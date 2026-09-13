@@ -1,0 +1,13 @@
+# Personal data — never commit
+profile.yaml
+.env
+
+# Run artifacts
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/

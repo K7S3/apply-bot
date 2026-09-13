@@ -1,0 +1,27 @@
+# Copy this file to profile.yaml and fill in YOUR details.
+# profile.yaml is git-ignored (it contains personal data) — never commit it.
+#
+# Every value below is a placeholder. The bot fills web forms by matching
+# field labels to these keys (see FIELD_KEYWORDS in applybot/applier.py).
+
+# --- Candidate details (used to fill application forms) ---
+first_name: "PLACEHOLDER_FIRST_NAME"
+last_name: "PLACEHOLDER_LAST_NAME"
+full_name: "PLACEHOLDER_FIRST_NAME PLACEHOLDER_LAST_NAME"
+email: "you@example.com"
+phone: "+1-555-010-0000"
+location: "New York, NY"
+linkedin: "https://www.linkedin.com/in/PLACEHOLDER"
+website: "https://PLACEHOLDER.example.com"
+years_experience: "3"
+# Common dropdown answers on application forms:
+work_authorization: "Yes"          # e.g. "Are you authorized to work in the US?"
+requires_sponsorship: "No"        # e.g. "Will you require sponsorship?"
+
+# --- Email summary (sent to you after each run) ---
+# The password is NEVER stored here — set the SMTP_PASSWORD env var.
+smtp:
+  host: "smtp.gmail.com"          # Gmail; use an App Password, not your login password
+  port: 587
+  username: "you@example.com"     # must match the account the App Password belongs to
+  to: "sree@example.com"          # where the summary goes (defaults to `email` above)
