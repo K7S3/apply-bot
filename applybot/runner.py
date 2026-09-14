@@ -134,6 +134,24 @@ def run(excel_path: str | Path, profile_path: str | Path, *, dry_run: bool, chec
     results: list[dict] = []
     try:
         for i, row in enumerate(rows, 1):
+            # Resume support: skip rows that already carry a terminal status
+            # (applied / needs_manual / failed / skipped_*), so a re-run only
+            # processes fresh rows.
+            prior = (row.get(C.COL_STATUS) or "").strip()
+            if prior:
+                log.log(
+                    f"--- [{i}/{len(rows)}] {row.get(C.COL_ROLE)} @ {row.get(C.COL_COMPANY)} "
+                    f"--- skipped (status already '{prior}')"
+                )
+                results.append(
+                    {
+                        "role": row.get(C.COL_ROLE),
+                        "company": row.get(C.COL_COMPANY),
+                        "status": f"skipped ({prior})",
+                        "reason": "",
+                    }
+                )
+                continue
             log.log(f"--- [{i}/{len(rows)}] {row.get(C.COL_ROLE)} @ {row.get(C.COL_COMPANY)} ---")
             result = process_row(row, profile, log, dry_run=dry_run, check_only=check_only)
             results.append(result)

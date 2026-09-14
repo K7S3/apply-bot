@@ -9,9 +9,14 @@ import os
 from pathlib import Path
 
 # --- AI model ---------------------------------------------------------------
-# Latest stable Gemini Flash model (as of Aug 2026). Change this one line to
-# switch models everywhere in the pipeline.
-MODEL = "gemini-3.7-flash"
+# Local Ollama model (no API keys, no quotas, no cost). The server must be
+# running (~/workspace/ollama-start.sh) with the model pulled.
+# Change these two lines to switch models everywhere in the pipeline.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b")
+OLLAMA_NUM_PREDICT = int(os.environ.get("OLLAMA_NUM_PREDICT", "1500"))
+# Kept for display / backwards compatibility with the old Gemini path.
+MODEL = f"{OLLAMA_MODEL} (local Ollama)"
 
 # --- Input / output paths ---------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

@@ -126,8 +126,29 @@ def fill_form(page, profile: dict) -> int:
     return filled
 
 
+def _count_consent_boxes(page) -> int:
+    """Count visible, enabled, unchecked agreement/consent checkboxes."""
+    count = 0
+    boxes = page.locator('input[type="checkbox"]')
+    for i in range(boxes.count()):
+        handle = boxes.nth(i)
+        try:
+            if not handle.is_visible() or not handle.is_enabled() or handle.is_checked():
+                continue
+            label = _field_label_text(page, handle)
+            if any(w in label for w in ("agree", "consent", "terms", "privacy", "acknowledge")):
+                count += 1
+        except Exception:  # noqa: BLE001
+            continue
+    return count
+
+
 def check_consent_boxes(page) -> int:
-    """Check visible agreement/consent checkboxes. Returns # checked."""
+    """Check visible agreement/consent checkboxes. Returns # checked.
+
+    NOTE: only ever called in dry-run mode. Live mode refuses to auto-check
+    these and marks the row needs_manual instead (see apply_to_job).
+    """
     checked = 0
     boxes = page.locator('input[type="checkbox"]')
     for i in range(boxes.count()):
@@ -229,8 +250,19 @@ def apply_to_job(
             if blocker:
                 return C.STATUS_NEEDS_MANUAL, blocker
 
+            # --- hard safety rule: in LIVE mode never auto-check legal
+            # consent/attestation boxes. They need the candidate's own
+            # attestation, so the row goes to manual handling instead.
+            n_consent = _count_consent_boxes(page)
+            if not dry_run and n_consent > 0:
+                page.screenshot(path=str(shot_path), full_page=False)
+                return C.STATUS_NEEDS_MANUAL, (
+                    f"legal consent/attestation checkbox(es) present ({n_consent}) — "
+                    "needs the candidate's own attestation, finishing manually"
+                )
+
             n_filled = fill_form(page, profile)
-            n_checked = check_consent_boxes(page)
+            n_checked = 0 if not dry_run else check_consent_boxes(page)
             uploaded = upload_resume(page, resume_path)
             page.screenshot(path=str(shot_path), full_page=False)
 
@@ -265,6 +297,14 @@ def apply_to_job(
                 )
                 if not clicked:
                     break
+                # A later wizard page may surface consent/attestation boxes —
+                # same rule applies: never auto-check, hand to manual.
+                if _count_consent_boxes(page) > 0:
+                    page.screenshot(path=str(shot_path), full_page=False)
+                    return C.STATUS_NEEDS_MANUAL, (
+                        "legal consent/attestation checkbox appeared on a later "
+                        "wizard page — needs the candidate's own attestation"
+                    )
                 fill_form(page, profile)  # new page may have new fields
 
             submitted = _click_if_present(

@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m applybot",
         description=(
             "End-to-end job application bot: reviews each tailored resume with "
-            f"Gemini ({C.MODEL}), applies to each job link, updates the Excel "
+            f"the local model ({C.MODEL}), applies to each job link, updates the "
             "status column, and emails a summary."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -64,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write a sample applications.xlsx (2 example rows) and exit.",
     )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Answer the --live confirmation prompt automatically. Only use "
+        "when live submission was explicitly authorized.",
+    )
     return p
 
 
@@ -84,10 +90,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if live:
         print("*** LIVE MODE: applications will actually be submitted. ***")
-        answer = input("Type YES to continue: ").strip()
-        if answer != "YES":
-            print("Aborted. (Use --dry-run to preview without submitting.)")
-            return 1
+        if args.yes:
+            print("(confirmation bypassed with --yes)")
+        else:
+            answer = input("Type YES to continue: ").strip()
+            if answer != "YES":
+                print("Aborted. (Use --dry-run to preview without submitting.)")
+                return 1
 
     from applybot import runner  # lazy: keeps --help working without deps
 

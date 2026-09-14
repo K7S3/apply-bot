@@ -1,0 +1,56 @@
+LAKSHMI SREE LAKSHMANAN
+New York, NY • phone on request • email on request • LinkedIn
+
+EXPERIENCE
+
+Prudential Financial — Senior Data Scientist (Agentic AI / GenAI) | New York, NY | Apr 2025 – Present
+• Engineered an end-to-end, Claude-powered automated rate-setting workflow for individual life insurance, annuity, and retirement products, automating data sourcing, rate calculations, validation, and visualization dashboards.
+• Developed an LLM-based agentic workflow that converts insurance close-process SOPs into executable multi-step plans, enabling consistent, auditable execution of manual operational workflows.
+• Designed a Supervisor Agent orchestrating multi-step LLM workflows for Data Chat, the enterprise chatbot, reducing failed SQL routes by 40% and saving 30 hours weekly for 200+ internal users.
+• Built enterprise knowledge assistants using AWS OpenSearch RAG, Amazon RDS, Bedrock, and LangGraph.
+• Implemented LLM workflow guardrails, prompt-routing logic, and validation checks to improve reliability, reduce hallucinated SQL generation, and support governed GenAI deployment.
+
+Veritiv Corporation — Data Scientist | Atlanta, GA | Jan 2024 – Apr 2025
+• Developed LLM-powered semantic product search using LangChain and embedding-based retrieval, saving 100 hours weekly.
+• Led end-to-end analytics analyzing 1.4M transactions with Apriori, FP-Growth, PySpark, and MapReduce, identifying cross-sell opportunities worth $200K+ and deploying pipelines for continuous improvement.
+
+Veritiv Corporation — Data Scientist Intern | Atlanta, GA | Jul 2023 – Aug 2023
+• Owned customer analytics and recommendations pipeline, sourcing 3.9M data points for 30K customers and delivering K-means/GMM-based segments and an implicit collaborative filtering system.
+
+Zoho Labs — AI Research Intern | Chennai, India | May 2021 – Jul 2021
+• Researched neural algorithmic reasoning, developing a neural pre-processor for Random Forest and LightGBM models, improving accuracy by 3.25%.
+
+EDUCATION
+
+Georgia Institute of Technology | Atlanta, GA | Aug 2022 – Dec 2023
+M.S. in Analytics (Computational Data Analytics)
+
+Indian Institute of Technology Kanpur | Kanpur, India | Jul 2018 – Jun 2022
+B.Tech in Mechanical Engineering; Minor in Economics, Finance & Business • Academic Excellence Award
+
+TECHNICAL SKILLS
+
+Languages: Python, R, SQL, C/C++, Java, JavaScript (D3), MATLAB, HTML/CSS, LaTeX
+Agentic / GenAI: Claude, LangGraph, LangChain, RAG pipelines, multi-step reasoning, tool orchestration, SQL agents, prompt engineering, LLM evaluation, guardrails
+ML and Analytics: scikit-learn, Pandas, NumPy, SciPy, PCA, PyTorch, TensorFlow/Keras, XGBoost, LightGBM, statistical modeling, time-series forecasting, NLP, deep learning, clustering, classification, recommendations
+Visualization & BI: Tableau, Power BI, Excel/VBA, SAS
+Cloud, MLOps, Deployment: AWS, Azure, GCP, Docker, CI/CD, GitHub Actions, Jenkins, model deployment, API integration, workflow orchestration, monitoring, logging, version control
+
+PROJECTS
+
+Joulea — Building System Energy Forecast
+• Built XGBoost/LightGBM-based forecasting for thermal energy data (RMSE 0.1°C) using EnergyPlus simulations to optimize building energy usage.
+
+Best Buy — Slow-Selling SKUs Sales Prediction
+• Forecasted sales for slow-moving SKUs using Prophet, ARIMA, and exponential smoothing, achieving a 7-day RMSE of 4.78.
+
+Sentiment Search — Internet as Focus Group
+• Designed a BERT + Vader sentiment pipeline analyzing six social platforms (2015–2021) for post sentiment insights.
+
+Finance: Options Trading in NSE Market
+• Analyzed stocks using moving averages, RSI, and Bollinger Bands; priced options with the Black-Scholes model and evaluated payoff structures.
+
+AWARDS & ACHIEVEMENTS
+
+• National Talent Search Examination (NTSE) Scholar, Kishore Vaigyanik Protsahan Yojana (KVPY) Fellow.
+• Qualified Indian National Chemistry Olympiad and Regional Mathematics Olympiad — Govt. of India.

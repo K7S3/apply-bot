@@ -1,16 +1,26 @@
-"""AI resume review/formatting step, powered by Gemini Flash.
+"""AI resume review/formatting step, powered by the local Ollama model.
+
+Default model: deepseek-r1:8b served at http://localhost:11434 (no API keys,
+no quotas, no cost). The model is only invoked when no cached review exists:
+`output/<Company>_<Role>.txt` from a prior --check-only pass is reused, so a
+--live browser run never needs the model in RAM at the same time as Chromium.
 
 Takes the tailored resume text plus role context and asks the model to:
   - fix typos, grammar, and formatting inconsistencies
   - tighten bullet points and tailor them to the role
   - keep everything truthful (no invented experience)
 
-Returns the cleaned resume as plain text. Raises if GEMINI_API_KEY is unset.
+Returns the cleaned resume as plain text.
 """
 
 from __future__ import annotations
 
+import json
+import re
+import urllib.request
+
 from applybot import config as C
+from applybot import resume as resume_mod
 
 
 class ReviewError(Exception):
@@ -33,7 +43,7 @@ Your job:
    sections (SUMMARY, EXPERIENCE, EDUCATION, SKILLS, etc.).
 
 Output ONLY the cleaned resume text — no commentary, no preamble, no markdown
-code fences.
+code fences, no thinking trace.
 """
 
 
@@ -54,40 +64,72 @@ def build_user_prompt(
     return "\n\n".join(parts)
 
 
+def _ollama_generate(system: str, prompt: str, timeout: int = 600) -> str:
+    """One non-streaming generation via the local Ollama HTTP API."""
+    body = json.dumps(
+        {
+            "model": C.OLLAMA_MODEL,
+            "system": system,
+            "prompt": prompt,
+            "stream": False,
+            "keep_alive": "10m",
+            "options": {
+                "temperature": 0.3,
+                "num_predict": C.OLLAMA_NUM_PREDICT,
+            },
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"{C.OLLAMA_URL}/api/generate",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.load(resp)
+    except Exception as exc:  # noqa: BLE001 — server down, refused, timeout...
+        raise ReviewError(
+            f"Could not reach Ollama at {C.OLLAMA_URL} ({exc}). "
+            "Start it with ~/workspace/ollama-start.sh and make sure "
+            f"'{C.OLLAMA_MODEL}' is pulled."
+        ) from exc
+    text = data.get("response", "") or ""
+    # Strip deepseek-r1 <think>...</think> reasoning traces if present.
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+    return text
+
+
 def review_resume(
     resume_text: str,
     role_title: str,
     company: str,
     job_description: str = "",
 ) -> str:
-    """Call Gemini Flash and return the cleaned resume text."""
-    api_key = C.gemini_api_key()
-    if not api_key:
-        raise ReviewError(
-            f"Environment variable {C.GEMINI_API_KEY_ENV} is not set. "
-            "Get a free key at https://aistudio.google.com and export it, e.g.\n"
-            '  export GEMINI_API_KEY="your-key-here"'
-        )
+    """Review the resume with the local model and return the cleaned text.
 
-    try:
-        from google import genai  # lazy import: checker unused in --help
-    except ImportError as exc:
-        raise ReviewError(
-            "The google-genai package is not installed. "
-            "Run: pip install -r requirements.txt"
-        ) from exc
+    Reuses output/<Company>_<Role>.txt when a prior --check-only pass already
+    produced it, so --live runs don't need the model loaded.
+    """
+    out_name = resume_mod.safe_filename(company, role_title, "txt")
+    cache = C.OUTPUT_DIR / out_name
+    if cache.exists():
+        cached = cache.read_text(encoding="utf-8", errors="replace").strip()
+        if len(cached) >= 200:
+            return cached
 
-    client = genai.Client(api_key=api_key)
-    try:
-        response = client.models.generate_content(
-            model=C.MODEL,
-            contents=build_user_prompt(resume_text, role_title, company, job_description),
-            config={"system_instruction": SYSTEM_PROMPT},
-        )
-    except Exception as exc:  # noqa: BLE001 — surface API errors with context
-        raise ReviewError(f"Gemini API call failed ({C.MODEL}): {exc}") from exc
+    prompt = build_user_prompt(resume_text, role_title, company, job_description)
+    last_err = ""
+    for attempt in range(1, 4):
+        try:
+            cleaned = _ollama_generate(SYSTEM_PROMPT, prompt)
+            if len(cleaned) >= 200:
+                return cleaned
+            last_err = f"short response ({len(cleaned)} chars)"
+        except ReviewError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            last_err = f"{type(exc).__name__}: {exc}"[:200]
+        import time
 
-    cleaned = (response.text or "").strip()
-    if len(cleaned) < 50:
-        raise ReviewError("Gemini returned an empty or trivial response.")
-    return cleaned
+        time.sleep(10 * attempt)
+    raise ReviewError(f"Local-model review failed after 3 attempts: {last_err}")
