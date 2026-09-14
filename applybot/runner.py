@@ -16,6 +16,7 @@ from pathlib import Path
 
 from applybot import config as C
 from applybot import checker, excel_io, jobdesc, mailer, resume as resume_mod
+from applybot import resume_pdf
 
 
 def load_profile(path: str | Path) -> dict:
@@ -80,6 +81,12 @@ def process_row(row: dict, profile: dict, log: RunLogger, *, dry_run: bool, chec
         out_path.write_text(cleaned, encoding="utf-8")
         log.log(f"  cleaned resume saved to output/{out_name}")
 
+        # --- 3b. PDF for upload (portals expect doc/rtf/pdf, not .txt) --------
+        pdf_name = resume_mod.safe_filename(company, role, "pdf")
+        pdf_path = C.OUTPUT_DIR / pdf_name
+        resume_pdf.text_to_pdf(cleaned, pdf_path)
+        log.log(f"  upload-ready PDF saved to output/{pdf_name}")
+
         if check_only:
             result["status"] = "checked"
             result["reason"] = f"resume reviewed and saved to output/{out_name} (no browser step)"
@@ -97,7 +104,7 @@ def process_row(row: dict, profile: dict, log: RunLogger, *, dry_run: bool, chec
         log.log(f"  opening application page ({'dry-run' if dry_run else 'LIVE'})...")
         status, reason = applier.apply_to_job(
             job_link,
-            out_path,
+            pdf_path,
             profile,
             dry_run=dry_run,
             output_dir=C.OUTPUT_DIR,

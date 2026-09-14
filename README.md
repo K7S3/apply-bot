@@ -3,8 +3,8 @@
 End-to-end job-application automation. For each row in your Excel sheet, the bot:
 
 1. **Fetches** your tailored resume — from the Google Docs link, or from a `.txt` file in `resumes/` as fallback
-2. **Reviews & formats** it with AI (Gemini Flash) against the role and job description
-3. **Applies** on the job site automatically with a real browser (Playwright)
+2. **Reviews & formats** it with AI (Gemini Flash) against the role and job description, then converts the cleaned resume to an upload-ready **PDF** (portals expect doc/rtf/pdf, not .txt)
+3. **Applies** on the job site automatically with a real browser (Playwright) — live mode only submits when the resume attached and at least 3 profile fields matched, otherwise the row is flagged for manual finish
 4. **Updates** the Excel `status` column after every row
 5. **Emails you a summary** of what was applied, what needs a human, and what failed
 
@@ -54,7 +54,8 @@ If a doc is private, paste its text into `resumes/<Company>_<Role>.txt` instead 
 
 Each run writes to `output/` (git-ignored):
 
-- `<Company>_<Role>.txt` — the AI-cleaned resume that was used
+- `<Company>_<Role>.txt` — the AI-cleaned resume text
+- `<Company>_<Role>.pdf` — the same resume as a PDF (this is what gets uploaded to the application form)
 - `<Company>_<Role>_form.png` — screenshot of the filled application form
 - `run_<timestamp>.log` — full per-row log
 

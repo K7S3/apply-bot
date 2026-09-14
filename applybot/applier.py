@@ -231,6 +231,20 @@ def apply_to_job(
                 return f"{C.STATUS_APPLIED} (dry-run)", reason
 
             # --- live mode: step through wizards, then submit ----------------
+            # Safety guard: never submit a near-empty application. A real
+            # submission needs the tailored resume attached and enough profile
+            # fields matched that the application identifies the candidate.
+            if not uploaded:
+                return C.STATUS_NEEDS_MANUAL, (
+                    f"live submit blocked: resume could not be attached "
+                    f"({n_filled} fields filled) — finish manually"
+                )
+            if n_filled < 3:
+                return C.STATUS_NEEDS_MANUAL, (
+                    f"live submit blocked: only {n_filled} fields matched — "
+                    "too few to submit safely, finish manually"
+                )
+
             for _ in range(3):  # up to 3 "Continue/Next" wizard steps
                 clicked = _click_if_present(
                     page,
