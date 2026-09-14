@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Acme Corp — Data Scientist application (TEST PAGE)</title>
+  <style>body{font-family:sans-serif;max-width:640px;margin:2rem auto}label{display:block;margin-top:1rem}input,textarea,select{width:100%;padding:.4rem}</style>
+</head>
+<body>
+  <h1>Data Scientist — Acme Corp</h1>
+  <p><strong>TEST PAGE.</strong> Fake job posting used to test the apply-bot. No real application is submitted.</p>
+  <form id="apply-form" action="#" method="post">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" name="full_name" placeholder="Your full name">
+
+    <label for="email">Email Address</label>
+    <input type="email" id="email" name="email" placeholder="you@example.com">
+
+    <label for="phone">Phone Number</label>
+    <input type="tel" id="phone" name="phone" placeholder="+1-555-000-0000">
+
+    <label for="loc">Location (City, State)</label>
+    <input type="text" id="loc" name="location" placeholder="New York, NY">
+
+    <label for="li">LinkedIn Profile URL</label>
+    <input type="url" id="li" name="linkedin" placeholder="https://www.linkedin.com/in/you">
+
+    <label for="yoe">Years of Experience</label>
+    <input type="text" id="yoe" name="years_experience" placeholder="e.g. 3">
+
+    <label for="cover">Cover Letter</label>
+    <textarea id="cover" name="cover_letter" rows="5" placeholder="Why are you a good fit?"></textarea>
+
+    <label for="resume">Resume (PDF or TXT)</label>
+    <input type="file" id="resume" name="resume" accept=".pdf,.txt">
+
+    <label><input type="checkbox" name="agree" value="yes"> I agree to the terms and privacy policy</label>
+
+    <p><button type="submit">Submit Application</button></p>
+  </form>
+</body>
+</html>

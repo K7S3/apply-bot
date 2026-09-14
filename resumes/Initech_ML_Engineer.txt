@@ -1,0 +1,24 @@
+SREE SAMPLE
+Machine Learning Engineer — TEST RESUME (fake data, for apply-bot testing only)
+sree.sample@example.com | +1-555-010-0199 | New York, NY
+linkedin.com/in/sree-sample-fake | github.com/sree-sample-fake
+
+SUMMARY
+ML engineer with 3 years of experience shipping models to production.
+Focused on ranking, recommendations, and LLM-powered features. (All details on this page are fictional.)
+
+EXPERIENCE
+Machine Learning Engineer, Fakeco Inc, New York, NY — 2023–Present
+- Shipped learning-to-rank model serving 2M requests/day with p99 latency under 80ms
+- Built RAG pipeline over product docs using vector search and a hosted LLM
+- Set up model monitoring dashboards tracking drift and data quality
+
+Data Scientist, SampleCorp, Remote — 2021–2023
+- Prototyped demand forecasting models with XGBoost
+- Containerized training jobs with Docker for reproducibility
+
+EDUCATION
+B.S. Computer Science, Example University — 2021
+
+SKILLS
+Python (PyTorch, scikit-learn, XGBoost), Docker, SQL, vector databases, MLflow

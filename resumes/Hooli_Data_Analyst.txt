@@ -1,0 +1,19 @@
+SREE SAMPLE
+Data Analyst — TEST RESUME (fake data, for apply-bot testing only)
+sree.sample@example.com | +1-555-010-0199 | New York, NY
+linkedin.com/in/sree-sample-fake
+
+SUMMARY
+Data analyst with 3 years of experience turning messy data into clear reports.
+Strong SQL and dashboarding skills. (All details on this page are fictional.)
+
+EXPERIENCE
+Data Analyst, SampleCorp, Remote — 2021–2024
+- Owned executive KPI dashboard used by 50+ stakeholders weekly
+- Reduced manual reporting time by 70% with scheduled SQL pipelines
+
+EDUCATION
+B.S. Statistics, Example University — 2021
+
+SKILLS
+SQL, Excel, Tableau, Python (pandas)

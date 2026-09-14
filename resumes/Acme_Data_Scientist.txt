@@ -1,0 +1,24 @@
+SREE SAMPLE
+Data Scientist — TEST RESUME (fake data, for apply-bot testing only)
+sree.sample@example.com | +1-555-010-0199 | New York, NY
+linkedin.com/in/sree-sample-fake
+
+SUMMARY
+Data scientist with 3 years of experience building ML models for product analytics.
+Skilled in Python, SQL, and experiment design. (All details on this page are fictional.)
+
+EXPERIENCE
+Data Scientist, Fakeco Inc, New York, NY — 2023–Present
+- Built churn prediction model (gradient boosting) that identified at-risk users
+- Designed and analyzed 12+ A/B tests for onboarding flows
+- Automated weekly reporting pipelines in Python, saving 6 hours per week
+
+Data Analyst, SampleCorp, Remote — 2021–2023
+- Created dashboards tracking KPIs for 40k daily active users
+- Wrote complex SQL queries joining 10+ tables for ad-hoc analysis
+
+EDUCATION
+B.S. Computer Science, Example University — 2021
+
+SKILLS
+Python (pandas, scikit-learn), SQL, A/B testing, Tableau, Git

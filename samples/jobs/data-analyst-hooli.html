@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hooli — Data Analyst application (TEST PAGE)</title>
+  <style>body{font-family:sans-serif;max-width:640px;margin:2rem auto}.wall{border:2px solid #c00;padding:2rem;background:#fee}</style>
+</head>
+<body>
+  <h1>Data Analyst — Hooli</h1>
+  <p><strong>TEST PAGE.</strong> Fake job posting used to test the apply-bot's login-wall detection.</p>
+
+  <!-- This page is intentionally gated: the bot must detect the login wall
+       and mark this row needs_manual instead of trying to fill anything. -->
+  <div class="wall" id="login-wall">
+    <h2>Sign in to apply</h2>
+    <p>You must create an account to apply for this position.</p>
+    <label for="pw">Password</label>
+    <input type="password" id="pw" name="password">
+    <p><button type="button">Log in</button></p>
+  </div>
+
+  <form id="apply-form" action="#" method="post" style="display:none">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" name="full_name">
+    <label for="resume">Resume</label>
+    <input type="file" id="resume" name="resume">
+    <p><button type="submit">Submit Application</button></p>
+  </form>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Initech — Machine Learning Engineer application (TEST PAGE)</title>
+  <style>body{font-family:sans-serif;max-width:640px;margin:2rem auto}label{display:block;margin-top:1rem}input,textarea,select{width:100%;padding:.4rem}</style>
+</head>
+<body>
+  <h1>Machine Learning Engineer — Initech</h1>
+  <p><strong>TEST PAGE.</strong> Fake job posting used to test the apply-bot. No real application is submitted.</p>
+  <form id="apply-form" action="#" method="post">
+    <label for="fname">First Name</label>
+    <input type="text" id="fname" name="first_name">
+
+    <label for="lname">Last Name</label>
+    <input type="text" id="lname" name="last_name">
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email_address">
+
+    <label for="mobile">Mobile Phone</label>
+    <input type="tel" id="mobile" name="mobile">
+
+    <label for="where">Where are you located?</label>
+    <input type="text" id="where" name="candidate_location">
+
+    <label for="site">Portfolio / Website</label>
+    <input type="url" id="site" name="website">
+
+    <label for="auth">Are you authorized to work in the US?</label>
+    <select id="auth" name="work_authorization">
+      <option value="">Select…</option>
+      <option>Yes</option>
+      <option>No</option>
+    </select>
+
+    <label for="spon">Will you require sponsorship?</label>
+    <select id="spon" name="requires_sponsorship">
+      <option value="">Select…</option>
+      <option>Yes</option>
+      <option>No</option>
+    </select>
+
+    <label for="cover">Cover Letter</label>
+    <textarea id="cover" name="cover_letter" rows="5"></textarea>
+
+    <label for="cv">Upload your resume</label>
+    <input type="file" id="cv" name="cv_upload" accept=".pdf,.txt,.docx">
+
+    <p><button type="submit">Apply Now</button></p>
+  </form>
+</body>
+</html>
