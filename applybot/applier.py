@@ -200,7 +200,19 @@ def apply_to_job(
 
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            # APPLYBOT_CHROMIUM_PATH: use a system Chromium instead of the
+            # Playwright-bundled one (e.g. when the sandbox has no net access
+            # for `playwright install`). APPLYBOT_NO_SANDBOX=1 adds --no-sandbox
+            # for running as root in containers.
+            import os
+
+            launch_kwargs: dict = {"headless": True}
+            custom_path = os.environ.get("APPLYBOT_CHROMIUM_PATH")
+            if custom_path:
+                launch_kwargs["executable_path"] = custom_path
+            if os.environ.get("APPLYBOT_NO_SANDBOX"):
+                launch_kwargs["args"] = ["--no-sandbox"]
+            browser = pw.chromium.launch(**launch_kwargs)
             page = browser.new_page()
             page.set_default_timeout(C.PAGE_TIMEOUT_MS)
             try:
