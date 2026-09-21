@@ -3,7 +3,7 @@
 End-to-end job-application automation. For each row in your Excel sheet, the bot:
 
 1. **Fetches** your tailored resume — from the Google Docs link, or from a `.txt` file in `resumes/` as fallback
-2. **Reviews & formats** it with AI (Gemini Flash) against the role and job description, then converts the cleaned resume to an upload-ready **PDF** (portals expect doc/rtf/pdf, not .txt)
+2. **Reviews & formats** it with a local AI model (Ollama + DeepSeek — no API key, no cost) against the role and job description, then converts the cleaned resume to an upload-ready **PDF** (portals expect doc/rtf/pdf, not .txt)
 3. **Applies** on the job site automatically with a real browser (Playwright) — live mode only submits when the resume attached and at least 3 profile fields matched, otherwise the row is flagged for manual finish
 4. **Updates** the Excel `status` column after every row
 5. **Emails you a summary** of what was applied, what needs a human, and what failed
@@ -18,11 +18,14 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-**2. Get a free Gemini API key** at <https://aistudio.google.com> ("Get API key") and set it in your terminal. The key is never stored in any file:
+**2. Start Ollama with a local model** (one-time setup — no API keys, no quotas, no cost). Install from <https://ollama.com>, then pull the model and start the server:
 
 ```bash
-export GEMINI_API_KEY="paste-your-key-here"
+ollama pull deepseek-r1:8b
+ollama serve
 ```
+
+The bot talks to `http://localhost:11434` by default. To use a different model or host, set `OLLAMA_MODEL` / `OLLAMA_URL` in your terminal:
 
 **3. Create your profile** — copy the template and replace the placeholders with your real details:
 
@@ -95,10 +98,10 @@ One bad row never kills a run: every row is isolated, its status is saved immedi
 
 ## Switching the AI model
 
-The model name lives in one place — `applybot/config.py`:
+The model lives in one place — `applybot/config.py`:
 
 ```python
-MODEL = "gemini-3.7-flash"
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b")
 ```
 
-Change that line when a newer Flash model is released. To try the fixtures in `samples/`, see the test notes in the repo history.
+Change that line, or set the `OLLAMA_MODEL` env var, to use a different local model. To try the fixtures in `samples/`, see the test notes in the repo history.
