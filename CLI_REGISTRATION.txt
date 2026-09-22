@@ -526,3 +526,278 @@ once section 1 is applied. No extra work needed.
 # - [ ] reapproach argparse block added inside build_parser
 # - [ ] `python -m candid offer deadline --help` and `python -m candid reapproach --help` smoke-tested
 
+
+---
+
+# CLI registration for workstream B: `deadlines` + `track update --deadline` (batch-4)
+
+Integration patch the branch owner merges into `candid/__main__.py` — do
+not edit `__main__.py` directly in the workstream branch. Follows the
+existing conventions (`_sub` helper, `cmd_<name>` dispatchers). No new
+error type: deadline validation raises `TrackerError` (already in
+`_EXPECTED_ERRORS` and `_NEXT_COMMAND`), and `dashboard.set_deadline`
+wraps it into `DashboardError` (also already registered).
+
+## 1. COMMANDS additions
+
+In `COMMANDS`, add `"deadlines"` (flat top-level command, like `match`):
+
+    COMMANDS = [
+        "onboard", "profile", "match", "tailor", "track", "prep",
+        "followup", "offer", "negotiate", "salary", "mock", "jobs",
+-        "dashboard", "import", "gmail", "linkedin",
++        "dashboard", "deadlines", "import", "gmail", "linkedin",
+    ]
+
+SUBCOMMANDS: no entry for "deadlines" (it has no subcommands).
+
+_EXPECTED_ERRORS / _NEXT_COMMAND: no changes needed (reuses
+TrackerError → "python -m candid track list" and
+DashboardError → "python -m candid dashboard --help").
+
+## 2. cmd_deadlines dispatcher (place near cmd_track / cmd_dashboard)
+
+    def cmd_deadlines(a):
+        """List upcoming application deadlines, most urgent first."""
+        from candid import dashboard as D
+        rows = D.deadline_alerts()
+        days = getattr(a, "days", None)
+        if days is not None:
+            rows = [r for r in rows if r["days_remaining"] <= days]
+        if not rows:
+            print("No application deadlines on the books.")
+            print("Set one with: python -m candid track update ID --deadline YYYY-MM-DD")
+            return
+        print(f"{len(rows)} deadline(s):")
+        for r in rows:
+            dr = r["days_remaining"]
+            when = f"{-dr}d OVERDUE" if dr < 0 else "due TODAY" if dr == 0 else f"{dr}d left"
+            print(f"  [{r['bucket']}] {r['company']} — {r['role']} "
+                  f"({r['deadline']}, {when}) [{r['status']}]")
+
+## 3. argparse block (place right after the `dashboard` parser block, ~line 847)
+
+    # deadlines
+    s = _sub(sub, "deadlines", "Upcoming application deadlines, most urgent first.", [
+        "python -m candid deadlines",
+        "python -m candid deadlines --days 7",
+    ])
+    s.add_argument("--days", type=int, default=None,
+                   help="Only show deadlines within N days (e.g. --days 7)")
+    s.set_defaults(func=cmd_deadlines)
+
+## 4. `track update` — add `--deadline YYYY-MM-DD`
+
+Diff against the current `track update` parser (~line 591-592):
+
+-    t.add_argument("id", type=int)
+-    t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
++    t.add_argument("id", type=int)
++    t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
++    t.add_argument("--deadline", default=None,
++                   help="Application deadline (YYYY-MM-DD; empty string clears it)")
+
+Diff against the current `cmd_track` "update" branch (~line 250):
+
+     elif a.what == "update":
+-        rec = T.update(a.id, status=a.status, notes=a.notes)
++        rec = T.update(a.id, status=a.status, notes=a.notes, deadline=a.deadline)
+         print(f"Updated #{rec['id']}: status={rec['status']}")
++        if rec.get("deadline"):
++            print(f"  deadline: {rec['deadline']}")
+         if rec["status"] == "selected_for_interview":
+             print("\n🎯 Interview! Generate a prep pack with:")
+             print(f"   python -m candid prep --company \"{rec['company']}\" "
+                   f"--role \"{rec['role']}\" --app-id {rec['id']}")
+
+Also add a usage example to the `track update` examples list (~line 586):
+
+    "python -m candid track update 3 --deadline 2026-10-01",
+
+## Wiring checklist for the coordinator
+# - [ ] COMMANDS gets "deadlines"
+# - [ ] argparse block added after the `dashboard` block
+# - [ ] cmd_deadlines added near cmd_track / cmd_dashboard
+# - [ ] `track update` parser gains --deadline; cmd_track passes deadline=a.deadline
+# - [ ] `python -m candid deadlines --help` and
+#       `python -m candid track update 3 --deadline 2026-10-01` smoke-tested
+
+
+---
+
+# CLI registration for workstream E: `note`, `attach`, `packet`, `references` (batch-4)
+
+Integration patch the branch owner merges into `candid/__main__.py` — do
+not edit `__main__.py` directly in the workstream branch. Follows the
+existing conventions (`_sub` / `_nested` helpers, `cmd_<name>` dispatchers,
+`_NEXT_COMMAND` entries). New errors `AppNotesError` / `PacketError` already
+end with the next command to run, so just register the types.
+
+## 1. COMMANDS / SUBCOMMANDS additions
+
+In `COMMANDS`, add `"note"`, `"attach"`, `"packet"`, `"references"`
+(`packet` is a flat top-level command like `match`; the others take
+subcommands like `track`).
+
+In `SUBCOMMANDS`, add:
+
+```python
+"note": ["add", "list"],
+"attach": ["add", "list"],
+"references": ["add", "list"],
+```
+
+In `_EXPECTED_ERRORS`, add: `"AppNotesError", "PacketError"`.
+
+In `_NEXT_COMMAND`, add:
+
+```python
+"AppNotesError": "python -m candid track list",
+"PacketError": "python -m candid tailor --help",
+```
+
+## 2. Dispatchers (place near the other cmd_* functions)
+
+```python
+def cmd_note(a):
+    from candid import appnotes as A
+    if a.what == "add":
+        entry = A.add_note(a.app_id, a.text)
+        print(f"Note added to application #{a.app_id} [{entry['timestamp']}].")
+    elif a.what == "list":
+        print(A.render_notes(a.app_id, A.list_notes(a.app_id)))
+
+
+def cmd_attach(a):
+    from candid import appnotes as A
+    if a.what == "add":
+        rec = A.attach(a.app_id, a.src)
+        mb = rec["size_bytes"] / 1024 / 1024
+        print(f"Attached {rec['filename']} ({mb:.1f} MiB) "
+              f"to application #{a.app_id}.")
+    elif a.what == "list":
+        print(A.render_attachments(a.app_id, A.list_attachments(a.app_id)))
+
+
+def cmd_packet(a):
+    from candid import packet as P
+    from candid import match as M
+    jd = M.fetch_jd(a.jd) if a.jd else ""
+    out = a.out or f"packet-{a.app_id}.pdf"
+    dest = P.save_packet(a.app_id, out, jd=jd,
+                         company=a.company or "", role=a.role or "",
+                         tone=a.tone, length=a.length, hook=a.hook or "",
+                         include_references=a.include_references)
+    print(f"Packet saved to {dest}")
+
+
+def cmd_references(a):
+    from candid import packet as P
+    if a.what == "add":
+        rec = P.add_reference(a.name, a.relationship, contact=a.contact or "")
+        print(f"Added reference: {rec['name']} ({rec['relationship']}).")
+    elif a.what == "list":
+        print(P.render_references(P.list_references()))
+```
+
+## 3. argparse blocks (append inside build_parser, before `return p`)
+
+```python
+    # note
+    s = _sub(sub, "note", "Per-application timestamped notes.", [
+        'python -m candid note add --app-id 3 "met hiring manager at meetup"',
+        "python -m candid note list --app-id 3",
+    ])
+    ns = _nested(s)
+    n = _sub(ns, "add", "Add a timestamped note to a tracked application.", [
+        'python -m candid note add --app-id 3 "referral from Sam"',
+    ])
+    n.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    n.add_argument("text", help="Note text")
+    n = _sub(ns, "list", "List notes for a tracked application.", [
+        "python -m candid note list --app-id 3",
+    ])
+    n.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    s.set_defaults(func=cmd_note)
+
+    # attach
+    s = _sub(sub, "attach", "File attachments per application.", [
+        "python -m candid attach add --app-id 3 resume_tailored.pdf",
+        "python -m candid attach list --app-id 3",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "add", "Attach a file (copied into the git-ignored data dir).", [
+        "python -m candid attach add --app-id 3 offer_letter.pdf",
+    ])
+    t.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    t.add_argument("src", help="File to attach")
+    t = _sub(ns, "list", "List attachments for a tracked application.", [
+        "python -m candid attach list --app-id 3",
+    ])
+    t.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    s.set_defaults(func=cmd_attach)
+
+    # packet
+    s = _sub(sub, "packet",
+             "Export one PDF: tailored resume + cover letter (+ references).", [
+                 "python -m candid packet --app-id 3",
+                 "python -m candid packet --app-id 3 --include-references --out packet-acme.pdf",
+                 "python -m candid packet --app-id 3 --jd jd.txt --tone formal",
+             ])
+    s.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    s.add_argument("--jd", default="",
+                   help="JD text/file/URL/- (falls back to the curated JD for the app)")
+    s.add_argument("--company", default=""); s.add_argument("--role", default="")
+    s.add_argument("--tone", default="confident",
+                   choices=["concise", "confident", "formal", "warm"])
+    s.add_argument("--length", default="one-page",
+                   choices=["one-page", "detailed"])
+    s.add_argument("--hook", default="",
+                   help="One-line 'why this company' for the cover letter")
+    s.add_argument("--include-references", action="store_true",
+                   help="Append the references page (requires saved references)")
+    s.add_argument("--out", default="",
+                   help="Write to file (default: packet-<app-id>.pdf in cwd)")
+    s.set_defaults(func=cmd_packet)
+
+    # references
+    s = _sub(sub, "references", "Manage your reference list.", [
+        'python -m candid references add --name "Sam Rivera" '
+        '--relationship "former manager" --contact sam@example.com',
+        "python -m candid references list",
+    ])
+    ns = _nested(s)
+    r = _sub(ns, "add", "Add a reference.", [
+        'python -m candid references add --name "Sam Rivera" '
+        '--relationship "former manager"',
+    ])
+    r.add_argument("--name", required=True)
+    r.add_argument("--relationship", required=True,
+                   help="e.g. former manager, colleague, professor")
+    r.add_argument("--contact", default="", help="Email or phone")
+    r = _sub(ns, "list", "List saved references.", [
+        "python -m candid references list",
+    ])
+    s.set_defaults(func=cmd_references)
+```
+
+## 4. Typo suggestions
+
+`_suggest_typo` builds its pool from `COMMANDS` + `SUBCOMMANDS`, so
+`note`, `attach`, `packet`, `references` are suggested automatically once
+section 1 is applied. No extra work needed.
+
+## Wiring checklist for the coordinator
+# - [ ] COMMANDS gets "note", "attach", "packet", "references"
+# - [ ] SUBCOMMANDS gets "note", "attach", "references" entries
+# - [ ] _EXPECTED_ERRORS gets "AppNotesError", "PacketError"
+# - [ ] _NEXT_COMMAND gets both entries
+# - [ ] cmd_note, cmd_attach, cmd_packet, cmd_references added
+# - [ ] argparse blocks added inside build_parser
+# - [ ] `python -m candid note --help`, `attach --help`, `packet --help`,
+#       `references --help` smoke-tested
