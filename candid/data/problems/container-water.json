@@ -1,0 +1,81 @@
+{
+  "id": "container-water",
+  "title": "Container With Most Water",
+  "topic": "two-pointers",
+  "difficulty": "medium",
+  "statement": "Given integer array `height` of length n, where n vertical lines are drawn at positions 0..n-1 with the given heights: find the two lines that together with the x-axis form the container holding the most water. Return the area.\n\nExample: height = [1, 8, 6, 2, 5, 4, 8, 3, 7] -> 49",
+  "function": "solve(height)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        [
+          1,
+          8,
+          6,
+          2,
+          5,
+          4,
+          8,
+          3,
+          7
+        ]
+      ],
+      "expected": 49
+    },
+    {
+      "args": [
+        [
+          1,
+          1
+        ]
+      ],
+      "expected": 1
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        [
+          4,
+          3,
+          2,
+          1,
+          4
+        ]
+      ],
+      "expected": 16
+    },
+    {
+      "args": [
+        [
+          1,
+          2,
+          1
+        ]
+      ],
+      "expected": 2
+    },
+    {
+      "args": [
+        [
+          2,
+          3,
+          4,
+          5,
+          18,
+          17,
+          6
+        ]
+      ],
+      "expected": 17
+    }
+  ],
+  "hints": [
+    "Brute force tries all pairs: O(n^2). The area is min(h[l], h[r]) * (r - l).",
+    "Start with the widest container (both ends). Which pointer should move inward?",
+    "Move the shorter line's pointer: the taller line can't improve the area with a narrower width, but the shorter one might find a taller partner."
+  ],
+  "reference_solution": "def solve(height):\n    l, r = 0, len(height) - 1\n    best = 0\n    while l < r:\n        best = max(best, min(height[l], height[r]) * (r - l))\n        if height[l] < height[r]:\n            l += 1\n        else:\n            r -= 1\n    return best\n",
+  "complexity": "Time O(n) \u2014 single pass with two pointers. Space O(1)."
+}

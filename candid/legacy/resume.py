@@ -14,7 +14,7 @@ import re
 import urllib.request
 from pathlib import Path
 
-from applybot import config as C
+from candid.legacy import config as C
 
 
 class ResumeFetchError(Exception):
@@ -31,7 +31,7 @@ def _doc_id_from_link(link: str) -> str | None:
 
 def _download_doc_as_txt(doc_id: str, timeout: int = 30) -> str:
     url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
-    req = urllib.request.Request(url, headers={"User-Agent": "applybot/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "candid.legacy/0.1"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
     text = raw.strip()

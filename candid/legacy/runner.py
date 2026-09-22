@@ -14,9 +14,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from applybot import config as C
-from applybot import checker, excel_io, jobdesc, mailer, resume as resume_mod
-from applybot import resume_pdf
+from candid.legacy import config as C
+from candid.legacy import checker, excel_io, jobdesc, mailer, resume as resume_mod
+from candid.legacy import resume_pdf
 
 
 def load_profile(path: str | Path) -> dict:
@@ -99,7 +99,7 @@ def process_row(row: dict, profile: dict, log: RunLogger, *, dry_run: bool, chec
             return result
 
         # The applier is imported lazily so --check-only works without playwright.
-        from applybot import applier
+        from candid.legacy import applier
 
         log.log(f"  opening application page ({'dry-run' if dry_run else 'LIVE'})...")
         status, reason = applier.apply_to_job(
@@ -129,7 +129,7 @@ def run(excel_path: str | Path, profile_path: str | Path, *, dry_run: bool, chec
     log = RunLogger(C.OUTPUT_DIR)
 
     mode = "check-only" if check_only else ("dry-run" if dry_run else "LIVE")
-    log.log(f"Starting applybot ({mode}) — {len(rows)} application(s) from {excel_path}")
+    log.log(f"Starting candid.legacy ({mode}) — {len(rows)} application(s) from {excel_path}")
 
     results: list[dict] = []
     try:

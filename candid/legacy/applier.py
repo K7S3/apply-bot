@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from applybot import config as C
+from candid.legacy import config as C
 
 # Map profile.yaml keys -> keyword lists matched against each field's
 # label / placeholder / name / id (lowercased, substring match).
@@ -214,7 +214,7 @@ def apply_to_job(
             "&& playwright install chromium"
         ) from exc
 
-    from applybot.resume import safe_filename
+    from candid.legacy.resume import safe_filename
 
     base = safe_filename(company, role, "").rstrip(".")
     shot_path = output_dir / f"{base}_form.png"

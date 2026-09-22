@@ -1,0 +1,84 @@
+{
+  "id": "coin-change",
+  "title": "Coin Change",
+  "topic": "dp",
+  "difficulty": "medium",
+  "statement": "Given coins of different denominations and a total `amount`, compute the fewest number of coins needed to make up that amount. Return -1 if impossible.\n\nExample: coins = [1, 2, 5], amount = 11 -> 3 (5 + 5 + 1)",
+  "function": "solve(coins, amount)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        [
+          1,
+          2,
+          5
+        ],
+        11
+      ],
+      "expected": 3
+    },
+    {
+      "args": [
+        [
+          2
+        ],
+        3
+      ],
+      "expected": -1
+    },
+    {
+      "args": [
+        [
+          1
+        ],
+        0
+      ],
+      "expected": 0
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        [
+          1,
+          2,
+          5
+        ],
+        100
+      ],
+      "expected": 20
+    },
+    {
+      "args": [
+        [
+          186,
+          419,
+          83,
+          408
+        ],
+        6249
+      ],
+      "expected": 20
+    },
+    {
+      "args": [
+        [
+          2,
+          5,
+          10,
+          1
+        ],
+        27
+      ],
+      "expected": 4
+    }
+  ],
+  "hints": [
+    "Greedy (largest coin first) fails: coins=[1,3,4], amount=6 needs 3+3, greedy picks 4+1+1.",
+    "Define dp[a] = fewest coins for amount a. dp[a] = 1 + min(dp[a - c]) over coins c <= a.",
+    "Fill dp bottom-up from 0 to amount; answer dp[amount], or -1 if unreachable."
+  ],
+  "reference_solution": "def solve(coins, amount):\n    INF = float('inf')\n    dp = [INF] * (amount + 1)\n    dp[0] = 0\n    for a in range(1, amount + 1):\n        for c in coins:\n            if c <= a:\n                dp[a] = min(dp[a], dp[a - c] + 1)\n    return dp[amount] if dp[amount] != INF else -1\n",
+  "complexity": "Time O(amount * coins), space O(amount)."
+}

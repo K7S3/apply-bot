@@ -1,6 +1,8 @@
 # Personal data — never commit
 profile.yaml
 .env
+candid_data/
+copilot_data/
 
 # Run artifacts
 output/

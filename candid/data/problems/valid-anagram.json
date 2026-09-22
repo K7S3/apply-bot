@@ -1,0 +1,62 @@
+{
+  "id": "valid-anagram",
+  "title": "Valid Anagram",
+  "topic": "strings",
+  "difficulty": "easy",
+  "statement": "Given two strings `s` and `t`, return True if `t` is an anagram of `s`, else False.\n\nExample: s = \"anagram\", t = \"nagaram\" -> True",
+  "function": "solve(s, t)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        "anagram",
+        "nagaram"
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "rat",
+        "car"
+      ],
+      "expected": false
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        "a",
+        "ab"
+      ],
+      "expected": false
+    },
+    {
+      "args": [
+        "",
+        ""
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "aacc",
+        "ccac"
+      ],
+      "expected": false
+    },
+    {
+      "args": [
+        "listen",
+        "silent"
+      ],
+      "expected": true
+    }
+  ],
+  "hints": [
+    "Anagrams have identical character counts. What data structure counts characters?",
+    "collections.Counter(s) == collections.Counter(t) is the one-liner \u2014 but first check len(s) == len(t).",
+    "Sorting both strings also works but costs O(n log n)."
+  ],
+  "reference_solution": "def solve(s, t):\n    from collections import Counter\n    return len(s) == len(t) and Counter(s) == Counter(t)\n",
+  "complexity": "Time O(n), space O(1) for lowercase letters (O(k) alphabet)."
+}

@@ -1,4 +1,4 @@
-"""Shared configuration constants for applybot.
+"""Shared configuration constants for candid.legacy.
 
 Bump MODEL here when a newer Gemini Flash model is released.
 Secrets (GEMINI_API_KEY, SMTP_PASSWORD) are NEVER stored here —

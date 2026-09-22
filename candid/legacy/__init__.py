@@ -1,4 +1,4 @@
-"""applybot — end-to-end job application automation.
+"""candid.legacy — end-to-end job application automation.
 
 Pipeline per application row:
   1. Fetch the tailored resume text (Google Docs export, or resumes/*.txt fallback)

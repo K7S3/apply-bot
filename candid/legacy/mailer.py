@@ -1,4 +1,4 @@
-"""Email the run summary to Sree via SMTP.
+"""Email the run summary via SMTP.
 
 SMTP settings live in profile.yaml; the password comes ONLY from the
 SMTP_PASSWORD environment variable. If SMTP is not configured, the
@@ -32,7 +32,7 @@ def build_summary(results: list[dict], dry_run: bool) -> str:
         "Full details are in the run log (output/run_<timestamp>.log).",
         "Rows marked needs_manual need a human: login wall, CAPTCHA, or a custom form.",
         "",
-        "— applybot",
+        "— candid.legacy",
     ]
     return "\n".join(lines)
 
@@ -61,7 +61,7 @@ def send_summary(profile: dict, results: list[dict], dry_run: bool) -> bool:
 
     mode = "dry-run" if dry_run else "live"
     msg = EmailMessage()
-    msg["Subject"] = f"[applybot] Job applications summary ({mode})"
+    msg["Subject"] = f"[candid.legacy] Job applications summary ({mode})"
     msg["From"] = user
     msg["To"] = to_addr
     msg.set_content(build_summary(results, dry_run))

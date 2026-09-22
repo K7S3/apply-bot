@@ -1,4 +1,4 @@
-"""CLI entry point: python -m applybot --excel applications.xlsx [--dry-run | --live | --check-only]
+"""CLI entry point: python -m candid.legacy --excel applications.xlsx [--dry-run | --live | --check-only]
 
 Modes:
   --dry-run    (default) Fill every form and screenshot it, but NEVER submit.
@@ -11,12 +11,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from applybot import config as C
+from candid.legacy import config as C
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="python -m applybot",
+        prog="python -m candid.legacy",
         description=(
             "End-to-end job application bot: reviews each tailored resume with "
             f"the local model ({C.MODEL}), applies to each job link, updates the "
@@ -25,9 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  python -m applybot --excel applications.xlsx --dry-run\n"
-            "  python -m applybot --excel applications.xlsx --check-only\n"
-            "  python -m applybot --excel applications.xlsx --live   # actually submits!\n"
+            "  python -m candid.legacy --excel applications.xlsx --dry-run\n"
+            "  python -m candid.legacy --excel applications.xlsx --check-only\n"
+            "  python -m candid.legacy --excel applications.xlsx --live   # actually submits!\n"
             "\n"
             "Always run --dry-run first and inspect output/ before going --live."
         ),
@@ -77,11 +77,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.make_sample:
-        from applybot import excel_io
+        from candid.legacy import excel_io
 
         path = excel_io.create_sample_excel(Path(args.excel))
         print(f"Sample workbook written to {path}")
-        print("Fill in your real rows, then run: python -m applybot --excel applications.xlsx --dry-run")
+        print("Fill in your real rows, then run: python -m candid.legacy --excel applications.xlsx --dry-run")
         return 0
 
     live = bool(args.live)
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("Aborted. (Use --dry-run to preview without submitting.)")
                 return 1
 
-    from applybot import runner  # lazy: keeps --help working without deps
+    from candid.legacy import runner  # lazy: keeps --help working without deps
 
     runner.run(args.excel, args.profile, dry_run=dry_run, check_only=check_only)
     return 0

@@ -1,0 +1,24 @@
+Senior Data Scientist — Acme Analytics (fictional company)
+New York, NY · Hybrid
+
+About the role:
+We're hiring a Senior Data Scientist to join our risk modeling team. You'll design
+and analyze experiments, build ML models for fraud detection, and partner with
+product and engineering to ship data products.
+
+Requirements:
+- 4+ years of experience as a data scientist or related role
+- Strong SQL skills, including window functions over large event tables
+- Deep experience with A/B testing and experimental design
+- Hands-on machine learning: XGBoost, scikit-learn, model evaluation
+- Python and pandas for analysis; statistics fundamentals
+- Excellent communication with non-technical stakeholders
+
+Nice to have:
+- Causal inference (difference-in-differences, propensity matching)
+- Airflow or dbt experience
+- Fintech background
+
+Compensation:
+The salary range for this role is $150,000 - $185,000 per year, plus annual bonus
+and equity. Benefits include health, dental, 401(k) match.

@@ -19,8 +19,8 @@ import json
 import re
 import urllib.request
 
-from applybot import config as C
-from applybot import resume as resume_mod
+from candid.legacy import config as C
+from candid.legacy import resume as resume_mod
 
 
 class ReviewError(Exception):

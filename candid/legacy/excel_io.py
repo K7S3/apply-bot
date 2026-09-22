@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from applybot import config as C
+from candid.legacy import config as C
 
 
 class ExcelError(Exception):

@@ -1,107 +1,124 @@
-# apply-bot
+# candid
 
-End-to-end job-application automation. For each row in your Excel sheet, the bot:
+**Your candid job-search copilot** — profile-driven, local-first, and honest
+about what it knows.
 
-1. **Fetches** your tailored resume — from the Google Docs link, or from a `.txt` file in `resumes/` as fallback
-2. **Reviews & formats** it with a local AI model (Ollama + DeepSeek — no API key, no cost) against the role and job description, then converts the cleaned resume to an upload-ready **PDF** (portals expect doc/rtf/pdf, not .txt)
-3. **Applies** on the job site automatically with a real browser (Playwright) — live mode only submits when the resume attached and at least 3 profile fields matched, otherwise the row is flagged for manual finish
-4. **Updates** the Excel `status` column after every row
-5. **Emails you a summary** of what was applied, what needs a human, and what failed
+candid takes *your* résumé (or LinkedIn export) and helps with the whole
+hunt: scoring job descriptions, tailoring résumés and cover letters,
+tracking applications, prepping for interviews with real reported questions,
+running mock coding interviews with a sandboxed judge, benchmarking salary
+from public DOL data, comparing offers, and drafting follow-ups. Everything
+runs on your machine; your data never leaves it.
 
-## Quick start
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![No paid APIs](https://img.shields.io/badge/APIs-none%20required-brightgreen.svg)](https://github.com/K7S3/candid)
 
-**1. Install** (Python 3.10+, one time):
-
-```bash
-cd apply-bot
-pip install -r requirements.txt
-playwright install chromium
-```
-
-**2. Start Ollama with a local model** (one-time setup — no API keys, no quotas, no cost). Install from <https://ollama.com>, then pull the model and start the server:
+## Try it in 5 minutes
 
 ```bash
-ollama pull deepseek-r1:8b
-ollama serve
+git clone https://github.com/K7S3/candid.git
+cd candid
+pip install -r requirements.txt   # stdlib only, nothing to compile
+
+# 1. Onboard with the fictional sample résumé (or use your own PDF/md/txt)
+python -m candid onboard --resume samples/candid/sample_resume.md
+
+# 2. Score a job description against your profile
+python -m candid match --jd samples/candid/sample_jd.txt \
+    --company "Acme Corp" --role "Senior Data Scientist"
+
+# 3. Generate a tailored résumé + cover letter
+python -m candid tailor resume --jd samples/candid/sample_jd.txt \
+    --company "Acme Corp" --role "Senior Data Scientist"
+python -m candid tailor cover-letter --jd samples/candid/sample_jd.txt \
+    --company "Acme Corp" --role "Senior Data Scientist"
+
+# 4. Track it, then build an interview prep pack when you're selected
+python -m candid track add --company "Acme Corp" --role "Senior Data Scientist"
+python -m candid track update 1 --status selected_for_interview
+python -m candid prep --company "Capital One" --role "Senior Data Scientist" --app-id 1
 ```
 
-The bot talks to `http://localhost:11434` by default. To use a different model or host, set `OLLAMA_MODEL` / `OLLAMA_URL` in your terminal:
+All commands are `python -m candid <command> --help`. No accounts, no keys.
 
-**3. Create your profile** — copy the template and replace the placeholders with your real details:
+## What it does
 
-```bash
-cp profile.yaml.example profile.yaml
-```
-
-`profile.yaml` is git-ignored, so your personal data never gets committed.
-
-**4. Prepare your applications sheet.** Edit `applications.xlsx` (or generate a fresh one with `python -m applybot --make-sample --excel applications.xlsx`):
-
-| Column | What to put |
+| Command | What you get |
 |---|---|
-| `role_title` | e.g. `Data Scientist` |
-| `company` | e.g. `Acme Corp` |
-| `job_link` | URL of the application page |
-| `resume_doc_link` | Google Docs link to the tailored resume (**"Anyone with the link can view"**) |
-| `status` | left blank — the bot fills this in |
+| `onboard` / `profile` | Parse your résumé or LinkedIn export into a structured profile (skills, seniority, experience). Stored as JSON you can inspect. |
+| `match` | Score any JD 0–100 (skills / seniority / domain / title fit) with a GO / CONDITIONAL / NO-GO verdict. Accepts text, a file, a URL, or stdin. |
+| `tailor` | Grounded résumé + cover letter in 4 tones and 2 lengths. Reorders *your* bullets; never invents experience. |
+| `track` | Application tracker: add / list / update / stats with funnel + response/interview/offer rates. |
+| `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
+| `prep` | Interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, concept deep-dives, comp benchmark, day-before checklist. Exportable Markdown. |
+| `mock` | Mock interviews: 11 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
+| `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution. |
+| `offer` | Normalize offers (base + bonus + equity/vesting + benefits) into comparable $/yr and side-by-side tables. |
+| `negotiate` | BATNA playbook, scenario scripts (lowball / competing offer / exploding deadline / level pushback), and counteroffer email drafts. |
+| `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice. |
 
-If a doc is private, paste its text into `resumes/<Company>_<Role>.txt` instead and leave `resume_doc_link` empty.
+## Job-source coverage (honest)
 
-## CLI modes
+`jobs curate` pulls from **two free, no-login JSON feeds**: Arbeitnow and
+RemoteOK. That's the entire coverage today. It does *not* search the web at
+large, read company career pages, or touch anything behind a login — and the
+CLI never claims otherwise. Adding a new public feed is a ~20-line adapter;
+see [docs/adding_sources.md](docs/adding_sources.md).
 
-| Mode | Command | What it does |
-|---|---|---|
-| `--dry-run` (default) | `python -m applybot --excel applications.xlsx --dry-run` | Fills every form and screenshots it, but **never submits**. Always run this first. |
-| `--check-only` | `python -m applybot --excel applications.xlsx --check-only` | Only the AI resume-review step; no browser. Fast sanity check of resumes. |
-| `--live` | `python -m applybot --excel applications.xlsx --live` | Actually submits applications. Asks you to type `YES` first. |
+## Salary data: sources and limits
 
-Each run writes to `output/` (git-ignored):
+- **DOL H-1B LCA disclosure data** (public CSV download from the Department
+  of Labor): case-level wages with employer, title, and worksite. Import with
+  `salary import-lca`. Every lookup shows p25/median/p75 *and* the source rows
+  behind them.
+- **Posted ranges** parsed from JDs you feed it (`salary parse-range`).
+- Limits: LCA data covers H-1B filings only — it's a real signal, not the
+  whole market. Small samples are labeled as such; no data is ever
+  fabricated to fill a gap.
 
-- `<Company>_<Role>.txt` — the AI-cleaned resume text
-- `<Company>_<Role>.pdf` — the same resume as a PDF (this is what gets uploaded to the application form)
-- `<Company>_<Role>_form.png` — screenshot of the filled application form
-- `run_<timestamp>.log` — full per-row log
+## Your data stays yours
 
-Status values written back to the Excel sheet: `applied`, `applied (dry-run)`, `needs_manual`, `checked`, `failed: <reason>`.
+Everything candid learns about you lives in `candid_data/` (git-ignored):
+`profile.json`, `tracker.json`, `offers.json`, `salary.db`, prep packs,
+tailored output, mock sessions. Delete the folder and you're forgotten.
+Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
-### Email summaries (optional)
+The only network calls candid makes:
+- `jobs curate` → the two public job feeds above.
+- `match --jd <url>` → fetches the JD page you pointed it at.
+- `mock ai` → Gemini, **only** for conversational interview dialogue, only
+  when you run it.
 
-Add an `smtp:` section to `profile.yaml` (see the template) and set the password via environment variable — never in the file:
+No analytics, no telemetry, no accounts.
+
+## Extending it
+
+- [docs/adding_problems.md](docs/adding_problems.md) — add coding problems to the mock judge
+- [docs/adding_questions.md](docs/adding_questions.md) — add reported interview questions (source + URL required)
+- [docs/adding_sources.md](docs/adding_sources.md) — add a public job feed
+
+## Tests
 
 ```bash
-export SMTP_PASSWORD="your-app-password"
+python -m unittest discover -s tests -v
 ```
 
-For Gmail, create an **App Password** (Google Account → Security → 2-Step Verification → App passwords). Without SMTP configured, the bot simply skips the email and the run log still has everything.
+52 tests covering profile parsing, matching, tailoring, tracker, salary,
+judge verdicts, problem bank, prep packs, offers, negotiation, follow-ups,
+and jobs curation (mocked adapters). The mock judge is also verified by
+running every problem's reference solution through it
+(`python scripts/seed_problems.py --verify`).
 
-## Honest limitations
+## Legacy automation
 
-The bot handles standard application forms well, but some rows will need you:
+This repo started as an automated job *applier* (Excel-driven, Playwright
+browser, email summaries). That code still lives under `candid/legacy/`
+(`python -m candid.legacy`) but is no longer the focus — candid the copilot
+is the product now. The legacy runner expects its own `profile.yaml` /
+`applications.xlsx` setup; see the docstrings in `candid/legacy/` if you're
+migrating.
 
-- **Login walls** — if applying requires an account, the row is marked `needs_manual`
-- **CAPTCHAs** (reCAPTCHA / hCaptcha) — need a human by design → `needs_manual`
-- **Exotic ATS wizards** — some Workday/Greenhouse custom multi-page flows can't be completed automatically → `needs_manual`
-- **No guarantees** — always spot-check the screenshots in `output/` before trusting a submission
+## License
 
-One bad row never kills a run: every row is isolated, its status is saved immediately, and the bot moves on.
-
-## Files
-
-| Path | What it is |
-|---|---|
-| `applybot/` | the bot's code |
-| `applications.xlsx` | your job list (you edit this) |
-| `profile.yaml` | your details (git-ignored; copy from `.example`) |
-| `resumes/` | fallback `.txt` resumes |
-| `samples/` | test fixtures: fake job pages + a test workbook |
-| `output/` | cleaned resumes, screenshots, logs (git-ignored) |
-
-## Switching the AI model
-
-The model lives in one place — `applybot/config.py`:
-
-```python
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b")
-```
-
-Change that line, or set the `OLLAMA_MODEL` env var, to use a different local model. To try the fixtures in `samples/`, see the test notes in the repo history.
+MIT.

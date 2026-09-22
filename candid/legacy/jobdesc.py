@@ -12,7 +12,7 @@ import re
 import urllib.request
 from html.parser import HTMLParser
 
-from applybot import config as C
+from candid.legacy import config as C
 
 
 class _TextExtractor(HTMLParser):
@@ -47,7 +47,7 @@ def fetch_job_description(job_link: str | None, timeout: int = 25) -> str:
         return ""
     try:
         req = urllib.request.Request(
-            job_link, headers={"User-Agent": "applybot/0.1 (+job-description)"}
+            job_link, headers={"User-Agent": "candid.legacy/0.1 (+job-description)"}
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             content_type = resp.headers.get("Content-Type", "")

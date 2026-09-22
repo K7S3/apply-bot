@@ -1,0 +1,137 @@
+{
+  "id": "number-of-islands",
+  "title": "Number of Islands",
+  "topic": "graphs",
+  "difficulty": "medium",
+  "statement": "Given an m x n binary grid of '1's (land) and '0's (water), return the number of islands. An island is surrounded by water and formed by connecting adjacent lands horizontally or vertically.\n\nExample: [[\"1\",\"1\",\"0\"],[\"1\",\"0\",\"0\"],[\"0\",\"0\",\"1\"]] -> 2",
+  "function": "solve(grid)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        [
+          [
+            "1",
+            "1",
+            "1",
+            "1",
+            "0"
+          ],
+          [
+            "1",
+            "1",
+            "0",
+            "1",
+            "0"
+          ],
+          [
+            "1",
+            "1",
+            "0",
+            "0",
+            "0"
+          ],
+          [
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        ]
+      ],
+      "expected": 1
+    },
+    {
+      "args": [
+        [
+          [
+            "1",
+            "1",
+            "0",
+            "0",
+            "0"
+          ],
+          [
+            "1",
+            "1",
+            "0",
+            "0",
+            "0"
+          ],
+          [
+            "0",
+            "0",
+            "1",
+            "0",
+            "0"
+          ],
+          [
+            "0",
+            "0",
+            "0",
+            "1",
+            "1"
+          ]
+        ]
+      ],
+      "expected": 3
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        [
+          [
+            "0",
+            "0"
+          ],
+          [
+            "0",
+            "0"
+          ]
+        ]
+      ],
+      "expected": 0
+    },
+    {
+      "args": [
+        [
+          [
+            "1"
+          ]
+        ]
+      ],
+      "expected": 1
+    },
+    {
+      "args": [
+        [
+          [
+            "1",
+            "0",
+            "1"
+          ],
+          [
+            "0",
+            "1",
+            "0"
+          ],
+          [
+            "1",
+            "0",
+            "1"
+          ]
+        ]
+      ],
+      "expected": 5
+    }
+  ],
+  "hints": [
+    "Each island is a connected component. How do you explore everything reachable from one land cell?",
+    "DFS/BFS from each unvisited '1', marking visited cells as '0'. Each new DFS = one island.",
+    "Iterative BFS with a queue avoids recursion-depth issues on huge grids."
+  ],
+  "reference_solution": "def solve(grid):\n    if not grid or not grid[0]:\n        return 0\n    R, C = len(grid), len(grid[0])\n    count = 0\n    def dfs(r, c):\n        if not (0 <= r < R and 0 <= c < C) or grid[r][c] != '1':\n            return\n        grid[r][c] = '0'\n        dfs(r + 1, c); dfs(r - 1, c); dfs(r, c + 1); dfs(r, c - 1)\n    for r in range(R):\n        for c in range(C):\n            if grid[r][c] == '1':\n                count += 1\n                dfs(r, c)\n    return count\n",
+  "complexity": "Time O(m*n) \u2014 each cell visited once. Space O(m*n) worst-case recursion."
+}

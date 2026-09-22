@@ -1,0 +1,62 @@
+{
+  "id": "climbing-stairs",
+  "title": "Climbing Stairs",
+  "topic": "dp",
+  "difficulty": "easy",
+  "statement": "You are climbing a staircase of `n` steps. Each time you can climb 1 or 2 steps. Return the number of distinct ways to reach the top.\n\nExample: n = 3 -> 3 (1+1+1, 1+2, 2+1)",
+  "function": "solve(n)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        2
+      ],
+      "expected": 2
+    },
+    {
+      "args": [
+        3
+      ],
+      "expected": 3
+    },
+    {
+      "args": [
+        5
+      ],
+      "expected": 8
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        1
+      ],
+      "expected": 1
+    },
+    {
+      "args": [
+        10
+      ],
+      "expected": 89
+    },
+    {
+      "args": [
+        20
+      ],
+      "expected": 10946
+    },
+    {
+      "args": [
+        30
+      ],
+      "expected": 1346269
+    }
+  ],
+  "hints": [
+    "How many ways to reach step i? It only depends on steps i-1 and i-2.",
+    "This is the Fibonacci recurrence: ways[i] = ways[i-1] + ways[i-2].",
+    "You only need the last two values \u2014 O(1) space is enough."
+  ],
+  "reference_solution": "def solve(n):\n    a, b = 1, 1\n    for _ in range(n - 1):\n        a, b = b, a + b\n    return b\n",
+  "complexity": "Time O(n), space O(1)."
+}

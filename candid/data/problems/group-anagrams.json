@@ -1,0 +1,126 @@
+{
+  "id": "group-anagrams",
+  "title": "Group Anagrams",
+  "topic": "hashmap",
+  "difficulty": "medium",
+  "statement": "Given a list of strings `strs`, group the anagrams together. Return the groups in any order.\n\nExample: [\"eat\", \"tea\", \"tan\", \"ate\", \"nat\", \"bat\"] -> [[\"bat\"], [\"nat\", \"tan\"], [\"ate\", \"eat\", \"tea\"]]",
+  "function": "solve(strs)",
+  "compare": "sorted_nested",
+  "visible_tests": [
+    {
+      "args": [
+        [
+          "eat",
+          "tea",
+          "tan",
+          "ate",
+          "nat",
+          "bat"
+        ]
+      ],
+      "expected": [
+        [
+          "bat"
+        ],
+        [
+          "nat",
+          "tan"
+        ],
+        [
+          "ate",
+          "eat",
+          "tea"
+        ]
+      ]
+    },
+    {
+      "args": [
+        [
+          ""
+        ]
+      ],
+      "expected": [
+        [
+          ""
+        ]
+      ]
+    },
+    {
+      "args": [
+        [
+          "a"
+        ]
+      ],
+      "expected": [
+        [
+          "a"
+        ]
+      ]
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        [
+          "abc",
+          "bca",
+          "xyz",
+          "zyx"
+        ]
+      ],
+      "expected": [
+        [
+          "abc",
+          "bca"
+        ],
+        [
+          "xyz",
+          "zyx"
+        ]
+      ]
+    },
+    {
+      "args": [
+        [
+          "ddddddddddg",
+          "dgggggggggg"
+        ]
+      ],
+      "expected": [
+        [
+          "ddddddddddg"
+        ],
+        [
+          "dgggggggggg"
+        ]
+      ]
+    },
+    {
+      "args": [
+        [
+          "a",
+          "b",
+          "c"
+        ]
+      ],
+      "expected": [
+        [
+          "a"
+        ],
+        [
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ]
+    }
+  ],
+  "hints": [
+    "Anagrams share a canonical form. What single key could represent a whole group?",
+    "The sorted tuple of characters works as a dict key: tuple(sorted(word)).",
+    "For long strings, a 26-count signature is O(n) per word instead of O(n log n)."
+  ],
+  "reference_solution": "def solve(strs):\n    from collections import defaultdict\n    groups = defaultdict(list)\n    for w in strs:\n        groups[tuple(sorted(w))].append(w)\n    return list(groups.values())\n",
+  "complexity": "Time O(n * k log k) for words of length k (O(n*k) with count signatures). Space O(n*k)."
+}

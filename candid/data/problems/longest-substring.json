@@ -1,0 +1,62 @@
+{
+  "id": "longest-substring",
+  "title": "Longest Substring Without Repeating Characters",
+  "topic": "strings",
+  "difficulty": "medium",
+  "statement": "Given a string `s`, find the length of the longest substring without repeating characters.\n\nExample: s = \"abcabcbb\" -> 3 (\"abc\")",
+  "function": "solve(s)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        "abcabcbb"
+      ],
+      "expected": 3
+    },
+    {
+      "args": [
+        "bbbbb"
+      ],
+      "expected": 1
+    },
+    {
+      "args": [
+        "pwwkew"
+      ],
+      "expected": 3
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        ""
+      ],
+      "expected": 0
+    },
+    {
+      "args": [
+        "dvdf"
+      ],
+      "expected": 3
+    },
+    {
+      "args": [
+        "abba"
+      ],
+      "expected": 2
+    },
+    {
+      "args": [
+        "tmmzuxt"
+      ],
+      "expected": 5
+    }
+  ],
+  "hints": [
+    "The brute force checks all substrings: O(n^2). Notice the window only grows/shrinks at the ends.",
+    "Sliding window: expand the right edge; when a duplicate enters, move the left edge past its previous occurrence.",
+    "Keep a dict of char -> last index. left = max(left, last[ch] + 1) on duplicates."
+  ],
+  "reference_solution": "def solve(s):\n    last = {}\n    start = best = 0\n    for i, ch in enumerate(s):\n        if ch in last and last[ch] >= start:\n            start = last[ch] + 1\n        last[ch] = i\n        best = max(best, i - start + 1)\n    return best\n",
+  "complexity": "Time O(n) \u2014 each character visited at most twice. Space O(min(n, alphabet))."
+}
