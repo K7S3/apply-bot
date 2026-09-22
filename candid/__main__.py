@@ -44,7 +44,7 @@ SUBCOMMANDS = {
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
-             "behavioral", "design"],
+             "behavioral", "design", "voice"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
@@ -53,7 +53,7 @@ SUBCOMMANDS = {
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "SalaryError", "MockError", "JudgeError", "VoiceError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
 }
@@ -68,6 +68,7 @@ _NEXT_COMMAND = {
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
+    "VoiceError": "python -m candid mock voice --help",
     "GmailError": "python -m candid gmail --help",
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
@@ -391,6 +392,10 @@ def cmd_mock(a):
         M.behavioral_session(theme=a.theme, ai_feedback=a.ai)
     elif a.what == "design":
         M.design_session(level=a.level, ai_feedback=a.ai)
+    elif a.what == "voice":
+        M.voice_session(kind=a.kind, stt_backend=a.stt_backend, theme=a.theme,
+                        level=a.level, topic=a.topic, difficulty=a.difficulty,
+                        problem_id=a.problem, seed=a.seed)
 
 
 def cmd_jobs(a):
@@ -797,6 +802,24 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid mock design --level senior --ai",
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
+    t = _sub(ms, "voice", "Voice mock interview: question read aloud (TTS if available), "
+             "answer via STT or typed input, key-point coverage scoring. "
+             "Degrades to text mode when no TTS/mic is available.", [
+        "python -m candid mock voice --kind behavioral",
+        "python -m candid mock voice --kind design --level senior",
+        "python -m candid mock voice --kind coding --difficulty medium --stt-backend vosk",
+    ])
+    t.add_argument("--kind", default="behavioral",
+                   help="behavioral | coding | design")
+    t.add_argument("--stt-backend", default=None,
+                   help="STT backend: typed (default), vosk, speech_recognition. "
+                        "Unavailable backends fall back to typed.")
+    t.add_argument("--theme", default=None, help="behavioral theme filter")
+    t.add_argument("--level", default=None, help="design level filter")
+    t.add_argument("--topic", default=None, help="coding topic filter")
+    t.add_argument("--difficulty", default=None, help="coding difficulty filter")
+    t.add_argument("--problem", default=None, help="coding problem id")
+    t.add_argument("--seed", type=int, default=None, help="coding problem random seed")
     s.set_defaults(func=cmd_mock)
 
     # jobs
