@@ -1,0 +1,528 @@
+# CLI registration for `candid bulk` (bulk JD import)
+# Coordinator: wire these four parts into candid/__main__.py verbatim.
+# Conventions: BulkError messages already end with the next command to run;
+# main() prints "Next: run ..." via _NEXT_COMMAND, so just register the type.
+
+## (1) COMMANDS / SUBCOMMANDS additions
+
+In COMMANDS, add "bulk" (flat command, no subcommands - like `match`):
+
+    COMMANDS = [
+        "onboard", "profile", "match", "tailor", "track", "prep",
+        "followup", "offer", "negotiate", "salary", "mock", "jobs",
+        "dashboard", "import", "gmail", "linkedin", "bulk",
+    ]
+
+SUBCOMMANDS: no entry for "bulk" (it has no subcommands).
+
+In _EXPECTED_ERRORS, add "BulkError".
+
+## (2) argparse block - place right after the `match` command block
+##     (before the `# tailor` comment)
+
+    # bulk
+    s = _sub(sub, "bulk", "Score many JDs at once and rank them by fit.", [
+        "python -m candid bulk --jd-dir ./jds/",
+        "python -m candid bulk --jd-files a.txt b.txt --top 10",
+        "python -m candid bulk --jd-dir ./jds/ --manifest meta.csv --min-score 60 --json",
+        "python -m candid bulk --jd-dir ./jds/ --json > ranked.json   # scripting",
+    ])
+    s.add_argument("--jd-dir", default="",
+                   help="Directory of JD text files (.txt/.md, non-recursive)")
+    s.add_argument("--jd-files", nargs="+", default=[],
+                   help="Explicit JD file paths (combined with --jd-dir)")
+    s.add_argument("--manifest", default="",
+                   help="CSV with file,company,role columns to override "
+                        "filename metadata (e.g. AcmeCorp__Data-Scientist.txt)")
+    s.add_argument("--top", type=int, default=None,
+                   help="Show only the top N results")
+    s.add_argument("--min-score", type=float, default=0.0,
+                   help="Only show results scoring at least this (0-100)")
+    s.add_argument("--json", action="store_true",
+                   help="Print {results, warnings} as JSON (for scripting)")
+    s.set_defaults(func=cmd_bulk)
+
+## (3) cmd_bulk dispatcher - place after cmd_match in __main__.py
+
+    def cmd_bulk(a):
+        from candid import bulk as B
+        prof = _profile()  # raises OnboardError with next step if missing
+        out = B.score_all(prof, jd_dir=a.jd_dir or None,
+                          jd_files=a.jd_files or None,
+                          manifest=a.manifest or None,
+                          min_score=a.min_score)
+        if a.json:
+            print(json.dumps(out, indent=2, default=str))
+        else:
+            print(B.render_table(out["results"], top=a.top))
+            for w in out["warnings"]:
+                print(f"warning: {w}", file=sys.stderr)
+
+BulkError from B.score_all / B.render_table flows into main()'s
+except Exception handler (it's in _EXPECTED_ERRORS) - clean message,
+"Next: run `python -m candid bulk --help`", exit 1, no traceback.
+
+## (4) _NEXT_COMMAND entry
+
+    "BulkError": "python -m candid bulk --help",
+
+## Wiring checklist for the coordinator
+# - [ ] COMMANDS gets "bulk"
+# - [ ] _EXPECTED_ERRORS gets "BulkError"
+# - [ ] argparse block added after `match` (before `# tailor`)
+# - [ ] cmd_bulk added after cmd_match
+# - [ ] _NEXT_COMMAND gets the BulkError entry
+# - [ ] `python -m candid bulk --help` and `python -m candid bulk --jd-dir DIR` smoke-tested
+
+
+---
+
+# CLI registration for workstream C: `refreq`, `schedule`, `thanks` (batch-4)
+
+DO NOT edit `candid/__main__.py` directly in the workstream branches —
+this section is the integration patch the branch owner merges. It follows
+the existing conventions in `__main__.py` (`_sub` / `_nested` helpers,
+`cmd_<name>` dispatchers, `_profile()` for the user's name, `sys` already
+imported).
+
+## 1. Inventory additions
+
+In `COMMANDS`, append: `"refreq", "schedule", "thanks"`.
+
+In `SUBCOMMANDS`, add:
+
+```python
+"refreq": ["add", "list", "update", "remind"],
+"schedule": ["parse", "reply"],
+"thanks": ["plan", "list", "mark-sent"],
+```
+
+In `_EXPECTED_ERRORS`, add: `"RefRequestError", "SchedulingError", "ThankYouError"`.
+
+In `_NEXT_COMMAND`, add:
+
+```python
+"RefRequestError": "python -m candid refreq --help",
+"SchedulingError": "python -m candid schedule --help",
+"ThankYouError": "python -m candid thanks --help",
+```
+
+## 2. Dispatchers (place near the other cmd_* functions)
+
+```python
+def cmd_refreq(a):
+    from candid import refrequests as R
+    prof = _profile()
+    name = prof.get("name") or "Your Name"
+    if a.what == "add":
+        rec = R.add(a.contact, a.company, a.role,
+                    connection=a.connection or "", status=a.status,
+                    notes=a.notes or "")
+        if rec.get("duplicate"):
+            print(f"Already tracked as request #{rec['id']} - not duplicated.")
+        else:
+            print(f"Added referral request #{rec['id']}: {rec['contact']} - "
+                  f"{rec['role']} @ {rec['company']} [{rec['status']}]")
+        print()
+        print("Draft the ask (copy, edit, send yourself):")
+        print(R.draft(rec["id"], name=name))
+        print(f"\nAfter sending: python -m candid refreq update {rec['id']} --status sent")
+    elif a.what == "list":
+        print(R.render_list(R.list_requests(status=a.status or None)))
+    elif a.what == "update":
+        rec = R.update(a.id, status=a.status or None, note=a.note or "")
+        print(f"Updated request #{rec['id']} -> {rec['status']}.")
+    elif a.what == "remind":
+        rems = R.remind(days=a.days, name=name)
+        print(R.render_reminders(rems))
+
+
+def cmd_schedule(a):
+    from candid import scheduling as S
+    if a.what == "parse":
+        text = S.read_source(a.source, file=a.file,
+                             stdin_text=None if sys.stdin.isatty() else sys.stdin.read())
+        print(S.render_parse(S.parse_invite(text)))
+    elif a.what == "reply":
+        prof = _profile()
+        name = prof.get("name") or "Your Name"
+        raw = a.source or a.file
+        parsed = None
+        if raw or not sys.stdin.isatty():
+            text = S.read_source(a.source, file=a.file,
+                                 stdin_text=None if sys.stdin.isatty() else sys.stdin.read())
+            parsed = S.parse_invite(text)
+            unconfirmed = parsed["needs_confirm"]
+            if unconfirmed:
+                print("⚠️  The invite has ambiguities - confirm these before "
+                      "sending your reply:")
+                for f in unconfirmed:
+                    print(f"  • {f}")
+                print()
+        print(S.reply_draft(name, interviewer=a.person or "", role=a.role or "",
+                            company=a.company or "", slots=a.slots, parsed=parsed))
+
+
+def cmd_thanks(a):
+    from candid import thankyou as TK
+    prof = _profile()
+    name = prof.get("name") or "Your Name"
+    if a.what == "plan":
+        people = []
+        for spec in (a.person or []):
+            parts = [p.strip() for p in spec.split(":", 1)]
+            iv = {"name": parts[0], "round": parts[1] if len(parts) > 1 else ""}
+            if not people:  # --topics/--standout feed the first step's draft
+                iv["topics"] = a.topics or ""
+                iv["standout"] = a.standout or ""
+            people.append(iv)
+        seq = TK.plan(a.app_id, role=a.role, company=a.company, interviewers=people)
+        print(TK.render_sequence(seq))
+        print()
+        for st in seq["steps"]:
+            print(f"--- step {st['step']}: {st['interviewer']} ---")
+            print(TK.draft(a.app_id, st["step"], name=name))
+            print()
+    elif a.what == "list":
+        seqs = TK.list_sequences(status=a.status or None)
+        if a.app_id is not None:
+            seqs = [s for s in seqs if s["app_id"] == a.app_id]
+        if not seqs:
+            print("No thank-you sequences yet. "
+                  "Plan one with `python -m candid thanks plan`.")
+        else:
+            print("\n\n".join(TK.render_sequence(s) for s in seqs))
+            print()
+            print(TK.render_pending(TK.pending_steps()))
+    elif a.what == "mark-sent":
+        seq = TK.mark_sent(a.app_id, a.step)
+        print(TK.render_sequence(seq))
+```
+
+## 3. argparse blocks (append inside build_parser, before `return p`)
+
+```python
+    # refreq
+    s = _sub(sub, "refreq", "Track referral requests: draft, status, reminders.", [
+        "python -m candid refreq add --contact \"Priya Nair\" --company Acme --role \"ML Engineer\"",
+        "python -m candid refreq list",
+        "python -m candid refreq update 1 --status sent",
+        "python -m candid refreq remind",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "add", "Add a referral request and print the ask draft.", [
+        "python -m candid refreq add --contact \"Priya Nair\" --company Acme --role \"ML Engineer\" --connection \"your ranking stack work\"",
+    ])
+    t.add_argument("--contact", required=True, help="Contact name")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--connection", default="", help="Your connection to them / why you're excited")
+    t.add_argument("--status", default="drafted",
+                   choices=["drafted", "sent", "reminded", "connected", "declined"])
+    t.add_argument("--notes", default="")
+    t = _sub(rs, "list", "List tracked referral requests.", [
+        "python -m candid refreq list",
+        "python -m candid refreq list --status sent",
+    ])
+    t.add_argument("--status", default=None,
+                   choices=["drafted", "sent", "reminded", "connected", "declined"])
+    t = _sub(rs, "update", "Update a request's status and/or append a note.", [
+        "python -m candid refreq update 1 --status sent",
+        "python -m candid refreq update 1 --status connected --note \"referred 2026-09-22\"",
+    ])
+    t.add_argument("id", type=int, help="Request id from `refreq list`")
+    t.add_argument("--status", default=None,
+                   choices=["drafted", "sent", "reminded", "connected", "declined"])
+    t.add_argument("--note", default="")
+    t = _sub(rs, "remind", "Nudge list: sent requests quiet longer than --days.", [
+        "python -m candid refreq remind",
+        "python -m candid refreq remind --days 10",
+    ])
+    t.add_argument("--days", type=int, default=7,
+                   help="Quiet-day threshold (default 7)")
+    s.set_defaults(func=cmd_refreq)
+
+    # schedule
+    s = _sub(sub, "schedule", "Parse an interview invite; draft a scheduling reply.", [
+        "python -m candid schedule parse --file invite.txt",
+        "python -m candid schedule reply --company Acme --role \"ML Engineer\" --slots \"Tue 2-4pm ET\" \"Wed 10am-12pm ET\"",
+    ])
+    ss = _nested(s)
+    t = _sub(ss, "parse", "Parse pasted invite text into dates/times/timezone/interviewers/links.", [
+        "python -m candid schedule parse --file invite.txt",
+        "cat invite.txt | python -m candid schedule parse",
+    ])
+    t.add_argument("source", nargs="?", default=None,
+                   help="Invite text or a file path; omit to read stdin")
+    t.add_argument("--file", default=None, help="Read the invite from this file")
+    t = _sub(ss, "reply", "Draft a reply proposing 2-3 time slots.", [
+        "python -m candid schedule reply --company Acme --role \"ML Engineer\" --slots \"Tue 2-4pm ET\" \"Wed 10am-12pm ET\"",
+        "python -m candid schedule reply --file invite.txt --slots \"Tue 2-4pm ET\" \"Wed 10am-12pm ET\"",
+    ])
+    t.add_argument("source", nargs="?", default=None,
+                   help="Invite text or a file path; omit to read stdin (optional context)")
+    t.add_argument("--file", default=None, help="Read the invite from this file")
+    t.add_argument("--slots", nargs="+", required=True,
+                   help="2-3 proposed slots, e.g. \"Tue 2-4pm ET\"")
+    t.add_argument("--person", default="", help="Interviewer / recruiter name")
+    t.add_argument("--role", default=""); t.add_argument("--company", default="")
+    s.set_defaults(func=cmd_schedule)
+
+    # thanks
+    s = _sub(sub, "thanks", "Per-application thank-you sequences, one step per interviewer.", [
+        "python -m candid thanks plan --app-id 3 --company Acme --role \"ML Engineer\" --person \"Jane Doe: phone screen\"",
+        "python -m candid thanks list",
+        "python -m candid thanks mark-sent --app-id 3 --step 1",
+    ])
+    ts = _nested(s)
+    t = _sub(ts, "plan", "Plan a thank-you sequence for an application and print the drafts.", [
+        "python -m candid thanks plan --app-id 3 --company Acme --role \"ML Engineer\" --person \"Jane Doe: phone screen\" --person \"Sam Reed: onsite\"",
+    ])
+    t.add_argument("--app-id", type=int, required=True, help="Application id from `track list`")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--person", action="append", default=[],
+                   help='Interviewer as "Name" or "Name: round" (repeatable)')
+    t.add_argument("--topics", default="", help="Topics for the first step's draft")
+    t.add_argument("--standout", default="", help="Standout moment for the first step's draft")
+    t = _sub(ts, "list", "List thank-you sequences and pending steps.", [
+        "python -m candid thanks list",
+        "python -m candid thanks list --status pending",
+        "python -m candid thanks list --app-id 3",
+    ])
+    t.add_argument("--app-id", type=int, default=None)
+    t.add_argument("--status", default=None, choices=["pending", "sent"])
+    t = _sub(ts, "mark-sent", "Mark one thank-you step as sent.", [
+        "python -m candid thanks mark-sent --app-id 3 --step 1",
+    ])
+    t.add_argument("--app-id", type=int, required=True)
+    t.add_argument("--step", type=int, required=True, help="Step number from `thanks list`")
+    s.set_defaults(func=cmd_thanks)
+```
+
+---
+
+# CLI registration for workstream D: `offer deadline` + `reapproach` (batch-4)
+
+Integration patch the branch owner merges into `candid/__main__.py` — do
+not edit `__main__.py` directly in the workstream branch. Follows the
+existing conventions (`_sub` / `_nested` helpers, `cmd_<name>` dispatchers,
+`_NEXT_COMMAND` entries). New errors `OfferDeadlineError` /
+`ReapproachError` already end with the next command to run, so just
+register the types.
+
+## 1. COMMANDS / SUBCOMMANDS additions
+
+In `COMMANDS`, add `"reapproach"` (flat top-level command; the `deadline`
+addition below is a subcommand of `offer`, not a new top-level command).
+
+In `SUBCOMMANDS`, append `"deadline"` to the `"offer"` list and add:
+
+```python
+"reapproach": ["add", "list", "due", "mark", "remove"],
+```
+
+In `_EXPECTED_ERRORS`, add: `"OfferDeadlineError", "ReapproachError"`.
+
+In `_NEXT_COMMAND`, add:
+
+```python
+"OfferDeadlineError": "python -m candid offer deadline --help",
+"ReapproachError": "python -m candid reapproach --help",
+```
+
+## 2. Dispatchers
+
+Extend `cmd_offer` so `deadline` routes to a new dispatcher (the rest of
+`cmd_offer` is unchanged):
+
+```python
+def cmd_offer(a):
+    from candid import offer as O
+    if a.what == "add":
+        fields = {k: v for k, v in vars(a).items()
+                  if k not in ("func", "what") and v is not None}
+        rec = O.add(fields)
+        print(f"Added offer #{rec['id']}: {rec['company']} — "
+              f"normalized ${rec['normalized_annual']:,.0f}/yr")
+    if a.what in ("list", "compare"):
+        print(O.render_comparison(O.list_offers()))
+    elif a.what == "export":
+        path = O.export_comparison(O.list_offers(),
+                                   path=a.out or None)
+        print(f"Offer comparison exported to {path}")
+    elif a.what == "deadline":
+        cmd_offer_deadline(a)
+
+
+def _parse_weight_list(text):
+    """Parse 'comp=5,growth=4,team=3' into {criterion: float}."""
+    out = {}
+    for part in (text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k, v = part.split("=", 1)
+        out[k.strip()] = float(v)
+    return out
+
+
+def cmd_offer_deadline(a):
+    from candid import offer_deadlines as OD
+    if a.deadline_what == "set":
+        if a.clear:
+            removed = OD.remove_deadline(a.id)
+            print(f"Deadline removed for offer #{a.id}." if removed
+                  else f"No deadline was set for offer #{a.id}.")
+        else:
+            rec = OD.set_deadline(a.id, a.date)
+            print(f"Deadline set: offer #{a.id} ({rec['company']}) — "
+                  f"decide by {rec['decision_deadline']}")
+    elif a.deadline_what == "list":
+        print(OD.render_countdown())
+    elif a.deadline_what == "remove":
+        removed = OD.remove_deadline(a.id)
+        print(f"Deadline removed for offer #{a.id}." if removed
+              else f"No deadline was set for offer #{a.id}.")
+    elif a.deadline_what == "decide":
+        import json as _json
+        weights = _parse_weight_list(a.weights)
+        scores = _json.loads(a.scores) if a.scores else {}
+        scores = {int(k): v for k, v in scores.items()}
+        print(OD.render_decision(weights, scores=scores))
+
+
+def cmd_reapproach(a):
+    from candid import reapproach as R
+    if a.what == "add":
+        rec = R.add(a.company, a.last_contact, reason=a.reason)
+        print(f"Watching #{rec['id']} {rec['company']} — retry "
+              f"{rec['retry_6mo']} (6mo) / {rec['retry_12mo']} (12mo)")
+    elif a.what == "list":
+        print(R.render_list())
+    elif a.what == "due":
+        print(R.render_due())
+    elif a.what == "mark":
+        rec = R.mark(a.company_or_id, a.status)
+        print(f"#{rec['id']} {rec['company']} marked {rec['status']}.")
+    elif a.what == "remove":
+        print("Removed." if R.remove(a.company_or_id)
+              else f"No watchlist entry for '{a.company_or_id}'.")
+```
+
+## 3. argparse: `offer deadline` subcommands
+
+Place right after the offer `export` subcommand registration, before
+`s.set_defaults(func=cmd_offer)`:
+
+```python
+    # offer decision deadlines
+    od = _sub(os_, "deadline", "Manage decision deadlines on offers.", [
+        "python -m candid offer deadline set --id 1 --date 2026-10-15",
+        "python -m candid offer deadline list",
+    ])
+    # distinct dest so it does not clobber the outer "what"
+    ods = od.add_subparsers(dest="deadline_what", required=True,
+                            title="subcommands", metavar="<subcommand>",
+                            parser_class=CandidParser)
+
+    t = _sub(ods, "set", "Set or clear a decision deadline on an offer.", [
+        "python -m candid offer deadline set --id 1 --date 2026-10-15",
+        "python -m candid offer deadline set --id 1 --clear",
+    ])
+    t.add_argument("--id", type=int, required=True,
+                   help="Offer id (see: python -m candid offer list)")
+    t.add_argument("--date", default="",
+                   help="Decision deadline, YYYY-MM-DD")
+    t.add_argument("--clear", action="store_true",
+                   help="Remove the deadline instead of setting it")
+
+    _sub(ods, "list", "Deadline countdown, most urgent first.", [
+        "python -m candid offer deadline list",
+    ])
+
+    t = _sub(ods, "remove", "Remove a decision deadline.", [
+        "python -m candid offer deadline remove --id 1",
+    ])
+    t.add_argument("--id", type=int, required=True,
+                   help="Offer id (see: python -m candid offer list)")
+
+    t = _sub(ods, "decide",
+             "Ranked weighted comparison of offers.", [
+                 "python -m candid offer deadline decide "
+                 "--weights comp=5,growth=4,team=3,location=2,stability=3 "
+                 "--scores '{\"1\": {\"growth\": 8, \"team\": 7}}'",
+             ])
+    t.add_argument("--weights", default="",
+                   help="Comma list k=v, e.g. "
+                        "comp=5,growth=4,team=3,location=2,stability=3")
+    t.add_argument("--scores", default="",
+                   help="JSON {\"offer_id\": {\"growth\": 8, \"team\": 7, ...}}; "
+                        "comp is derived from the offers, not scored")
+```
+
+## 4. argparse: `reapproach` command
+
+Append inside `build_parser`, after the offer section (e.g. after the
+`negotiate` section, before `return p`):
+
+```python
+    # reapproach
+    s = _sub(sub, "reapproach",
+             "Track companies worth re-approaching after 6-12 months.", [
+                 "python -m candid reapproach add --company Acme "
+                 "--last-contact 2026-09-01 --reason \"hiring freeze\"",
+                 "python -m candid reapproach list",
+                 "python -m candid reapproach due",
+                 "python -m candid reapproach mark Acme "
+                 "--status re-approached",
+             ])
+    rs = _nested(s)
+
+    t = _sub(rs, "add", "Add a company to the re-approach watchlist.", [
+        "python -m candid reapproach add --company Acme "
+        "--last-contact 2026-09-01 --reason \"hiring freeze\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--last-contact", dest="last_contact", required=True,
+                   help="Last contact date, YYYY-MM-DD")
+    t.add_argument("--reason", default="",
+                   help="Why it is worth retrying later")
+
+    _sub(rs, "list", "List the watchlist, soonest retry date first.", [
+        "python -m candid reapproach list",
+    ])
+
+    _sub(rs, "due", "Show companies whose retry date has arrived.", [
+        "python -m candid reapproach due",
+    ])
+
+    t = _sub(rs, "mark", "Change a watchlist entry's status.", [
+        "python -m candid reapproach mark Acme --status re-approached",
+    ])
+    t.add_argument("company_or_id", help="Company name or numeric id")
+    t.add_argument("--status", required=True,
+                   choices=["watching", "due", "re-approached"])
+
+    t = _sub(rs, "remove", "Remove a watchlist entry.", [
+        "python -m candid reapproach remove Acme",
+    ])
+    t.add_argument("company_or_id", help="Company name or numeric id")
+
+    s.set_defaults(func=cmd_reapproach)
+```
+
+## 5. Typo suggestions
+
+`_suggest_typo` builds its pool from `COMMANDS` + `SUBCOMMANDS`, so
+`reapproach`, `deadline`, `decide`, and `due` are suggested automatically
+once section 1 is applied. No extra work needed.
+
+## Wiring checklist for the coordinator
+# - [ ] COMMANDS gets "reapproach"
+# - [ ] SUBCOMMANDS["offer"] gains "deadline"; SUBCOMMANDS gets "reapproach"
+# - [ ] _EXPECTED_ERRORS gets "OfferDeadlineError", "ReapproachError"
+# - [ ] _NEXT_COMMAND gets both entries
+# - [ ] cmd_offer extended with the deadline branch; cmd_offer_deadline + cmd_reapproach added
+# - [ ] offer deadline argparse block added before s.set_defaults(func=cmd_offer)
+# - [ ] reapproach argparse block added inside build_parser
+# - [ ] `python -m candid offer deadline --help` and `python -m candid reapproach --help` smoke-tested
+
