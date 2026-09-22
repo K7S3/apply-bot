@@ -46,7 +46,7 @@ SUBCOMMANDS = {
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
-    "gmail": ["import", "proposals", "confirm", "reject", "guide"],
+    "gmail": ["import", "proposals", "confirm", "reject", "guide", "classify"],
     "linkedin": ["import", "guide"],
 }
 
@@ -471,6 +471,13 @@ def cmd_gmail(a):
         print(f"Dismissed proposal #{a.id}.")
     elif a.what == "guide":
         print(G.TAKEOUT_GUIDE)
+    elif a.what == "classify":
+        from candid import classify as CL
+        if not a.mbox:
+            raise G.GmailError("No mbox file given. "
+                               "Run: python -m candid gmail classify --mbox mail.mbox")
+        res = CL.classify_mbox(a.mbox, max_messages=a.max)
+        print(CL.render_classify_summary(res))
 
 
 def cmd_linkedin(a):
@@ -870,12 +877,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_import)
 
     # gmail
-    s = _sub(sub, "gmail", "Gmail Takeout mbox import: parse, propose, confirm.", [
+    s = _sub(sub, "gmail", "Gmail Takeout mbox import: parse, propose, confirm, classify.", [
         "python -m candid gmail import mail.mbox",
         "python -m candid gmail proposals",
         "python -m candid gmail confirm 1",
         "python -m candid gmail reject 2",
         "python -m candid gmail guide",
+        "python -m candid gmail classify --mbox mail.mbox",
     ])
     gs = _nested(s)
     t = _sub(gs, "import", "Import a Google Takeout .mbox file (or directory of them).", [
@@ -898,6 +906,13 @@ def build_parser() -> argparse.ArgumentParser:
     t = _sub(gs, "guide", "How to export Gmail via Google Takeout.", [
         "python -m candid gmail guide",
     ])
+    t = _sub(gs, "classify", "Classify recruiter mail in a Takeout mbox: direct / agency / interview / unsure. Interview invites become pending proposals.", [
+        "python -m candid gmail classify --mbox mail.mbox",
+        "python -m candid gmail classify --mbox takeout-mail/ --max 500",
+    ])
+    t.add_argument("--mbox", default=None,
+                   help="Path to the .mbox file or a directory of .mbox files")
+    t.add_argument("--max", type=int, default=0, help="Max messages to read (0 = all)")
     s.set_defaults(func=cmd_gmail)
 
     # linkedin

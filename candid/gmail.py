@@ -390,6 +390,71 @@ def import_mbox(path: str | Path, max_messages: int = 0,
     }
 
 
+def draft_proposals(items: list[dict], kind: str = "interview_invite",
+                    proposals_path: Path | None = None) -> dict:
+    """Create pending proposals from already-classified messages.
+
+    Same proposal semantics as import_mbox: dedupes on Message-ID and on
+    (company, role, kind), assigns the next free ids, and saves only when
+    there is something new. Nothing is written to the tracker - confirm
+    each proposal with ``gmail confirm <id>``.
+
+    ``items`` are parsed-message dicts (as from parse_mbox) with optional
+    ``classify_confidence`` (float) and ``classify_reasons`` (list)
+    attached by the caller. ``kind`` should be a KIND_TO_STATUS key.
+
+    Returns {"new_proposals", "skipped_duplicates"}.
+    """
+    if kind not in KIND_TO_STATUS:
+        raise GmailError(f"Unknown proposal kind '{kind}'.")
+    proposals = _load_proposals(proposals_path)
+    seen_ids = {p.get("message_id") for p in proposals}
+    seen_keys = {k for p in proposals
+                 if (k := _proposal_key(p.get("company", ""),
+                                        p.get("role", ""),
+                                        p.get("kind", "")))}
+    new: list[dict] = []
+    skipped_duplicates = 0
+    next_id = max([p.get("id", 0) for p in proposals] + [0])
+    for msg in items:
+        if msg.get("id") in seen_ids:
+            skipped_duplicates += 1
+            continue
+        seen_ids.add(msg.get("id"))
+        company, role, xconf = extract_company_role(msg.get("subject", ""),
+                                                    msg.get("from", ""),
+                                                    msg.get("snippet", ""))
+        key = _proposal_key(company, role, kind)
+        if key and key in seen_keys:
+            skipped_duplicates += 1
+            continue
+        if key:
+            seen_keys.add(key)
+        conf = msg.get("classify_confidence")
+        if conf is None:
+            conf = min(xconf + 0.25, 1.0)
+        next_id += 1
+        new.append({
+            "id": next_id,
+            "kind": kind,
+            "confidence": round(min(max(conf, 0.0), 1.0), 2),
+            "company": company,
+            "role": role,
+            "from": msg.get("from", ""),
+            "subject": msg.get("subject", ""),
+            "date": msg.get("date", ""),
+            "snippet": msg.get("snippet", ""),
+            "message_id": msg.get("id"),
+            "source_file": msg.get("source_file", ""),
+            "classify_reasons": msg.get("classify_reasons", []),
+            "status": "pending",
+        })
+    if new:
+        proposals.extend(new)
+        _save_proposals(proposals, proposals_path)
+    return {"new_proposals": new, "skipped_duplicates": skipped_duplicates}
+
+
 def list_proposals(status: str | None = None,
                    path: Path | None = None) -> list[dict]:
     proposals = _load_proposals(path)
