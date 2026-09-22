@@ -6,20 +6,40 @@ config-driven: edit the constants or data files here to extend behavior.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
+
+def _data_dir() -> Path:
+    """User data dir. Overridable via CANDID_DATA_DIR (used by tests)."""
+    override = os.environ.get("CANDID_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    return PROJECT_ROOT / "candid_data"
+
+
+def _config_dir() -> Path:
+    """Per-user config dir. Overridable via CANDID_CONFIG_DIR."""
+    override = os.environ.get("CANDID_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".config" / "candid"
+
+
 # --- user data (git-ignored) -------------------------------------------------
-DATA_DIR = PROJECT_ROOT / "candid_data"
+DATA_DIR = _data_dir()
+CONFIG_DIR = _config_dir()
 PROFILE_PATH = DATA_DIR / "profile.json"
 TRACKER_PATH = DATA_DIR / "tracker.json"
 OFFERS_PATH = DATA_DIR / "offers.json"
 SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
+GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
 
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"

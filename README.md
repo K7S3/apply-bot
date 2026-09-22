@@ -57,6 +57,8 @@ All commands are `python -m candid <command> --help`. No accounts, no keys.
 | `offer` | Normalize offers (base + bonus + equity/vesting + benefits) into comparable $/yr and side-by-side tables. |
 | `negotiate` | BATNA playbook, scenario scripts (lowball / competing offer / exploding deadline / level pushback), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice. |
+| `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
+| `dashboard` | Local web UI (127.0.0.1 only) with an **Import your data** section: export guides, file upload, import summaries, and confirm/reject proposal cards. |
 
 ## Job-source coverage (honest)
 
@@ -77,11 +79,56 @@ see [docs/adding_sources.md](docs/adding_sources.md).
   whole market. Small samples are labeled as such; no data is ever
   fabricated to fill a gap.
 
+## Privacy: you export, candid imports
+
+**candid never connects to your accounts.** No Gmail OAuth, no Gmail API, no
+LinkedIn login, no scraping, no tokens stored anywhere. You export your own
+data and feed it into candid:
+
+**Gmail (recruiter outreach, interviews, offers, rejections):**
+
+1. Go to [Google Takeout](https://takeout.google.com).
+2. Deselect all, select **Mail** only.
+3. Create the export and download it, then unzip.
+4. Import the `.mbox` (or the whole unzipped folder of them):
+
+```bash
+python -m candid gmail import ~/Downloads/Takeout/Mail
+python -m candid gmail proposals          # review what was found
+python -m candid gmail confirm <id>        # or: gmail reject <id>
+```
+
+**LinkedIn (profile, positions, skills, education):**
+
+1. Settings & Privacy → Data Privacy → **Get a copy of your data**.
+2. Download the ZIP when it's ready.
+3. Import it (merge with or replace your profile):
+
+```bash
+python -m candid import --linkedin-zip ~/Downloads/linkedin_export.zip --mode merge
+```
+
+Or use the generic import entrypoint (each new source follows this pattern):
+
+```bash
+python -m candid import --gmail-takeout ~/Downloads/Takeout/Mail
+```
+
+Rules that hold for every source:
+
+- Imported Gmail messages only become **proposals** (`candid_data/gmail_proposals.json`).
+  Nothing is added to your tracker until you explicitly `confirm` each proposal.
+- Re-importing the same mbox dedupes by message ID — you never get duplicates.
+- The dashboard's **Import your data** section shows the same guides plus a
+  file picker (`.mbox` / `.zip`) and proposal cards with Confirm/Reject buttons.
+
 ## Your data stays yours
 
 Everything candid learns about you lives in `candid_data/` (git-ignored):
 `profile.json`, `tracker.json`, `offers.json`, `salary.db`, prep packs,
-tailored output, mock sessions. Delete the folder and you're forgotten.
+tailored output, mock sessions, and `gmail_proposals.json` (pending Gmail
+import proposals). Delete the folder and you're forgotten — including every
+proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
 The only network calls candid makes:
@@ -104,9 +151,11 @@ No analytics, no telemetry, no accounts.
 python -m unittest discover -s tests -v
 ```
 
-52 tests covering profile parsing, matching, tailoring, tracker, salary,
+104 tests covering profile parsing, matching, tailoring, tracker, salary,
 judge verdicts, problem bank, prep packs, offers, negotiation, follow-ups,
-and jobs curation (mocked adapters). The mock judge is also verified by
+jobs curation (mocked adapters), Gmail Takeout mbox import (fixture-based),
+LinkedIn export import, and the dashboard HTTP endpoints (including the
+`/api/import` multipart upload and import guides). The mock judge is also verified by
 running every problem's reference solution through it
 (`python scripts/seed_problems.py --verify`).
 

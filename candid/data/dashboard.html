@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>candid — job search dashboard</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#182034; --panel2:#1f2a44;
+    --line:#2a3856; --text:#e8edf7; --muted:#9aa7c4; --accent:#5aa2ff;
+    --green:#3ecf8e; --amber:#f5b544; --red:#f26d6d; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:20px 24px;border-bottom:1px solid var(--line);
+         display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  header h1{margin:0;font-size:20px}
+  header h1 span{color:var(--accent)}
+  header .sub{color:var(--muted);font-size:13px}
+  main{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+          padding:18px;margin-bottom:18px}
+  section h2{margin:0 0 12px;font-size:16px}
+  .funnel{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+  .stage{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+         padding:12px;text-align:center;cursor:pointer;transition:border-color .15s}
+  .stage:hover{border-color:var(--accent)}
+  .stage.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .stage .n{font-size:26px;font-weight:700}
+  .stage .l{font-size:12px;color:var(--muted)}
+  .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid var(--line);
+      background:var(--panel2);color:var(--text);padding:8px 10px}
+  textarea{width:100%;min-height:110px;resize:vertical}
+  button{background:var(--accent);border-color:var(--accent);color:#06101f;
+         font-weight:600;cursor:pointer}
+  button.ghost{background:transparent;color:var(--text);border-color:var(--line);font-weight:400}
+  button.danger{background:transparent;color:var(--red);border-color:var(--red)}
+  button:disabled{opacity:.5;cursor:default}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
+  .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600}
+  .saved{background:#2b3b5e}.applied{background:#274b63}.selected_for_interview{background:#3d3a1e;color:#ffd97a}
+  .rejected{background:#4a2b2b;color:#ff9d9d}.offer{background:#1e4a34;color:#7deda9}.withdrawn{background:#333}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h3{margin:0 0 4px;font-size:15px}
+  .card .meta{color:var(--muted);font-size:13px;margin-bottom:8px}
+  .card .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .score{font-size:22px;font-weight:700;color:var(--green)}
+  .nudge{border-left:3px solid var(--amber);padding:8px 12px;margin-bottom:8px;background:var(--panel2);border-radius:0 8px 8px 0}
+  .nudge code{font-size:12px;color:var(--muted);display:block;margin-top:4px;word-break:break-all}
+  .ok{color:var(--green)} .warn{color:var(--amber)} .err{color:var(--red)}
+  pre.report{background:var(--panel2);padding:14px;border-radius:8px;overflow:auto;white-space:pre-wrap;font-size:13px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  footer{color:var(--muted);font-size:12px;text-align:center;padding:24px}
+  .hidden{display:none}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>candid <span>dashboard</span></h1>
+  <div class="sub" id="profileLine">local-only · nothing leaves this machine</div></div>
+  <div class="sub" id="gmailLine"></div>
+</header>
+<main>
+
+<section id="sec-funnel"><h2>Pipeline</h2><div class="funnel" id="funnel"></div>
+  <div class="sub" style="color:var(--muted);margin-top:8px" id="rates"></div></section>
+
+<section id="sec-apps"><h2>Applications</h2>
+  <div class="toolbar">
+    <input id="q" placeholder="Search company / role / notes…" style="flex:1;min-width:200px">
+    <select id="statusFilter"><option value="">All statuses</option></select>
+    <button class="ghost" id="refreshApps">Refresh</button>
+  </div>
+  <div style="overflow-x:auto"><table><thead><tr>
+    <th>ID</th><th>Company</th><th>Role</th><th>Status</th><th>Updated</th><th>Prep</th><th>Actions</th>
+  </tr></thead><tbody id="appsBody"></tbody></table></div></section>
+
+<section id="sec-jobs"><h2>Curated jobs <span class="sub" style="color:var(--muted);font-weight:400">(scored, not yet applied)</span></h2>
+  <div class="cards" id="jobsCards"></div></section>
+
+<section id="sec-prep"><h2>Interview prep</h2><div id="prepList"></div></section>
+
+<section id="sec-nudges"><h2>Pending nudges</h2><div id="nudges"></div></section>
+
+<section id="sec-tools"><h2>Match &amp; tailor</h2>
+  <div class="grid2">
+    <div><input id="tCompany" placeholder="Company" style="width:100%;margin-bottom:8px">
+         <input id="tRole" placeholder="Role title" style="width:100%;margin-bottom:8px"></div>
+    <div><select id="tTone"><option>confident</option><option>concise</option><option>formal</option><option>warm</option></select>
+         <span style="color:var(--muted);font-size:13px">tone for tailoring</span></div>
+  </div>
+  <textarea id="tJd" placeholder="Paste the job description here…"></textarea>
+  <div class="toolbar" style="margin-top:8px">
+    <button id="btnMatch">Score match</button>
+    <button class="ghost" id="btnResume">Tailor résumé</button>
+    <button class="ghost" id="btnCover">Cover letter</button>
+  </div>
+  <pre class="report hidden" id="toolOut"></pre></section>
+
+<section id="sec-salary"><h2>Salary insights</h2>
+  <div class="toolbar">
+    <input id="sCompany" placeholder="Company"><input id="sTitle" placeholder="Title">
+    <input id="sLoc" placeholder="Location"><button id="btnSalary">Look up</button>
+  </div><pre class="report hidden" id="salaryOut"></pre></section>
+
+<section id="sec-import"><h2>Import your data</h2>
+  <p style="color:var(--muted);font-size:14px;margin-top:0">candid <b>never connects to your accounts</b>.
+  You export your own data, then feed the file in below — nothing leaves this machine.</p>
+  <div id="importGuides"></div>
+  <div class="toolbar" style="margin-top:12px">
+    <input type="file" id="importFile" accept=".mbox,.zip" style="flex:1;min-width:220px">
+    <button id="btnImport">Import file</button>
+  </div>
+  <div style="color:var(--muted);font-size:13px">…or from the terminal:
+    <code>python -m candid import --gmail-takeout mail.mbox</code> ·
+    <code>python -m candid import --linkedin-zip export.zip</code></div>
+  <pre class="report hidden" id="importOut" style="margin-top:12px"></pre>
+</section>
+
+<section id="sec-gmail"><h2>Gmail proposals</h2>
+  <div id="gmailBox"></div><div class="cards" id="proposalCards" style="margin-top:12px"></div></section>
+
+</main>
+<footer>
+  🔒 All data stays on this machine. candid never connects to your accounts —
+  you export your own data (Gmail Takeout mbox, LinkedIn archive) and feed it in.
+  Proposals are never written to your tracker until you confirm them. ·
+  <a href="https://github.com/K7S3/candid" target="_blank" rel="noopener">candid on GitHub</a>
+</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const api={
+  get:p=>fetch(p).then(r=>r.json()),
+  post:(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json())
+};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const STATUSES=["saved","applied","selected_for_interview","rejected","offer","withdrawn"];
+
+async function loadOverview(){
+  const o=await api.get("/api/overview");
+  const f=$("funnel"); f.innerHTML="";
+  for(const s of STATUSES){
+    const d=document.createElement("div"); d.className="stage"; d.dataset.status=s;
+    d.innerHTML=`<div class="n">${o.funnel[s]||0}</div><div class="l">${s.replace(/_/g," ")}</div>`;
+    d.onclick=()=>{ $("statusFilter").value=s; document.querySelectorAll(".stage").forEach(x=>x.classList.remove("active")); d.classList.add("active"); loadApps(); };
+    f.appendChild(d);
+  }
+  $("rates").textContent=`Response ${o.response_rate}% · Interview ${o.interview_rate}% · Offer ${o.offer_rate}% · ${o.nudge_count} nudge(s)`;
+  if(o.profile.has_profile) $("profileLine").textContent=`${o.profile.name} · ${o.profile.headline} · local-only`;
+  $("gmailLine").innerHTML=
+    `Gmail proposals: <b>${o.gmail_pending_proposals}</b> pending — `+
+    `<a href="#sec-import">import a Takeout mbox</a>`;
+  loadNudges(o.nudges); loadProposals();
+}
+
+async function loadApps(){
+  const st=$("statusFilter").value, q=$("q").value;
+  const apps=await api.get(`/api/apps?status=${encodeURIComponent(st)}&q=${encodeURIComponent(q)}`);
+  const tb=$("appsBody"); tb.innerHTML="";
+  if(!apps.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--muted)">Nothing here. Curate jobs or add an application from the CLI.</td></tr>';return;}
+  for(const a of apps){
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td>
+      <td><span class="pill ${a.status}">${a.status.replace(/_/g," ")}</span></td>
+      <td>${esc(a.date_updated||"")}</td>
+      <td>${a.prep_pack?'<span class="ok">✓ pack</span>':'<span class="warn">—</span>'}</td>
+      <td><select data-id="${a.id}" class="stSel">${STATUSES.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select>
+      <button class="ghost" data-prep="${a.id}" data-c="${esc(a.company)}" data-r="${esc(a.role)}">Prep</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll(".stSel").forEach(sel=>sel.onchange=async e=>{
+    const r=await api.post(`/api/apps/${e.target.dataset.id}`,{status:e.target.value});
+    if(r.error) alert(r.error); loadApps(); loadOverview();
+  });
+  tb.querySelectorAll("[data-prep]").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.prep));
+}
+
+async function genPrep(company,role,appId){
+  const r=await api.post("/api/prep",{company,role,app_id:parseInt(appId)});
+  alert(r.error?("Error: "+r.error):("Prep pack saved:\n"+r.path)); loadPrep();
+}
+
+async function loadJobs(){
+  const jobs=await api.get("/api/jobs"); const w=$("jobsCards"); w.innerHTML="";
+  if(!jobs.length){w.innerHTML='<div style="color:var(--muted)">No saved jobs. Run <code>python -m candid jobs curate --role "Data Scientist"</code>.</div>';return;}
+  for(const j of jobs){
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`<h3>${esc(j.role)}</h3><div class="meta">${esc(j.company)} · ${esc(j.source||"")}</div>
+      <div class="score">${j.score??"—"}<span style="font-size:13px;color:var(--muted)">/100</span></div>
+      <div class="actions">
+        ${j.url?`<a href="${esc(j.url)}" target="_blank" rel="noopener"><button class="ghost">Apply ↗</button></a>`:""}
+        <button class="ghost" data-m="${j.app_id}">Match</button>
+        <button class="ghost" data-t="${j.app_id}">Tailor</button>
+      </div>`;
+    w.appendChild(d);
+  }
+}
+
+async function loadPrep(){
+  const rows=await api.get("/api/prep-status"); const w=$("prepList"); w.innerHTML="";
+  const need=rows.filter(r=>r.status==="selected_for_interview");
+  if(!need.length){w.innerHTML='<div style="color:var(--muted)">No interviews in the pipeline. Prep packs appear here when a role moves to interview.</div>';return;}
+  for(const r of need){
+    const d=document.createElement("div"); d.className="nudge";
+    d.innerHTML=`<b>${esc(r.role)} @ ${esc(r.company)}</b> — ${r.has_pack?'<span class="ok">✓ pack ready</span>':'<span class="warn">no pack yet</span>'}
+      ${r.has_pack?"":`<button data-c="${esc(r.company)}" data-r="${esc(r.role)}" data-a="${r.app_id}" style="margin-left:10px">Generate pack</button>`}`;
+    w.appendChild(d);
+  }
+  w.querySelectorAll("button").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.a));
+}
+
+function loadNudges(nudges){
+  const w=$("nudges"); w.innerHTML="";
+  if(!nudges.length){w.innerHTML='<div style="color:var(--muted)">All quiet. 🎉</div>';return;}
+  for(const n of nudges){
+    const d=document.createElement("div"); d.className="nudge";
+    d.innerHTML=`<b>[${n.kind.replace(/_/g," ")}]</b> ${esc(n.message)}<br>→ ${esc(n.action)}<code>${esc(n.command)}</code>`;
+    w.appendChild(d);
+  }
+}
+
+async function loadProposals(){
+  const ps=await api.get("/api/proposals?status=pending");
+  const w=$("proposalCards"); w.innerHTML="";
+  const box=$("gmailBox");
+  if(!ps.length){box.innerHTML='<div style="color:var(--muted)">No pending proposals. <a href="#sec-import">Import a Gmail Takeout mbox</a> to ingest recruiter mail — nothing is written to your tracker until you confirm here.</div>';return;}
+  box.innerHTML=`<div><b>${ps.length}</b> proposal(s) from Gmail. Confirm to write to your tracker; reject to dismiss.</div>`;
+  for(const p of ps){
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`<h3>${esc(p.role||"(role?)")} @ ${esc(p.company||"(company?)")}</h3>
+      <div class="meta">${esc(p.kind.replace(/_/g," "))} · confidence ${p.confidence} · ${esc(p.date||"")}</div>
+      <div style="font-size:13px">${esc(p.subject||"")}</div>
+      <div style="font-size:12px;color:var(--muted)">${esc(p.snippet||"")}</div>
+      <div class="actions"><button data-ok="${p.id}">Confirm</button><button class="danger" data-no="${p.id}">Reject</button></div>`;
+    w.appendChild(d);
+  }
+  w.querySelectorAll("[data-ok]").forEach(b=>b.onclick=async()=>{const r=await api.post(`/api/proposals/${b.dataset.ok}/confirm`);if(r.error)alert(r.error);loadProposals();loadApps();loadOverview();});
+  w.querySelectorAll("[data-no]").forEach(b=>b.onclick=async()=>{await api.post(`/api/proposals/${b.dataset.no}/reject`);loadProposals();loadOverview();});
+}
+
+$("refreshApps").onclick=loadApps;
+$("q").oninput=loadApps;
+$("statusFilter").onchange=loadApps;
+for(const s of STATUSES){const o=document.createElement("option");o.value=s;o.textContent=s.replace(/_/g," ");$("statusFilter").appendChild(o);}
+
+$("btnMatch").onclick=async()=>{
+  const r=await api.post("/api/match",{company:$("tCompany").value,role:$("tRole").value,jd:$("tJd").value});
+  const o=$("toolOut");o.classList.remove("hidden");
+  o.textContent=r.error?("Error: "+r.error):r.report; o.scrollIntoView({behavior:"smooth"});
+};
+async function tailor(kind){
+  const r=await api.post("/api/tailor",{kind,company:$("tCompany").value,role:$("tRole").value,jd:$("tJd").value,tone:$("tTone").value});
+  const o=$("toolOut");o.classList.remove("hidden");
+  o.textContent=r.error?("Error: "+r.error):("Saved to "+r.path+"\n\n"+r.text.slice(0,4000));
+  o.scrollIntoView({behavior:"smooth"});
+}
+$("btnResume").onclick=()=>tailor("resume");
+$("btnCover").onclick=()=>tailor("cover-letter");
+$("btnSalary").onclick=async()=>{
+  const r=await api.get(`/api/salary?company=${encodeURIComponent($("sCompany").value)}&title=${encodeURIComponent($("sTitle").value)}&location=${encodeURIComponent($("sLoc").value)}`);
+  const o=$("salaryOut");o.classList.remove("hidden");
+  o.textContent=!r.n?("No salary data yet — import DOL LCA data or parse JDs to build it up.")
+    :`n=${r.n} · p25 $${Math.round(r.p25).toLocaleString()} · median $${Math.round(r.median).toLocaleString()} · p75 $${Math.round(r.p75).toLocaleString()}\nSources: ${(r.sources||[]).join("; ")}`;
+};
+
+async function loadImportGuides(){
+  const g=await api.get("/api/import-guides");
+  const w=$("importGuides"); w.innerHTML="";
+  for(const key of ["gmail","linkedin","pattern"]){
+    const s=g[key]; if(!s) continue;
+    const d=document.createElement("div"); d.className="card"; d.style.marginBottom="10px";
+    const steps=s.steps.map(esc).join("<br>");
+    d.innerHTML=`<h3>${esc(s.title)}</h3><div style="font-size:13px">${steps}</div>`+
+      (s.command?`<div style="margin-top:6px;font-size:13px;color:var(--muted)"><code>${esc(s.command)}</code></div>`:"")+
+      (s.accept?`<div style="font-size:12px;color:var(--muted)">Accepts: ${esc(s.accept)} files</div>`:"");
+    w.appendChild(d);
+  }
+}
+
+$("btnImport").onclick=async()=>{
+  const inp=$("importFile");
+  if(!inp.files.length){alert("Pick an exported file first (.mbox or .zip).");return;}
+  const fd=new FormData(); fd.append("file",inp.files[0]);
+  const o=$("importOut"); o.classList.remove("hidden");
+  o.textContent="Importing… (large mbox files can take a minute)";
+  try{
+    const r=await fetch("/api/import",{method:"POST",body:fd}).then(r=>r.json());
+    if(r.error){o.textContent="Error: "+r.error;return;}
+    o.textContent=r.summary||JSON.stringify(r,null,2);
+    loadProposals(); loadOverview(); loadApps();
+  }catch(e){o.textContent="Error: "+e;}
+};
+
+loadOverview(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
+</script>
+</body>
+</html>

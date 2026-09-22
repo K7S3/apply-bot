@@ -7,6 +7,10 @@
     python -m candid prep --company X --role Y
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
+    python -m candid dashboard            # local web UI (127.0.0.1 only)
+    python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
+    python -m candid linkedin import --zip LinkedIn-export.zip
+    python -m candid import --gmail-takeout mail.mbox  # general import entry point
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -259,6 +263,65 @@ def cmd_jobs(a):
         print(J.render_saved())
 
 
+def cmd_dashboard(a):
+    from candid import dashboard as D
+    D.serve(port=a.port, open_browser=not a.no_browser)
+
+
+def cmd_import(a):
+    """General entry point: import user-supplied exports.
+
+    Pattern for new sources: add a module under candid/ that parses the
+    export and proposes changes, then wire it here and in the dashboard's
+    "Import your data" section.
+    """
+    if a.gmail_takeout:
+        from candid import gmail as G
+        res = G.import_mbox(a.gmail_takeout, max_messages=a.max)
+        print(G.render_import_summary(res))
+    elif a.linkedin_zip:
+        from candid import linkedin as L
+        res = L.import_zip(a.linkedin_zip, mode=a.mode)
+        prof = res["profile"]
+        print(f"✅ LinkedIn import ({res['mode']}): {res['positions']} positions, "
+              f"{res['skills']} skills, {res['education']} education entries.")
+        print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
+              f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+    else:
+        raise ValueError("Nothing to import. Use --gmail-takeout FILE.mbox "
+                         "or --linkedin-zip FILE.zip")
+
+
+def cmd_gmail(a):
+    from candid import gmail as G
+    if a.what == "import":
+        res = G.import_mbox(a.file, max_messages=a.max)
+        print(G.render_import_summary(res))
+    elif a.what == "proposals":
+        print(G.render_proposals(G.list_proposals(status="pending")))
+    elif a.what == "confirm":
+        rec = G.confirm_proposal(a.id)
+        print(f"\u2705 Confirmed \u2192 tracker #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['status']}]")
+    elif a.what == "reject":
+        G.reject_proposal(a.id)
+        print(f"Dismissed proposal #{a.id}.")
+    elif a.what == "guide":
+        print(G.TAKEOUT_GUIDE)
+
+
+def cmd_linkedin(a):
+    from candid import linkedin as L
+    if a.what == "guide":
+        print(L.EXPORT_GUIDE)
+    elif a.what == "import":
+        res = L.import_zip(a.zip, mode=a.mode)
+        prof = res["profile"]
+        print(f"✅ LinkedIn import ({res['mode']}): {res['positions']} positions, "
+              f"{res['skills']} skills, {res['education']} education entries.")
+        print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
+              f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m candid",
                                 description="The generic job-search copilot.")
@@ -428,6 +491,48 @@ def build_parser() -> argparse.ArgumentParser:
     js.add_parser("list", help="Show the curated pipeline (status=saved)")
     s.set_defaults(func=cmd_jobs)
 
+    # dashboard
+    s = sub.add_parser("dashboard", help="Launch the local web dashboard (127.0.0.1 only).")
+    s.add_argument("--port", type=int, default=8765, help="Preferred port (tries the next 10 if busy)")
+    s.add_argument("--no-browser", action="store_true", help="Don't auto-open the browser")
+    s.set_defaults(func=cmd_dashboard)
+
+    # import (general entry point for user-supplied exports)
+    s = sub.add_parser("import", help="Import your own data exports (mbox, LinkedIn ZIP, ...).")
+    s.add_argument("--gmail-takeout", metavar="FILE.mbox",
+                   help="Google Takeout mbox file (or directory of .mbox files)")
+    s.add_argument("--linkedin-zip", metavar="FILE.zip",
+                   help="LinkedIn official data-export archive")
+    s.add_argument("--mode", default="merge", choices=["merge", "replace"],
+                   help="LinkedIn import mode (default: merge)")
+    s.add_argument("--max", type=int, default=0,
+                   help="Max mbox messages to read (0 = all)")
+    s.set_defaults(func=cmd_import)
+
+    # gmail
+    s = sub.add_parser("gmail", help="Gmail Takeout mbox import: parse, propose, confirm.")
+    gs = s.add_subparsers(dest="what", required=True)
+    t = gs.add_parser("import", help="Import a Google Takeout .mbox file (or directory of them).")
+    t.add_argument("file", help="Path to the .mbox file or a directory of .mbox files")
+    t.add_argument("--max", type=int, default=0, help="Max messages to read (0 = all)")
+    t = gs.add_parser("proposals", help="List pending Gmail proposals.")
+    t = gs.add_parser("confirm", help="Confirm a proposal -> writes to the tracker.")
+    t.add_argument("id", type=int)
+    t = gs.add_parser("reject", help="Dismiss a proposal.")
+    t.add_argument("id", type=int)
+    gs.add_parser("guide", help="How to export Gmail via Google Takeout.")
+    s.set_defaults(func=cmd_gmail)
+
+    # linkedin
+    s = sub.add_parser("linkedin", help="Import LinkedIn's official data export (no scraping).")
+    ls = s.add_subparsers(dest="what", required=True)
+    t = ls.add_parser("import", help="Import a LinkedIn export ZIP into your profile.")
+    t.add_argument("--zip", required=True, help="Path to the LinkedIn export .zip")
+    t.add_argument("--mode", default="merge", choices=["merge", "replace"],
+                   help="merge: fold into existing profile (default); replace: overwrite")
+    ls.add_parser("guide", help="How to download your LinkedIn data export.")
+    s.set_defaults(func=cmd_linkedin)
+
     return p
 
 
@@ -439,6 +544,7 @@ def main(argv=None):
         etype = type(e).__name__
         if etype in ("OnboardError", "MatchError", "TrackerError", "PrepError",
                      "OfferError", "SalaryError", "MockError", "JudgeError",
+                     "GmailError", "LinkedInError", "DashboardError",
                      "ValueError"):
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
