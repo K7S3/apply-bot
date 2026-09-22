@@ -3,6 +3,8 @@
 Drafts are generated from interview context you provide (interviewer name,
 topics discussed, your standout moment). Nothing is ever sent automatically —
 copy, edit, and send yourself.
+
+Every draft includes a subject line and a short timing note (when to send it).
 """
 
 from __future__ import annotations
@@ -11,7 +13,19 @@ TONE_NOTE = {
     "warm": "warm and genuine",
     "formal": "polished and formal",
     "concise": "short and to the point",
+    "enthusiastic": "upbeat and openly excited",
 }
+
+# When to send each kind of follow-up.
+TIMING = {
+    "thank_you": "Send within 24 hours of the interview - same evening is ideal, next morning at the latest.",
+    "check_in": "Send 5-7 business days after your last contact, or 2 days past any timeline the recruiter gave you - whichever is later.",
+    "referral_ask": "Send on a weekday morning; give your contact at least a week before any application deadline.",
+}
+
+
+def _timing_line(kind: str) -> str:
+    return f"\n\n*Timing: {TIMING[kind]}*"
 
 
 def thank_you(name: str, interviewer: str, role: str, company: str,
@@ -23,7 +37,7 @@ def thank_you(name: str, interviewer: str, role: str, company: str,
     topics = topics or "our conversation about the team's work"
     standout = standout or "how my background maps to the role's challenges"
     if tone == "concise":
-        return (
+        draft = (
             f"Subject: Thank you — {role} interview\n\n"
             f"Hi {interviewer},\n\n"
             f"Thank you for your time today. I enjoyed {topics}, and I'm excited "
@@ -31,8 +45,8 @@ def thank_you(name: str, interviewer: str, role: str, company: str,
             f"Happy to share anything else that would be helpful.\n\n"
             f"Best,\n{name}"
         )
-    if tone == "formal":
-        return (
+    elif tone == "formal":
+        draft = (
             f"Subject: Thank you for the {role} interview\n\n"
             f"Dear {interviewer},\n\n"
             f"Thank you for taking the time to speak with me about the {role} "
@@ -42,16 +56,28 @@ def thank_you(name: str, interviewer: str, role: str, company: str,
             f"I look forward to hearing about next steps.\n\n"
             f"Sincerely,\n{name}"
         )
-    return (
-        f"Subject: Great speaking with you!\n\n"
-        f"Hi {interviewer},\n\n"
-        f"Really enjoyed {topics} — it gave me a clear picture of the problems "
-        f"the team is tackling, and I left even more excited about the {role} role. "
-        f"{standout[0].upper() + standout[1:] if standout else ''} feels like a great fit "
-        f"for what you're building at {company}.\n\n"
-        f"Thanks again for your time!\n\n"
-        f"Best,\n{name}"
-    )
+    elif tone == "enthusiastic":
+        draft = (
+            f"Subject: So excited about the {role} role!\n\n"
+            f"Hi {interviewer},\n\n"
+            f"I had to write right away - I loved {topics}! It is exactly the "
+            f"kind of problem I want to be working on, and {standout} has me "
+            f"even more fired up about the {role} role at {company}.\n\n"
+            f"Whatever the next step looks like, count me in.\n\n"
+            f"Best,\n{name}"
+        )
+    else:
+        draft = (
+            f"Subject: Great speaking with you!\n\n"
+            f"Hi {interviewer},\n\n"
+            f"Really enjoyed {topics} - it gave me a clear picture of the problems "
+            f"the team is tackling, and I left even more excited about the {role} role. "
+            f"{standout[0].upper() + standout[1:] if standout else ''} feels like a great fit "
+            f"for what you're building at {company}.\n\n"
+            f"Thanks again for your time!\n\n"
+            f"Best,\n{name}"
+        )
+    return draft + _timing_line("thank_you")
 
 
 def check_in(name: str, recruiter: str, role: str, company: str,
@@ -70,6 +96,13 @@ def check_in(name: str, recruiter: str, role: str, company: str,
             f"it's been a little while since {last_contact} and I wanted to see "
             f"where things stand. Still very excited about {company}!"
         )
+    elif tone == "enthusiastic":
+        body = (
+            f"Hi! I keep thinking about the {role} role at {company} - the "
+            f"conversations so far have me genuinely excited. It's been a bit "
+            f"since {last_contact}, so I wanted to check in: any updates on "
+            f"timeline or next steps? I'm ready whenever you are!"
+        )
     else:
         body = (
             f"Following up on the {role} role at {company} — any updates since "
@@ -78,6 +111,7 @@ def check_in(name: str, recruiter: str, role: str, company: str,
     return (
         f"Subject: Checking in — {role} @ {company}\n\n"
         f"Hi {recruiter},\n\n{body}\n\nBest,\n{name}"
+        + _timing_line("check_in")
     )
 
 
@@ -94,4 +128,5 @@ def referral_ask(name: str, contact: str, role: str, company: str,
         f"and a blurb to make it easy.\n\n"
         f"No worries at all if not — appreciate you either way!\n\n"
         f"Best,\n{name}"
+        + _timing_line("referral_ask")
     )

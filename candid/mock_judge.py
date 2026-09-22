@@ -2,8 +2,10 @@
 
 Safety model:
   - User code runs in a *separate* subprocess, never in this process.
-  - Hard wall-clock timeout per run (default 2s per test, enforced by
-    subprocess; plus a CPU rlimit as a backstop).
+  - Each test case runs in its OWN subprocess with a hard wall-clock
+    timeout (default 2s per test, enforced by subprocess; plus a CPU rlimit
+    as a backstop). An infinite loop fails that test fast instead of hanging
+    the whole run.
   - Resource limits via setrlimit in the child: CPU seconds, address-space
     memory, file size, open files, no core dumps.
   - Runs with `python -I` (isolated: no user site-packages, no PYTHONPATH,
@@ -72,18 +74,16 @@ def main():
     sys.path.insert(0, ".")
     import solution
     fn = getattr(solution, spec["fn"])
-    results = []
-    for i, t in enumerate(spec["tests"]):
-        args = copy.deepcopy(t["args"])
-        try:
-            got = fn(*args)
-            ok = compare(got, t["expected"], spec["compare"])
-            results.append({"i": i, "verdict": "accepted" if ok else "wrong_answer",
-                            "got": safe(got), "expected": safe(t["expected"])})
-        except Exception as e:  # noqa: BLE001 - report any user-code error
-            results.append({"i": i, "verdict": "runtime_error",
-                            "error": f"{type(e).__name__}: {e}"})
-    print(json.dumps(results))
+    t = spec["test"]
+    args = copy.deepcopy(t["args"])
+    try:
+        got = fn(*args)
+        ok = compare(got, t["expected"], spec["compare"])
+        print(json.dumps({"verdict": "accepted" if ok else "wrong_answer",
+                          "got": safe(got), "expected": safe(t["expected"])}))
+    except Exception as e:  # noqa: BLE001 - report any user-code error
+        print(json.dumps({"verdict": "runtime_error",
+                          "error": f"{type(e).__name__}: {e}"}))
 
 main()
 """
@@ -93,12 +93,69 @@ class JudgeError(Exception):
     """Raised when the judge itself fails (not the user's code)."""
 
 
+def _run_single_test(workdir: Path, fn_name: str, compare_mode: str,
+                     args, expected, per_test_timeout: float) -> dict:
+    """Run one test case in its own sandboxed subprocess."""
+    (workdir / "spec.json").write_text(json.dumps({
+        "fn": fn_name,
+        "compare": compare_mode,
+        "test": {"args": args, "expected": expected},
+    }), encoding="utf-8")
+
+    # wall-clock timeout with headroom for interpreter startup; the CPU
+    # rlimit is the backstop for spin-loops that dodge signals.
+    wall_timeout = per_test_timeout + max(1.0, per_test_timeout * 0.5)
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONNOUSERSITE": "1",
+           "COPILOT_CPU_LIMIT": str(int(per_test_timeout) + 5)}
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-I", "runner.py"],
+            cwd=str(workdir), env=env, capture_output=True, text=True,
+            timeout=wall_timeout,
+            preexec_fn=_child_limits if os.name == "posix" else None,
+        )
+    except subprocess.TimeoutExpired:
+        return {"verdict": "time_limit_exceeded",
+                "error": f"Hit the {per_test_timeout:g}s per-test time limit - "
+                         "likely an infinite loop or far too slow."}
+
+    if proc.returncode is not None and proc.returncode < 0:
+        # killed by a signal (SIGXCPU/SIGKILL from rlimits, incl. OOM) -
+        # for practice purposes this is a time/memory blowup, not a bug report
+        return {"verdict": "time_limit_exceeded",
+                "error": "Your solution was killed for exceeding CPU time or "
+                         "memory (infinite loop, far too slow, or too much memory)."}
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip().splitlines()
+        err_tail = "\n".join(err[-8:]) if err else "unknown error"
+        if "ModuleNotFoundError" in err_tail or "ImportError" in err_tail:
+            detail = "Your code imports a module that isn't available in the sandbox."
+        elif "SyntaxError" in err_tail:
+            detail = "Syntax error in your solution."
+        elif "MemoryError" in err_tail:
+            detail = ("Your solution ran out of memory "
+                      f"(sandbox limit: {MEMORY_LIMIT_BYTES // (1024*1024)} MB).")
+        else:
+            detail = "Your solution crashed before running the test."
+        return {"verdict": "runtime_error", "error": f"{detail}\n{err_tail}"}
+
+    try:
+        raw = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return {"verdict": "runtime_error",
+                "error": "Judge runner produced no parseable output."}
+    return raw
+
+
 def judge(problem: dict, code: str, per_test_timeout: float = DEFAULT_PER_TEST_TIMEOUT) -> dict:
     """Run `code` against a problem's visible + hidden tests.
 
+    Each test runs in its own sandboxed subprocess with a per-test timeout,
+    so an infinite loop fails fast instead of hanging the suite.
+
     Returns:
         {"verdict": "accepted"|"wrong_answer"|"time_limit_exceeded"|"runtime_error",
-         "tests": [{"i", "verdict", "got", "expected", "error", "hidden"}...],
+         "tests": [{"i", "verdict", "got", "expected", "error", "hidden", "args"}...],
          "summary": str}
     """
     fn_name = problem["function"].split("(")[0].strip()
@@ -115,70 +172,38 @@ def judge(problem: dict, code: str, per_test_timeout: float = DEFAULT_PER_TEST_T
     try:
         (workdir / "solution.py").write_text(code, encoding="utf-8")
         (workdir / "runner.py").write_text(_RUNNER, encoding="utf-8")
-        (workdir / "spec.json").write_text(json.dumps({
-            "fn": fn_name,
-            "compare": problem.get("compare", "exact"),
-            "tests": [{"args": t["args"], "expected": t["expected"]} for t in tests],
-        }), encoding="utf-8")
 
-        total_timeout = per_test_timeout * len(tests) + 5
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONNOUSERSITE": "1",
-               "COPILOT_CPU_LIMIT": str(int(total_timeout) + 5)}
-        try:
-            proc = subprocess.run(
-                [sys.executable, "-I", "runner.py"],
-                cwd=str(workdir), env=env, capture_output=True, text=True,
-                timeout=total_timeout,
-                preexec_fn=_child_limits if os.name == "posix" else None,
-            )
-        except subprocess.TimeoutExpired:
-            return _verdict("time_limit_exceeded", tests,
-                            f"Exceeded {total_timeout:.0f}s total — likely an infinite loop "
-                            "or far too slow.")
+        results: list[dict] = []
+        skip_rest = False
+        for i, t in enumerate(tests):
+            if skip_rest:
+                # an earlier test already blew the time budget - don't burn
+                # another full timeout per remaining test
+                results.append({
+                    "i": i, "verdict": "time_limit_exceeded", "hidden": t["hidden"],
+                    "args": t["args"],
+                    "error": "Skipped: an earlier test exceeded the time limit.",
+                })
+                continue
+            r = _run_single_test(workdir, fn_name, problem.get("compare", "exact"),
+                                 t["args"], t["expected"], per_test_timeout)
+            r.update({"i": i, "hidden": t["hidden"], "args": t["args"]})
+            if r["verdict"] == "time_limit_exceeded":
+                skip_rest = True
+            results.append(r)
 
-        if proc.returncode is not None and proc.returncode < 0:
-            # killed by a signal (SIGXCPU/SIGKILL from rlimits, incl. OOM) —
-            # for practice purposes this is a time/memory blowup, not a bug report
-            return _verdict("time_limit_exceeded", tests,
-                            "Your solution was killed for exceeding CPU time or memory "
-                            "(infinite loop or far too slow / too much memory).")
-        if proc.returncode != 0:
-            err = (proc.stderr or "").strip().splitlines()
-            err_tail = "\n".join(err[-8:]) if err else "unknown error"
-            if "ModuleNotFoundError" in err_tail or "ImportError" in err_tail:
-                detail = "Your code imports a module that isn't available in the sandbox."
-            elif "SyntaxError" in err_tail:
-                detail = "Syntax error in your solution."
-            else:
-                detail = "Your solution crashed before running any test."
-            return _verdict("runtime_error", tests, f"{detail}\n{err_tail}")
-
-        try:
-            raw = json.loads(proc.stdout.strip().splitlines()[-1])
-        except (json.JSONDecodeError, IndexError):
-            return _verdict("runtime_error", tests,
-                            "Judge runner produced no parseable output.")
-
-        enriched = []
-        for t, r in zip(tests, raw):
-            enriched.append({**r, "hidden": t["hidden"], "args": t["args"]})
-        verdict = "accepted" if all(r["verdict"] == "accepted" for r in enriched) else "wrong_answer"
-        # surface a crash as runtime_error if every test crashed identically
-        if verdict != "accepted" and all(r["verdict"] == "runtime_error" for r in enriched):
+        if all(r["verdict"] == "accepted" for r in results):
+            verdict = "accepted"
+        elif any(r["verdict"] == "time_limit_exceeded" for r in results):
+            verdict = "time_limit_exceeded"
+        elif all(r["verdict"] == "runtime_error" for r in results):
             verdict = "runtime_error"
-        return {"verdict": verdict, "tests": enriched,
-                "summary": _summarize(verdict, enriched)}
+        else:
+            verdict = "wrong_answer"
+        return {"verdict": verdict, "tests": results,
+                "summary": _summarize(verdict, results)}
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
-
-
-def _verdict(verdict: str, tests: list[dict], summary: str) -> dict:
-    return {
-        "verdict": verdict,
-        "tests": [{"i": i, "verdict": verdict, "hidden": t["hidden"],
-                   "args": t.get("args"), "error": summary} for i, t in enumerate(tests)],
-        "summary": summary,
-    }
 
 
 def _summarize(verdict: str, tests: list[dict]) -> str:

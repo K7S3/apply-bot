@@ -6,8 +6,10 @@ config-driven: edit the constants or data files here to extend behavior.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -121,12 +123,16 @@ SKILL_LEXICON: dict[str, list[str]] = {
 }
 
 
+@lru_cache(maxsize=1024)
 def skill_regex(alias: str) -> "re.Pattern[str]":
     """Compile a skill alias into a safe regex.
 
     Plain words get word boundaries (so ``excel`` doesn't match
     "excellent" and ``py`` doesn't match "happy"); symbols like ``c++``
     are escaped literally.
+
+    Compiled patterns are cached — this is called in hot loops during
+    JD scoring, so recompiling every call was a real drag.
     """
     esc = re.escape(alias)
     if alias[:1].isalnum() or alias[:1] == "_":
@@ -140,3 +146,14 @@ def ensure_data_dirs() -> None:
     """Create the git-ignored user data directories if missing."""
     for d in (DATA_DIR, PREP_PACKS_DIR, TAILOR_DIR):
         d.mkdir(parents=True, exist_ok=True)
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Module-level logger. Level from CANDID_LOG_LEVEL (default WARNING)."""
+    logger = logging.getLogger(f"candid.{name}")
+    if not logging.getLogger("candid").handlers:
+        logging.basicConfig(
+            level=os.environ.get("CANDID_LOG_LEVEL", "WARNING").upper(),
+            format="%(levelname)s [candid.%(name)s] %(message)s",
+        )
+    return logger

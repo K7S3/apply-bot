@@ -143,26 +143,51 @@ def ingest_posted_range(company: str, title: str, jd_text: str, *,
 # ---------------------------------------------------------------------------
 
 # DOL column names drift by year; map every known variant to a canonical field.
+# Matching is case-insensitive and ignores surrounding whitespace.
 _LCA_COLUMNS: dict[str, list[str]] = {
-    "company": ["EMPLOYER_NAME", "Employer Name", "EMPLOYER_NAME "],
-    "title": ["JOB_TITLE", "Job Title", "SOC_TITLE"],
-    "city": ["WORKSITE_CITY", "Worksite City", "EMPLOYER_CITY"],
-    "state": ["WORKSITE_STATE", "Worksite State", "EMPLOYER_STATE"],
-    "worksite": ["WORKSITE", "Worksite", "WORKSITE_ADDRESS"],
-    "wage_from": ["WAGE_RATE_OF_PAY_FROM", "Wage Rate of Pay From", "WAGE_RATE_OF_PAY"],
-    "wage_to": ["WAGE_RATE_OF_PAY_TO", "Wage Rate of Pay To"],
-    "wage_unit": ["WAGE_UNIT_OF_PAY", "Wage Unit of Pay", "PAY_UNIT"],
-    "case_no": ["CASE_NUMBER", "Case Number"],
-    "status": ["CASE_STATUS", "Case Status"],
+    "company": ["EMPLOYER_NAME", "Employer Name", "EMPLOYER_NAME ",
+                "Company Name", "Employer"],
+    "title": ["JOB_TITLE", "Job Title", "SOC_TITLE", "Occupational Title",
+              "OCCUPATIONAL_TITLE"],
+    "city": ["WORKSITE_CITY", "Worksite City", "EMPLOYER_CITY", "City"],
+    "state": ["WORKSITE_STATE", "Worksite State", "EMPLOYER_STATE", "State"],
+    "worksite": ["WORKSITE", "Worksite", "WORKSITE_ADDRESS", "Worksite Address"],
+    "wage_from": ["WAGE_RATE_OF_PAY_FROM", "Wage Rate of Pay From",
+                  "WAGE_RATE_OF_PAY", "Wage Rate of Pay", "WAGE_FROM",
+                  "Prevailing Wage From"],
+    "wage_to": ["WAGE_RATE_OF_PAY_TO", "Wage Rate of Pay To",
+                "WAGE_TO", "Prevailing Wage To"],
+    "wage_unit": ["WAGE_UNIT_OF_PAY", "Wage Unit of Pay", "PAY_UNIT",
+                  "Wage Unit"],
+    "case_no": ["CASE_NUMBER", "Case Number", "Case No"],
+    "status": ["CASE_STATUS", "Case Status", "Status"],
 }
 
 
-def _pick(row: dict, field: str) -> str:
-    for variant in _LCA_COLUMNS[field]:
-        for key in row:
-            if key.strip().upper() == variant.strip().upper():
-                return (row[key] or "").strip()
-    return ""
+def _norm_header(h: str) -> str:
+    return (h or "").strip().upper()
+
+
+def _build_picker(fieldnames: list[str] | None) -> dict[str, str]:
+    """Map each canonical field to the actual header present in the file."""
+    picker: dict[str, str] = {}
+    if not fieldnames:
+        return picker
+    have = {_norm_header(h): h for h in fieldnames if h}
+    for field, variants in _LCA_COLUMNS.items():
+        for v in variants:
+            key = _norm_header(v)
+            if key in have and field not in picker:
+                picker[field] = have[key]
+                break
+    return picker
+
+
+def _pick(row: dict, picker: dict[str, str], field: str) -> str:
+    header = picker.get(field)
+    if header is None:
+        return ""
+    return (row.get(header) or "").strip()
 
 
 _WAGE_RE = re.compile(r"[\d,]+(?:\.\d+)?")
@@ -195,47 +220,60 @@ def import_lca(csv_path: str | Path, *, path: str | Path | None = None,
     conn = connect(path)
     imported = skipped = 0
     now = datetime.now().isoformat(timespec="seconds")
-    with p.open(newline="", encoding="utf-8", errors="replace") as f:
+    with p.open(newline="", encoding="utf-8-sig", errors="replace") as f:
         # sniff delimiter; DOL files are comma-separated
         sample = f.read(4096)
         f.seek(0)
-        dialect = csv.Sniffer().sniff(sample) if sample else csv.excel
+        try:
+            dialect = csv.Sniffer().sniff(sample) if sample.strip() else csv.excel
+        except csv.Error:
+            dialect = csv.excel
         reader = csv.DictReader(f, dialect=dialect)
+        picker = _build_picker(reader.fieldnames)
         for n, row in enumerate(reader, 1):
             if limit and n > limit:
                 break
             if progress_every and n % progress_every == 0:
                 print(f"  ... {n} rows scanned ({imported} imported)")
+            if not any((v or "").strip() for v in row.values()):
+                skipped += 1  # blank row
+                continue
             try:
                 if only_certified:
-                    status = _pick(row, "status").upper()
-                    if status and "CERTIFIED" not in status:
+                    status = _pick(row, picker, "status").upper()
+                    # 'CERTIFIED-WITHDRAWN' contains CERTIFIED but is not a live case
+                    certified = status.startswith("CERTIFIED") and "WITHDRAWN" not in status
+                    if status and not certified:
                         skipped += 1
                         continue
-                company = _pick(row, "company")
-                title = _pick(row, "title")
-                wage_from = _parse_wage(_pick(row, "wage_from"))
+                company = _pick(row, picker, "company")
+                title = _pick(row, picker, "title")
+                wage_from = _parse_wage(_pick(row, picker, "wage_from"))
                 if not company or not title or not wage_from:
                     skipped += 1
                     continue
-                wage_to = _parse_wage(_pick(row, "wage_to")) or wage_from
-                unit = _pick(row, "wage_unit").lower()
+                wage_to = _parse_wage(_pick(row, picker, "wage_to")) or wage_from
+                unit = _pick(row, picker, "wage_unit").lower()
                 mult = 1
                 for key, m in _UNIT_MULT.items():
                     if key in unit:
                         mult = m
                         break
                 low, high = sorted((wage_from * mult, wage_to * mult))
-                city = _pick(row, "city")
-                state = _pick(row, "state")
-                location = ", ".join(x for x in (city, state) if x) or _pick(row, "worksite")
+                if low <= 0 or high <= 0:
+                    skipped += 1
+                    continue
+                city = _pick(row, picker, "city")
+                state = _pick(row, picker, "state")
+                location = ", ".join(x for x in (city, state) if x) or _pick(row, picker, "worksite")
+                case_no = _pick(row, picker, "case_no")
                 conn.execute(
                     """INSERT INTO ranges
                        (company, title, location, low, high, currency, pay_period,
                         source, source_detail, retrieved_at)
                        VALUES (?, ?, ?, ?, ?, 'USD', 'year', 'dol_lca', ?, ?)""",
                     (company, title, location, low, high,
-                     f"LCA {_pick(row, 'case_no')}".strip(), now),
+                     f"LCA {case_no}".strip(), now),
                 )
                 imported += 1
             except Exception:
@@ -251,6 +289,18 @@ def import_lca(csv_path: str | Path, *, path: str | Path | None = None,
 
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
+
+
+def _percentile(sorted_vals: list[float], p: float) -> float | None:
+    """Linear-interpolation percentile of an already-sorted value list."""
+    n = len(sorted_vals)
+    if n == 0:
+        return None
+    if n == 1:
+        return round(sorted_vals[0], 2)
+    k = (n - 1) * p / 100
+    f, c = int(k), min(int(k) + 1, n - 1)
+    return round(sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f), 2)
 
 
 def lookup(company: str = "", title: str = "", location: str = "",
@@ -298,21 +348,58 @@ def lookup(company: str = "", title: str = "", location: str = "",
     mids = sorted((r[3] + r[4]) / 2 for r in bucket)
     n = len(mids)
 
-    def pct(p: float) -> float:
-        if n == 1:
-            return round(mids[0], 2)
-        k = (n - 1) * p / 100
-        f, c = int(k), min(int(k) + 1, n - 1)
-        return round(mids[f] + (mids[c] - mids[f]) * (k - f), 2)
-
     sources = sorted({f"{r[5]}:{r[6]}" for r in bucket if r[5]})
     return {
-        "p25": pct(25), "median": pct(50), "p75": pct(75), "n": n,
+        "p25": _percentile(mids, 25), "median": _percentile(mids, 50),
+        "p75": _percentile(mids, 75), "n": n,
         "sources": sources[:8],
         "matches": [
             {"company": r[0], "title": r[1], "location": r[2],
              "low": r[3], "high": r[4], "source": r[5]} for r in bucket[:10]
         ],
+    }
+
+
+def aggregate_by_title(title: str, path: str | Path | None = None) -> dict:
+    """Aggregate pay across companies for a job title.
+
+    Rows are grouped by normalized company; each company's midpoint
+    (median of its rows) feeds the p25/median/p75 so one heavy filer
+    can't dominate. Returns
+    {title, p25, median, p75, n (companies), companies: [{company, median, rows}]}.
+    """
+    conn = connect(path)
+    rows = conn.execute(
+        "SELECT company, title, location, low, high, source, source_detail FROM ranges"
+    ).fetchall()
+    conn.close()
+
+    t_toks = set(_norm(title).split())
+    by_company: dict[str, dict] = {}
+    for r in rows:
+        if not t_toks or t_toks & set(_norm(r[1]).split()):
+            key = _norm(r[0])
+            entry = by_company.setdefault(
+                key, {"company": r[0], "mids": []})
+            entry["mids"].append((r[3] + r[4]) / 2)
+
+    companies = []
+    for entry in by_company.values():
+        mids = sorted(entry["mids"])
+        companies.append({
+            "company": entry["company"],
+            "median": _percentile(mids, 50),
+            "rows": len(mids),
+        })
+    meds = sorted(c["median"] for c in companies if c["median"] is not None)
+    return {
+        "title": title,
+        "p25": _percentile(meds, 25),
+        "median": _percentile(meds, 50),
+        "p75": _percentile(meds, 75),
+        "n": len(meds),
+        "companies": sorted(companies, key=lambda c: c["median"] or 0,
+                            reverse=True),
     }
 
 
@@ -327,12 +414,48 @@ def render_lookup(result: dict, company: str = "", title: str = "",
         )
     what = " ".join(x for x in (company, title, location) if x)
     lines = [
-        f"Salary data for '{what}' (n={result['n']}):",
-        f"  p25:    ${result['p25']:,.0f}/yr",
-        f"  median: ${result['median']:,.0f}/yr",
-        f"  p75:    ${result['p75']:,.0f}/yr",
+        f"Salary for '{what}' (n={result['n']} data point{'s' if result['n'] != 1 else ''}):",
+        f"  p25    ${result['p25']:,.0f}/yr",
+        f"  median ${result['median']:,.0f}/yr",
+        f"  p75    ${result['p75']:,.0f}/yr",
         "",
-        "Sources (attribution preserved per row):",
     ]
-    lines += [f"  • {s}" for s in result["sources"]]
+    srcs = result.get("sources", [])
+    if srcs:
+        from collections import Counter
+        kinds = Counter(s.split(":", 1)[0] for s in srcs)
+        breakdown = ", ".join(f"{k} ({v} source ref{'s' if v != 1 else ''})"
+                              for k, v in sorted(kinds.items()))
+        lines.append(f"Sources: {breakdown} — attribution per row below.")
+        lines.append("")
+    matches = result.get("matches", [])
+    if matches:
+        lines.append("Top matches (range = annualized $/yr):")
+        for m in matches[:8]:
+            rng = f"${m['low']:,.0f}–${m['high']:,.0f}"
+            lines.append(f"  • {m['company']} — {m['title']} "
+                         f"({m['location'] or 'no location'}): {rng} "
+                         f"[{m['source']}]")
+    lines.append("")
+    lines.append("Tip: use these bands in `python -m candid negotiate` "
+                 "when a range comes up.")
+    return "\n".join(lines)
+
+
+def render_title_aggregation(agg: dict) -> str:
+    """Render aggregate_by_title output."""
+    if not agg.get("n"):
+        return (f"No salary data for title '{agg.get('title')}'. "
+                "Import DOL LCA data or parse posted ranges first.")
+    lines = [
+        f"Pay across companies for '{agg['title']}' ({agg['n']} companies):",
+        f"  p25    ${agg['p25']:,.0f}/yr",
+        f"  median ${agg['median']:,.0f}/yr",
+        f"  p75    ${agg['p75']:,.0f}/yr",
+        "",
+        "By company (median of that company's rows):",
+    ]
+    for c in agg["companies"][:12]:
+        lines.append(f"  • {c['company']}: ${c['median']:,.0f}/yr "
+                     f"({c['rows']} row{'s' if c['rows'] != 1 else ''})")
     return "\n".join(lines)

@@ -44,7 +44,12 @@ def _next_id(apps: list[dict]) -> int:
 
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         notes: str = "", path: str | Path | None = None) -> dict:
-    """Add an application. Returns the new record."""
+    """Add an application. Returns the new record.
+
+    If the same company+role is already tracked, returns the EXISTING
+    record (a copy) with ``"duplicate": True`` instead of duplicating —
+    no write happens. Check ``rec.get("duplicate")`` to tell the user.
+    """
     if not company or not role:
         raise TrackerError("Both --company and --role are required to add an application.")
     if status not in C.STATUSES:
@@ -52,10 +57,7 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     apps = _load(path)
     for a in apps:
         if a["company"].lower() == company.lower() and a["role"].lower() == role.lower():
-            raise TrackerError(
-                f"Duplicate: application #{a['id']} already tracks '{role}' @ '{company}' "
-                f"(status: {a['status']}). Use `track update` instead."
-            )
+            return {**a, "duplicate": True}
     rec = {
         "id": _next_id(apps),
         "company": company.strip(),
@@ -113,6 +115,36 @@ def list_apps(*, status: str | None = None, company: str | None = None,
     return sorted(apps, key=lambda a: a["id"])
 
 
+def search(query: str, path: str | Path | None = None) -> list[dict]:
+    """Case-insensitive search over company, role, notes, and jd_link."""
+    q = (query or "").strip().lower()
+    if not q:
+        return []
+    out = []
+    for a in _load(path):
+        hay = " ".join(str(a.get(f, "")) for f in
+                       ("company", "role", "notes", "jd_link")).lower()
+        if q in hay:
+            out.append(a)
+    return sorted(out, key=lambda a: a["id"])
+
+
+def export_csv(dest: str | Path, path: str | Path | None = None) -> Path:
+    """Export the tracker to a CSV file. Returns the destination path."""
+    import csv
+    apps = _load(path)
+    p = Path(dest)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fields = ["id", "company", "role", "status", "jd_link", "notes",
+              "date_added", "date_updated", "prep_pack"]
+    with p.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        w.writeheader()
+        for a in sorted(apps, key=lambda x: x.get("id", 0)):
+            w.writerow({k: a.get(k, "") for k in fields})
+    return p
+
+
 def stats(path: str | Path | None = None) -> dict:
     """Funnel stats: counts per status, response rate, interview rate, offer rate."""
     apps = _load(path)
@@ -132,6 +164,17 @@ def stats(path: str | Path | None = None) -> dict:
     }
 
 
+# per-status next-action hints shown under each row of render_list
+NEXT_ACTIONS = {
+    "saved": "tailor resume + apply",
+    "applied": "follow up if quiet > 14d",
+    "selected_for_interview": "build a prep pack",
+    "offer": "compare + negotiate",
+    "rejected": "note lessons, keep moving",
+    "withdrawn": "—",
+}
+
+
 def render_list(apps: list[dict]) -> str:
     if not apps:
         return "No applications tracked yet. Add one with: python -m candid track add --company X --role Y"
@@ -141,6 +184,9 @@ def render_list(apps: list[dict]) -> str:
             f"{a['id']:<4}{a['company'][:21]:<22}{a['role'][:33]:<34}"
             f"{a['status']:<22}{a.get('date_updated', '')}"
         )
+        hint = NEXT_ACTIONS.get(a.get("status", ""), "")
+        if hint and hint != "—":
+            lines.append(f"      → next: {hint}")
     return "\n".join(lines)
 
 

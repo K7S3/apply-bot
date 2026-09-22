@@ -68,7 +68,45 @@ would take in the first year, in writing?"
 
 *Why it works:* level compounds — it sets your band for every future raise
 and refresh.""",
+    "leveling_up_push": """### Script: push for a higher level (not just more money)
+
+"Thanks for the offer - I'm excited about the role. Before we talk numbers, I
+want to make sure the level is right: the scope we discussed (owning {scope})
+looks like {target_level} work to me, and leveling affects my comp band, equity
+refreshers, and growth trajectory for the next four years.
+
+If {offered_level} is where you see me starting, can we put a written plan in
+place - what I'd need to demonstrate in the first {review_months} months to earn
+{target_level}, with a compensation true-up at that point?"
+
+*Why it works:* you are negotiating trajectory, not just salary - and a written
+plan turns a "no" on level into a "yes, with milestones." Get the plan in the
+offer letter, not just verbal.""",
+    "remote_flexibility": """### Script: remote / hybrid flexibility ask
+
+"I'm excited about the offer and the team. One thing that matters a lot for how
+I do my best work: flexibility on where I work. Would {remote_ask} be possible -
+for example, {example_schedule}?
+
+I'm fully committed to being present for {onsite_commitment} (team onsites,
+planning weeks, customer visits). For me this is about sustained focus time, not
+about opting out."
+
+*Why it works:* you name the specific ask, pre-empt the collaboration worry, and
+frame it as a performance point rather than a perk. Ask before you sign -
+flexibility agreed verbally has a way of evaporating.""",
 }
+
+PRECALL_CHECKLIST = """### Pre-call checklist (10 minutes before any negotiation call)
+
+- [ ] Your target number, your walk-away number, and your BATNA - written down, in front of you
+- [ ] The 2-3 market data points you will cite (role, level, location)
+- [ ] Which levers you will trade: base, sign-on, equity, level, start date, remote
+- [ ] One sentence on why *this* role excites you (enthusiasm is leverage too)
+- [ ] Silence practice: after you name your number, stop talking and let them respond
+- [ ] Never accept on the call: "I'm excited - can I have until [date] to review properly?"
+- [ ] Water nearby; smile - they can hear it on the phone
+"""
 
 DONT_SAY = """### What not to say (and what to say instead)
 
@@ -131,8 +169,8 @@ def counter_email(name: str, recruiter: str, role: str, company: str,
 
 
 def render_playbook() -> str:
-    """Full negotiation playbook: BATNA + all scripts + don't-say list."""
-    parts = [BATNA_GUIDE, ""]
+    """Full negotiation playbook: BATNA + checklist + all scripts + don't-say list."""
+    parts = [BATNA_GUIDE, "", PRECALL_CHECKLIST, ""]
     for key in SCRIPTS:
         parts.append(SCRIPTS[key].split("\n")[0])
         parts.append("(run `negotiate script --which {}` with your details to fill it in)".format(key))

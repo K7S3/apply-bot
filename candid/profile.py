@@ -145,39 +145,165 @@ _DATE_RE = re.compile(
     re.I,
 )
 
+_BULLET_MARK = re.compile(r"^[•·▪◦▪\-\*\+–—>]\s*")
+_LOCATION_LINE_RE = re.compile(
+    r"^[A-Z][A-Za-z .'\-]+,\s*(?:[A-Z]{2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+    r"(?:\s*,\s*(?:United States|USA|India|Canada|UK|Remote))?$"
+)
+_EMPLOYMENT_TYPE_RE = re.compile(
+    r"\s*[·•|]\s*(Full-time|Part-time|Contract|Contractor|Internship|"
+    r"Self-employed|Freelance|Temporary)\s*$",
+    re.I,
+)
+
+
+def _strip_location(line: str) -> str:
+    """Strip location suffixes from a title/company line.
+
+    Handles both 'Meridian Financial · New York, NY' and
+    'New York, NY' location lines on their own (returns "" for those).
+    """
+    s = line.strip()
+    if _LOCATION_LINE_RE.match(s):
+        return ""
+    # 'Company · City, ST' → keep the company part
+    if "·" in s:
+        first = s.split("·")[0].strip()
+        if first:
+            return first
+    return s
+
+
+def _clean_company_name(company: str) -> str:
+    company = _EMPLOYMENT_TYPE_RE.sub("", company).strip()
+    company = _strip_location(company)
+    # 'Acme Corp, New York, NY' → 'Acme Corp'
+    company = re.split(r",\s*(?=[A-Z][a-z])", company)[0].strip()
+    return company
+
+
+def _looks_like_header_line(line: str) -> bool:
+    """Could this line be a title or company line (multi-line header block)?"""
+    if len(line) > 90 or len(line) < 2:
+        return False
+    if _BULLET_MARK.match(line) or re.match(r"^\d{1,2}[.)]\s+", line):
+        return False
+    if "@" in line or re.search(r"\d{3}[-.\s]\d{3}[-.\s]\d{4}", line):
+        return False
+    if _LOCATION_LINE_RE.match(line):
+        return False
+    return True
+
 
 def _parse_experience(lines: list[str]) -> list[dict]:
     """Parse experience bullets into {title, company, dates, bullets} entries.
 
-    Heuristic: a line containing a date range starts a new entry; the text
-    before the date range is split into title/company on '—', '-', '@', '|'.
+    Handles three header shapes:
+      1. single-line: 'Title — Company, Jan 2020 - Present'
+      2. 'Title at Company, Jan 2020 - Present' (LinkedIn PDF text)
+      3. multi-line (LinkedIn export style):
+             Title
+             Company · Full-time
+             Jan 2020 - Present · 4 yrs
+
+    Two passes: first find every date line (an entry starts there), scanning
+    up to two lines back for a detached title/company block; then attribute
+    the lines between entries as bullets of the preceding entry.
     """
-    entries: list[dict] = []
-    current: dict | None = None
-    for raw in lines:
-        line = raw.strip()
+    clean = [raw.strip() for raw in lines]
+    n = len(clean)
+    events: list[dict] = []
+
+    for i, line in enumerate(clean):
         if not line:
             continue
         m = _DATE_RE.search(line)
-        if m and len(line) < 160:
-            head = line[: m.start()].strip(" –—-|,@")
-            parts = re.split(r"\s+[—–|@]\s+|\s+-\s+", head)
-            parts = [p.strip() for p in parts if p.strip()]
-            title = parts[0] if parts else head
-            company = parts[1].split(",")[0].strip() if len(parts) > 1 else ""
-            current = {
-                "title": title,
-                "company": company,
-                "dates": m.group(0).strip(),
-                "bullets": [],
-            }
-            entries.append(current)
-        elif current is not None and len(line) > 10:
-            current["bullets"].append(line.strip(" •·-*").strip())
-        elif current is None and len(line) > 10 and len(entries) == 0:
-            # bullet before any dated header — stash for the head summary
-            pass
+        if not (m and len(line) < 160):
+            continue
+        head = line[: m.start()].strip(" –—-|,@")
+        parts = [p.strip() for p in
+                 re.split(r"\s+[—–|@]\s+|\s+-\s+|\s+at\s+", head, flags=re.I)
+                 if p.strip()]
+        title = parts[0] if parts else ""
+        company = parts[1] if len(parts) > 1 else ""
+        hdr_start = i  # first line belonging to this entry's header block
+        if not title:
+            # detached header block: up to 2 short non-bullet lines above
+            hdr: list[str] = []
+            j = i - 1
+            while j >= 0 and len(hdr) < 2 and clean[j] and \
+                    _looks_like_header_line(clean[j]) and \
+                    not _DATE_RE.search(clean[j]):
+                hdr.append(clean[j])
+                j -= 1
+            hdr.reverse()
+            if hdr:
+                hdr_start = i - len(hdr)
+                if len(hdr) >= 2:
+                    title, company = hdr[-2], hdr[-1]
+                else:
+                    title = hdr[-1]
+                # 'Title at Company' on one detached line
+                if not company:
+                    parts2 = [p.strip() for p in
+                              re.split(r"\s+[—–|@]\s+|\s+-\s+|\s+at\s+",
+                                       title, flags=re.I) if p.strip()]
+                    if len(parts2) >= 2:
+                        title, company = parts2[0], parts2[1]
+        events.append({
+            "i": i, "hdr_start": hdr_start,
+            "title": _strip_location(title),
+            "company": _clean_company_name(company),
+            "dates": m.group(0).strip(),
+        })
+
+    entries: list[dict] = []
+    for ei, ev in enumerate(events):
+        next_hdr = events[ei + 1]["hdr_start"] if ei + 1 < len(events) else n
+        bullets: list[str] = []
+        for line in clean[ev["i"] + 1:next_hdr]:
+            if not line or _LOCATION_LINE_RE.match(line):
+                continue  # blank or a leftover location line
+            bullets.append(_BULLET_MARK.sub("", line).strip())
+        entries.append({
+            "title": ev["title"],
+            "company": ev["company"],
+            "dates": ev["dates"],
+            "bullets": [b for b in bullets if b],
+        })
     return entries
+
+
+def _norm_text(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _dedupe_experience(entries: list[dict]) -> list[dict]:
+    """Merge duplicate entries (same normalized title+company).
+
+    Happens when a resume and a LinkedIn export overlap: keep the first
+    entry, union the bullets, and prefer the longer dates string.
+    """
+    merged: list[dict] = []
+    index: dict[tuple[str, str], int] = {}
+    for e in entries:
+        key = (_norm_text(e.get("title", "")), _norm_text(e.get("company", "")))
+        if key == ("", "") or key not in index:
+            index.setdefault(key, len(merged))
+            merged.append(e)
+            continue
+        base = merged[index[key]]
+        seen = {b.lower() for b in base.get("bullets", [])}
+        for b in e.get("bullets", []):
+            if b and b.lower() not in seen:
+                base["bullets"].append(b)
+                seen.add(b.lower())
+        if len(e.get("dates", "") or "") > len(base.get("dates", "") or ""):
+            base["dates"] = e["dates"]
+        for f in ("title", "company"):
+            if not base.get(f) and e.get(f):
+                base[f] = e[f]
+    return merged
 
 
 def _parse_education(lines: list[str]) -> list[dict]:
@@ -266,9 +392,21 @@ def build_profile(texts: list[str], source_files: list[str] | None = None) -> di
     for key in ("skills", "technical skills", "core skills"):
         skill_lines.extend(sections.get(key, []))
 
-    experience = _parse_experience(exp_lines)
+    experience = _dedupe_experience(_parse_experience(exp_lines))
     education = _parse_education(edu_lines)
-    skills = _extract_skills(" ".join(skill_lines) or combined)
+
+    # Layered skill extraction: an explicit skills section wins; when there
+    # is none, mine the experience bullets/titles; last resort: whole text.
+    skills = _extract_skills(" ".join(skill_lines))
+    if not skills:
+        exp_text = " ".join(
+            [e.get("title", "") for e in experience]
+            + [b for e in experience for b in e.get("bullets", [])]
+        )
+        skills = _extract_skills(exp_text)
+    if not skills:
+        skills = _extract_skills(combined)
+
     years = _years_from_dates(experience)
     seniority = _seniority_for(years, [e["title"] for e in experience])
 
@@ -285,8 +423,89 @@ def build_profile(texts: list[str], source_files: list[str] | None = None) -> di
         "education": education,
         "years_experience": years,
         "seniority": seniority,
+        "domains": infer_domains({
+            "headline": headline, "experience": experience,
+        }),
         "source_files": source_files or [],
     }
+
+
+# ---------------------------------------------------------------------------
+# domain tags + validation (onboarding UX)
+# ---------------------------------------------------------------------------
+
+# domain tag -> match keywords (checked against titles + headline + companies)
+_DOMAIN_SIGNALS: dict[str, list[str]] = {
+    "data science": [r"\bdata scient", r"\bmachine learning\b", r"\bml engineer\b",
+                     r"\banalytics\b", r"\bstatistic"],
+    "software engineering": [r"\bsoftware engineer\b", r"\bbackend\b", r"\bfrontend\b",
+                             r"\bfull[\s-]?stack\b", r"\bsde\b", r"\bdeveloper\b"],
+    "ml platform / mlops": [r"\bmlops\b", r"\bml platform\b", r"\bplatform engineer\b",
+                            r"\binfrastructure\b", r"\bdevops\b"],
+    "ads / monetization": [r"\bads?\b", r"\badvertising\b", r"\bmonetization\b",
+                           r"\branking\b"],
+    "finance": [r"\bfinanc", r"\bbank\b", r"\bcapital\b", r"\btrading\b",
+                r"\bfintech\b", r"\bquant\b"],
+    "product": [r"\bproduct manager\b", r"\bproduct analyst\b", r"\bproduct\b"],
+    "research": [r"\bresearch scientist\b", r"\bresearch\b", r"\bph\.?d\b"],
+    "data engineering": [r"\bdata engineer\b", r"\betl\b", r"\bpipeline\b",
+                         r"\bwarehouse\b"],
+    "consulting": [r"\bconsultant\b", r"\bconsulting\b"],
+}
+
+
+def infer_domains(profile: dict) -> list[str]:
+    """Infer domain-expertise tags from titles, companies, and headline."""
+    text = " ".join(
+        [e.get("title", "") + " " + e.get("company", "")
+         for e in profile.get("experience", [])]
+        + [profile.get("headline", "")]
+    ).lower()
+    return sorted(
+        tag for tag, patterns in _DOMAIN_SIGNALS.items()
+        if any(re.search(p, text) for p in patterns)
+    )
+
+
+def validate_profile(profile: dict) -> list[dict]:
+    """Check a profile for onboarding problems.
+
+    Returns a list of {field, severity, message}; empty means the profile
+    is ready to use. ``error`` blocks downstream features; ``warning`` is
+    advice shown during onboarding.
+    """
+    problems: list[dict] = []
+    if not (profile.get("name") or "").strip():
+        problems.append({
+            "field": "name", "severity": "error",
+            "message": "Name not detected — put your name on the first line of your resume.",
+        })
+    if not profile.get("skills"):
+        problems.append({
+            "field": "skills", "severity": "error",
+            "message": "No skills detected — add a Skills section (or mention tools in your bullets).",
+        })
+    if not profile.get("experience"):
+        problems.append({
+            "field": "experience", "severity": "error",
+            "message": "No experience entries detected — add dated role headers like 'Title — Company, 2020 - Present'.",
+        })
+    if not (profile.get("headline") or "").strip():
+        problems.append({
+            "field": "headline", "severity": "warning",
+            "message": "No headline detected — a one-line role summary helps matching.",
+        })
+    if not (profile.get("location") or "").strip():
+        problems.append({
+            "field": "location", "severity": "warning",
+            "message": "No location detected — location filters work better with one.",
+        })
+    if not profile.get("education"):
+        problems.append({
+            "field": "education", "severity": "warning",
+            "message": "No education entries detected — optional, but some roles filter on it.",
+        })
+    return problems
 
 
 def onboard(resume_path: str | Path | None = None,

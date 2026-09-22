@@ -1,0 +1,74 @@
+{
+  "id": "valid-parentheses",
+  "title": "Valid Parentheses",
+  "topic": "strings",
+  "difficulty": "easy",
+  "statement": "Given a string `s` containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.\n\nA string is valid if open brackets are closed by the same type of bracket, in the correct order, and every close bracket has a matching open.\n\nExample: s = \"()[]{}\" -> True; s = \"(]\" -> False",
+  "function": "solve(s)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        "()"
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "()[]{}"
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "(]"
+      ],
+      "expected": false
+    },
+    {
+      "args": [
+        "([)]"
+      ],
+      "expected": false
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        ""
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "{[]}"
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "((("
+      ],
+      "expected": false
+    },
+    {
+      "args": [
+        "(){}}{"
+      ],
+      "expected": false
+    },
+    {
+      "args": [
+        "(([]){})"
+      ],
+      "expected": true
+    }
+  ],
+  "hints": [
+    "A stack is the natural tool: push opening brackets, pop on closing ones.",
+    "When you see a closing bracket, the top of the stack must be its matching opener.",
+    "At the end the stack must be empty. A closing bracket with an empty stack is an instant False."
+  ],
+  "reference_solution": "def solve(s):\n    pairs = {')': '(', ']': '[', '}': '{'}\n    stack = []\n    for ch in s:\n        if ch in pairs:\n            if not stack or stack.pop() != pairs[ch]:\n                return False\n        else:\n            stack.append(ch)\n    return not stack\n",
+  "complexity": "Time O(n), one pass. Space O(n) for the stack in the worst case."
+}

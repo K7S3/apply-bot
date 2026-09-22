@@ -17,8 +17,8 @@ power (sample size), peeking (don't stop early), and guardrails (don't break
 something else while improving one metric).
 
 **Worked example.** New checkout button: 100k users/day, baseline conversion
-5%. To detect a +0.3pp lift at 80% power, α=0.05, you need ~140k users per arm
-(≈3 days). Pre-register the primary metric, set a fixed runtime, and watch
+5%. To detect a +0.3pp lift at 80% power, α=0.05, you need ~85k users per arm
+(≈2 days at a 50/50 split). Pre-register the primary metric, set a fixed runtime, and watch
 guardrails (latency, error rate). If you peek daily and stop at the first
 significant day, your false-positive rate is far above 5%.
 
@@ -274,29 +274,269 @@ size, and data-parallel with overlap of communication and compute."
 
 **Follow-ups to expect.** "Why loss scaling?" → FP16's narrow range
 underflows small gradients; scaling keeps them representable.""",
+    "star_framework": """### The STAR Framework for Behavioral Questions
+
+**The idea in 60 seconds.** Behavioral questions test whether you have actually
+done the thing, not whether you can describe it. STAR gives the answer a spine:
+Situation (one or two sentences of context), Task (what you personally owned),
+Action (the 2-3 specific things *you* did, in order), Result (the measurable
+outcome, plus what you learned). The classic failure mode is 90% situation and
+one vague sentence of action. Flip it: most of your time belongs on A and R.
+
+**Worked example.** "Tell me about a time you disagreed with a stakeholder."
+Weak: "We had a disagreement about the model launch timeline..." (then rambles).
+STAR: "S: our risk team wanted a 6-week manual review before launching a fraud
+model. T: I owned the launch decision and the fraud-loss number. A: I built a
+shadow-mode evaluation on 2 weeks of live traffic, showed the model's
+false-positive rate beat their manual-review baseline, and proposed a canary
+launch with a kill switch. R: they signed off; we launched in 1 week and cut
+fraud losses 22%."
+
+**How to answer.** Prepare 5-6 stories that each cover multiple themes (impact,
+conflict, failure, leadership, ambiguity). Open with the result as a headline,
+then rewind: "We cut fraud losses 22%. Here is how..." Always name your personal
+contribution explicitly; "we" hides your signal.
+
+**Follow-ups to expect.** "What would you do differently?" → show reflection,
+not regret. "What was *your* contribution vs the team's?" → answer with verbs
+only you performed.""",
+    "load_balancing": """### Load Balancing: Distributing Traffic Across Servers
+
+**The idea in 60 seconds.** A load balancer sits in front of your servers and
+decides which one handles each request, so no single machine drowns while others
+idle. Strategies: round-robin (simple, assumes equal capacity),
+least-connections (sends to the emptiest server), IP-hash (sticky sessions for
+stateful services), and weighted (for heterogeneous hardware). Layer 4 balances
+on TCP/UDP (fast, dumb); Layer 7 understands HTTP (routes by path, header, or
+cookie).
+
+**Worked example.** An API with 3 app servers behind a balancer: round-robin
+works until one server runs a heavier model version and slows down.
+Least-connections adapts automatically. For a websocket chat service, IP-hash
+pins a user's connection to the same server so in-memory session state survives.
+
+**How to answer.** "I would put a Layer 7 balancer in front of stateless app
+servers, use least-connections or weighted round-robin, health-check
+aggressively, and keep session state out of the servers (Redis) so any server
+can serve any request."
+
+**Follow-ups to expect.** "What if the load balancer itself dies?" →
+active-passive pair with a floating IP, or DNS-based failover. "Sticky sessions
+vs shared state?" → shared state scales; sticky sessions are a crutch with
+failure modes.""",
+    "caching": """### Caching Strategies: Speed vs Freshness
+
+**The idea in 60 seconds.** Caching trades freshness for speed: store expensive
+results close to the reader and serve them again. The decisions that matter:
+what to cache (hot, expensive-to-compute, tolerant of staleness), where (client,
+CDN, in-memory like Redis, or the database query cache), and invalidation (the
+hard part). Patterns: cache-aside (app checks cache, falls back to DB, then
+populates), write-through (write to cache and DB together), write-behind (cache
+first, DB async), and TTL expiry (accept bounded staleness).
+
+**Worked example.** A product page doing 10k reads/sec with a 200ms DB query:
+cache-aside in Redis with a 60s TTL drops p99 to 5ms. When the price changes,
+the writer deletes the cache key (invalidation on write) so nobody sees a stale
+price beyond the TTL.
+
+**How to answer.** Name the pattern, the TTL, and the invalidation story: "I
+would use cache-aside with a 60-second TTL for reads, explicit invalidation on
+writes, and a stale-while-revalidate fallback so a cold cache never blocks the
+page."
+
+**Follow-ups to expect.** "Thundering herd on cache expiry?" → jittered TTLs,
+request coalescing, or background refresh. "Cache penetration (misses for keys
+that never exist)?" → bloom filter, or cache the negative result briefly.""",
+    "message_queues": """### Message Queues and Async Processing
+
+**The idea in 60 seconds.** A queue decouples "request received" from "work
+done": the API writes a message and returns fast; workers drain the queue at
+their own pace. This absorbs traffic spikes, survives worker crashes (messages
+persist), and lets you retry failures. The tradeoff: eventual consistency and
+operational complexity (dead-letter queues, poison messages, ordering).
+
+**Worked example.** Image uploads: the API stores the file, publishes
+{"image_id": ...} to a queue, and returns 202 immediately. Workers resize,
+thumbnail, and run classification. If a worker crashes mid-job, the message
+reappears after the visibility timeout and another worker picks it up. Poison
+messages (corrupt files) go to a dead-letter queue after 3 failures instead of
+blocking the line forever.
+
+**How to answer.** "For anything slower than ~200ms or bursty, I would put it
+behind a queue: API returns fast, workers scale on queue depth, retries with
+backoff, a dead-letter queue for poison messages, and idempotent workers so
+redelivery is safe."
+
+**Follow-ups to expect.** "At-least-once vs exactly-once?" → exactly-once is a
+myth in distributed systems; design idempotent consumers. "Ordering?" → FIFO
+queues or partition by key; most queues only guarantee it within a partition.""",
+    "exp_pitfalls": """### Experimentation Pitfalls: Novelty, Interference, Peeking
+
+**The idea in 60 seconds.** A/B tests fail in predictable ways beyond bad math.
+Novelty effect: users click the new thing because it is new, then revert - run
+long enough to see the decay, or split new vs existing users. Network effects /
+interference: in social or marketplace products, treating one user changes
+outcomes for others - use cluster randomization or switchback designs. Peeking:
+checking daily and stopping at the first significant result inflates false
+positives far above 5%. Seasonality: short tests miss weekly cycles.
+
+**Worked example.** Testing a feed ranking change at a social app: user-level
+randomization leaks because treated users' posts reach control users. A
+switchback (time-based) design or geo-cluster randomization isolates the effect.
+And when the new ranking wins week 1 but the lift decays by week 3, that is
+novelty - not a real win.
+
+**How to answer.** "I would ask three questions before trusting any test: is
+there interference between units, could this be novelty, and was the stopping
+rule pre-registered? Then pick the design that survives the answers."
+
+**Follow-ups to expect.** "How do you size a switchback test?" → power comes
+from the number of switch periods, not users. "Guardrail tripped but the primary
+is green?" → no launch; the guardrail exists for exactly this case.""",
+    "bias_variance": """### Bias-Variance Tradeoff
+
+**The idea in 60 seconds.** Expected error decomposes into bias (error from
+wrong assumptions - underfitting), variance (error from sensitivity to the
+training sample - overfitting), and irreducible noise. Simple models have high
+bias and low variance; complex models flip it. The interview trap: "more data"
+fixes variance, not bias. If your model is too simple for the pattern, 10x data
+just makes it confidently wrong.
+
+**Worked example.** Predicting house prices: linear regression on square footage
+underfits (high bias) - adding data barely helps. A 12-degree polynomial nails
+training data but swings wildly on new neighborhoods (high variance). Fix for
+variance: more data, regularization, or a simpler model. Fix for bias: richer
+features or a more expressive model. Learning curves diagnose which: training and
+validation error both plateau high → bias; a gap between them → variance.
+
+**How to answer.** "I would plot learning curves first. Both errors high and
+flat: add features or model capacity. Big train/val gap: regularize, get more
+data, or simplify."
+
+**Follow-ups to expect.** "Where does regularization sit?" → it trades a little
+bias for a lot less variance. "Does ensembling reduce bias or variance?" →
+bagging cuts variance; boosting cuts bias (then variance, if you are careless).""",
+    "class_imbalance": """### Handling Imbalanced Classification
+
+**The idea in 60 seconds.** When positives are 1% of data, accuracy is a lie (a
+constant "no" scores 99%). Optimize the right metric: PR-AUC or F1 over ROC-AUC,
+and always look at the confusion matrix at your operating threshold. Levers:
+class weights (scale_pos_weight), resampling (SMOTE or undersampling - but never
+resample the validation set), threshold tuning on a calibrated model, and an
+anomaly-detection framing when positives are truly rare.
+
+**Worked example.** Fraud at 0.5% prevalence: train XGBoost with a class weight
+around 200, early-stop on PR-AUC with a time-split validation set, then pick the
+threshold that hits the business constraint (e.g., review capacity of 500
+cases/day) rather than the default 0.5. Report expected precision at that
+threshold, not accuracy.
+
+**How to answer.** "First I would fix the metric - PR-AUC and precision at the
+operating threshold. Then class weights, then threshold tuning against the real
+business constraint. And I would keep the validation set at natural prevalence
+so the numbers mean something."
+
+**Follow-ups to expect.** "Why not just oversample?" → duplicates leak into
+validation if you are sloppy, and it distorts calibration. "Your model says 99%
+accuracy - ship it?" → no; show me the confusion matrix.""",
+    "data_leakage": """### Data Leakage: The Silent Model Killer
+
+**The idea in 60 seconds.** Leakage is when training data contains information
+that will not be available at prediction time - the model learns to cheat and
+your offline metrics lie. Classic sources: target-derived features
+("days_until_churn" computed from the churn date), future information in time
+data (random splits instead of time splits), preprocessing fit on the full
+dataset (scaling/imputation before the split), and duplicates across train/test.
+
+**Worked example.** A churn model with "last_login_days_ago" computed as
+(churn_date minus last_login): for churned users this encodes the answer, so the
+model looks perfect offline and flops in production. The fix: compute every
+feature as-of the prediction timestamp, use time-based splits, and fit all
+preprocessing inside the training fold only.
+
+**How to answer.** "I audit features with one question: could I compute this at
+prediction time with only data available then? And I validate with time splits,
+never random splits, on time-ordered data."
+
+**Follow-ups to expect.** "Offline AUC 0.97 but production is 0.62 - diagnose?"
+→ leakage is suspect #1; check feature timestamps and split strategy before
+anything else.""",
+    "embeddings_search": """### Embeddings and Vector Search
+
+**The idea in 60 seconds.** Embeddings turn text (or images) into dense vectors
+where distance means semantic similarity - the foundation of modern retrieval.
+The pipeline: choose an embedding model (general vs domain-fine-tuned), chunk
+documents (size and overlap matter), index with an ANN algorithm (HNSW for
+recall, IVF for scale), and retrieve with hybrid dense + keyword (BM25) plus a
+reranker for precision. Failure modes live in chunking (answers split across
+chunks), stale indexes, and embedding drift after model swaps.
+
+**Worked example.** Support-docs search over 200k articles: 512-token chunks
+with overlap, a fine-tuned embedding model, an HNSW index, hybrid retrieval
+(vector + BM25), and a cross-encoder rerank of the top-50 down to 5. Eval on a
+golden set of real support questions: recall@5 and whether the retrieved chunk
+actually contains the answer, not just keyword overlap.
+
+**How to answer.** "I would start with chunking strategy and a golden eval set,
+because retrieval quality is bounded by both. Then hybrid retrieval plus
+reranking - dense alone misses exact terms like error codes, keyword alone
+misses paraphrases."
+
+**Follow-ups to expect.** "How do you pick chunk size?" → tradeoff: small chunks
+are precise but lose context; test empirically on your golden set. "What changes
+at 100M vectors?" → sharding, quantization (scalar/product), and IVF instead of
+flat HNSW.""",
+    "sql_joins_groupby": """### Advanced SQL: Joins, Grouping, and Dedup
+
+**The idea in 60 seconds.** Most analytics bugs are join bugs. Know your joins
+cold: INNER (matches only), LEFT (keep all left rows), FULL OUTER (keep both),
+CROSS (cartesian - usually a mistake), and SEMI/ANTI patterns (EXISTS / NOT IN
+for "has at least one" / "has none"). After joining, GROUP BY with HAVING
+filters groups (WHERE filters rows, before grouping). Dedup with ROW_NUMBER()
+partitioned by the natural key, keeping rn = 1 by your preferred ordering.
+
+**Worked example.** "Users who bought in January but not February": anti-join -
+SELECT jan.user_id FROM jan_purchasers jan LEFT JOIN feb_purchasers feb
+ON jan.user_id = feb.user_id WHERE feb.user_id IS NULL. The LEFT JOIN + IS NULL
+pattern is the workhorse; NOT IN silently returns nothing if the right side has
+a single NULL.
+
+**How to answer.** Narrate the grain first: "one row per user per month, so I
+join at user grain, then..." Always state what a LEFT JOIN does to row counts -
+fan-out from a one-to-many join is the #1 silent bug.
+
+**Follow-ups to expect.** "Why did your counts double after the join?" →
+fan-out: the dimension table was not unique on the join key. Fix: dedup first,
+or aggregate before joining.""",
 }
 
 # question category -> concept tags
 CATEGORY_CONCEPTS: dict[str, list[str]] = {
-    "stats": ["ab_testing", "pvalues", "causal_inference"],
-    "case": ["metrics_trees", "ab_testing"],
+    "stats": ["ab_testing", "pvalues", "causal_inference", "exp_pitfalls"],
+    "case": ["metrics_trees", "ab_testing", "exp_pitfalls"],
     "product": ["metrics_trees", "guardrails"],
-    "sql": ["sql_window", "star_schema"],
+    "sql": ["sql_window", "star_schema", "sql_joins_groupby"],
     "python": ["sql_window"],
-    "ml": ["xgboost_vs_rf", "transformers", "llm_eval"],
-    "system_design": ["ml_system_design", "rag_design", "gpu_training"],
-    "behavioral": [],
+    "ml": ["xgboost_vs_rf", "transformers", "llm_eval", "bias_variance",
+           "class_imbalance", "data_leakage", "embeddings_search"],
+    "system_design": ["ml_system_design", "rag_design", "gpu_training",
+                      "load_balancing", "caching", "message_queues"],
+    "behavioral": ["star_framework"],
     "quant": ["pvalues"],
-    "process": [],
+    "process": ["load_balancing", "caching"],
 }
 
 ROLE_FAMILY_CONCEPTS: dict[str, list[str]] = {
-    "data_scientist": ["ab_testing", "metrics_trees", "xgboost_vs_rf"],
-    "ml_engineer": ["ml_system_design", "llm_eval", "rag_design", "gpu_training"],
-    "data_analyst": ["sql_window", "metrics_trees", "ab_testing"],
-    "data_engineer": ["sql_window", "star_schema"],
+    "data_scientist": ["ab_testing", "metrics_trees", "xgboost_vs_rf",
+                       "data_leakage", "bias_variance", "exp_pitfalls"],
+    "ml_engineer": ["ml_system_design", "llm_eval", "rag_design", "gpu_training",
+                    "embeddings_search"],
+    "data_analyst": ["sql_window", "metrics_trees", "ab_testing",
+                     "sql_joins_groupby"],
+    "data_engineer": ["sql_window", "star_schema", "message_queues"],
     "quant": ["pvalues", "causal_inference"],
-    "software_engineer": ["ml_system_design"],
+    "software_engineer": ["load_balancing", "caching", "message_queues"],
+    "product_manager": ["metrics_trees", "guardrails"],
 }
 
 DAY_BEFORE_CHECKLIST = """### Day-Before Checklist

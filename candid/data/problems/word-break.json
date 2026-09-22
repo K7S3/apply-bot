@@ -1,0 +1,110 @@
+{
+  "id": "word-break",
+  "title": "Word Break",
+  "topic": "dp",
+  "difficulty": "medium",
+  "statement": "Given a string `s` and a list of strings `word_dict`, return True if `s` can be segmented into a space-separated sequence of one or more dictionary words. The same word may be reused.\n\nExample: s = \"leetcode\", word_dict = [\"leet\",\"code\"] -> True",
+  "function": "solve(s, word_dict)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        "leetcode",
+        [
+          "leet",
+          "code"
+        ]
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "applepenapple",
+        [
+          "apple",
+          "pen"
+        ]
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "catsandog",
+        [
+          "cats",
+          "dog",
+          "sand",
+          "and",
+          "cat"
+        ]
+      ],
+      "expected": false
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        "",
+        [
+          "a"
+        ]
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "a",
+        [
+          "b"
+        ]
+      ],
+      "expected": false
+    },
+    {
+      "args": [
+        "aaaaaaa",
+        [
+          "aaaa",
+          "aaa"
+        ]
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "cars",
+        [
+          "car",
+          "ca",
+          "rs"
+        ]
+      ],
+      "expected": true
+    },
+    {
+      "args": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+        [
+          "a",
+          "aa",
+          "aaa",
+          "aaaa",
+          "aaaaa",
+          "aaaaaa",
+          "aaaaaaa",
+          "aaaaaaaa",
+          "aaaaaaaaa",
+          "aaaaaaaaaa"
+        ]
+      ],
+      "expected": false
+    }
+  ],
+  "hints": [
+    "Think about prefixes: if s[:i] can be segmented and s[i:j] is a word, then s[:j] can be segmented.",
+    "A boolean dp array where dp[i] means 's[:i] is segmentable' turns this into O(n^2).",
+    "Put word_dict in a set for O(1) lookups; only extend j as far as the longest word."
+  ],
+  "reference_solution": "def solve(s, word_dict):\n    words = set(word_dict)\n    n = len(s)\n    dp = [False] * (n + 1)\n    dp[0] = True\n    for i in range(n):\n        if not dp[i]:\n            continue\n        for w in words:\n            if s.startswith(w, i):\n                dp[i + len(w)] = True\n    return dp[n]\n",
+  "complexity": "Time O(n * m) where m is the longest word (substring checks). Space O(n) for the dp array."
+}

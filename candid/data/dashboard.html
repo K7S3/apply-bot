@@ -14,22 +14,30 @@
   body{margin:0;background:var(--bg);color:var(--text);
        font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   header{padding:20px 24px;border-bottom:1px solid var(--line);
-         display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+         display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px}
   header h1{margin:0;font-size:20px}
   header h1 span{color:var(--accent)}
   header .sub{color:var(--muted);font-size:13px}
+  .profile-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+         padding:10px 14px;min-width:220px}
+  .profile-card .name{font-weight:700}
+  .profile-card .headline{color:var(--muted);font-size:13px}
   main{max-width:1180px;margin:0 auto;padding:20px 16px 60px}
   section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
           padding:18px;margin-bottom:18px}
   section h2{margin:0 0 12px;font-size:16px}
-  .funnel{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
-  .stage{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
-         padding:12px;text-align:center;cursor:pointer;transition:border-color .15s}
-  .stage:hover{border-color:var(--accent)}
-  .stage.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-  .stage .n{font-size:26px;font-weight:700}
-  .stage .l{font-size:12px;color:var(--muted)}
-  .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .statcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+  .statcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+  .statcard .n{font-size:26px;font-weight:700}
+  .statcard .l{font-size:12px;color:var(--muted)}
+  .funnelbar{margin:4px 0}
+  .funnelbar .row{display:flex;align-items:center;gap:10px;margin-bottom:6px;cursor:pointer}
+  .funnelbar .lbl{width:170px;font-size:13px;color:var(--muted);text-align:right;flex-shrink:0}
+  .funnelbar .barwrap{flex:1;background:var(--panel2);border-radius:6px;height:22px;position:relative}
+  .funnelbar .bar{height:100%;border-radius:6px;background:linear-gradient(90deg,#2b6cb0,var(--accent));min-width:2px;transition:width .3s}
+  .funnelbar .cnt{width:36px;font-size:13px;font-weight:600}
+  .funnelbar .row.active .lbl{color:var(--accent)}
+  .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
   input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid var(--line);
       background:var(--panel2);color:var(--text);padding:8px 10px}
   textarea{width:100%;min-height:110px;resize:vertical}
@@ -40,16 +48,24 @@
   button:disabled{opacity:.5;cursor:default}
   table{width:100%;border-collapse:collapse;font-size:14px}
   th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
-  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;cursor:pointer;user-select:none;white-space:nowrap}
+  th:hover{color:var(--accent)}
+  th .arrow{color:var(--accent)}
   .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600}
   .saved{background:#2b3b5e}.applied{background:#274b63}.selected_for_interview{background:#3d3a1e;color:#ffd97a}
   .rejected{background:#4a2b2b;color:#ff9d9d}.offer{background:#1e4a34;color:#7deda9}.withdrawn{background:#333}
+  .chip{display:inline-block;padding:4px 12px;border-radius:16px;border:1px solid var(--line);
+        font-size:13px;cursor:pointer;margin:0 6px 6px 0;background:var(--panel2)}
+  .chip.active{background:var(--accent);border-color:var(--accent);color:#06101f;font-weight:600}
   .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
   .card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
   .card h3{margin:0 0 4px;font-size:15px}
   .card .meta{color:var(--muted);font-size:13px;margin-bottom:8px}
   .card .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
   .score{font-size:22px;font-weight:700;color:var(--green)}
+  .scorebadge{display:inline-block;min-width:44px;text-align:center;font-weight:700;border-radius:8px;
+              padding:2px 8px;font-size:14px}
+  .score-hi{background:#1e4a34;color:#7deda9}.score-mid{background:#3d3a1e;color:#ffd97a}.score-lo{background:#4a2b2b;color:#ff9d9d}
   .nudge{border-left:3px solid var(--amber);padding:8px 12px;margin-bottom:8px;background:var(--panel2);border-radius:0 8px 8px 0}
   .nudge code{font-size:12px;color:var(--muted);display:block;margin-top:4px;word-break:break-all}
   .ok{color:var(--green)} .warn{color:var(--amber)} .err{color:var(--red)}
@@ -59,37 +75,87 @@
   footer{color:var(--muted);font-size:12px;text-align:center;padding:24px}
   .hidden{display:none}
   a{color:var(--accent)}
+  .bdbar{margin:6px 0}
+  .bdbar .row{display:flex;align-items:center;gap:10px}
+  .bdbar .lbl{width:130px;font-size:13px;color:var(--muted);flex-shrink:0}
+  .bdbar .barwrap{flex:1;background:var(--panel2);border-radius:6px;height:16px}
+  .bdbar .bar{height:100%;border-radius:6px;background:var(--green);min-width:2px}
+  .bdbar .val{width:70px;font-size:13px;text-align:right}
+  .kwchip{display:inline-block;padding:3px 10px;border-radius:14px;font-size:12px;margin:0 6px 6px 0}
+  .kwchip.covered{background:#1e4a34;color:#7deda9}
+  .kwchip.missing{background:#4a2b2b;color:#ff9d9d}
+  #dropzone{border:2px dashed var(--line);border-radius:10px;padding:26px;text-align:center;
+            color:var(--muted);margin-bottom:12px;transition:border-color .15s,background .15s}
+  #dropzone.over{border-color:var(--accent);background:var(--panel2)}
+  .progress{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:8px}
+  .progress>div{height:100%;background:var(--accent);width:0%;transition:width .2s}
 </style>
 </head>
 <body>
 <header>
   <div><h1>candid <span>dashboard</span></h1>
-  <div class="sub" id="profileLine">local-only · nothing leaves this machine</div></div>
-  <div class="sub" id="gmailLine"></div>
+  <div class="sub">local-only · nothing leaves this machine</div></div>
+  <div class="profile-card" id="profileCard">
+    <div class="name" id="profileName">—</div>
+    <div class="headline" id="profileHeadline">no profile yet — run <code>python -m candid onboard</code></div>
+  </div>
 </header>
 <main>
 
-<section id="sec-funnel"><h2>Pipeline</h2><div class="funnel" id="funnel"></div>
-  <div class="sub" style="color:var(--muted);margin-top:8px" id="rates"></div></section>
+<!-- 1. stats + funnel + nudges -->
+<section id="sec-overview"><h2>Overview</h2>
+  <div class="statcards" id="statCards"></div>
+  <h2 style="font-size:14px;color:var(--muted)">Pipeline funnel</h2>
+  <div class="funnelbar" id="funnelBars"></div>
+</section>
 
+<section id="sec-nudges"><h2>Due nudges</h2><div id="nudges"></div></section>
+
+<!-- 2. applications -->
 <section id="sec-apps"><h2>Applications</h2>
   <div class="toolbar">
     <input id="q" placeholder="Search company / role / notes…" style="flex:1;min-width:200px">
-    <select id="statusFilter"><option value="">All statuses</option></select>
     <button class="ghost" id="refreshApps">Refresh</button>
   </div>
-  <div style="overflow-x:auto"><table><thead><tr>
-    <th>ID</th><th>Company</th><th>Role</th><th>Status</th><th>Updated</th><th>Prep</th><th>Actions</th>
-  </tr></thead><tbody id="appsBody"></tbody></table></div></section>
+  <div id="statusChips" style="margin-bottom:12px"></div>
+  <div style="overflow-x:auto"><table><thead><tr id="appsHead"></tr></thead>
+  <tbody id="appsBody"></tbody></table></div></section>
 
+<!-- 3. curated jobs -->
 <section id="sec-jobs"><h2>Curated jobs <span class="sub" style="color:var(--muted);font-weight:400">(scored, not yet applied)</span></h2>
-  <div class="cards" id="jobsCards"></div></section>
+  <div class="toolbar">
+    <input id="cRole" placeholder="Role, e.g. Data Scientist" style="flex:1;min-width:180px">
+    <input id="cLocation" placeholder="Location" style="width:150px">
+    <label style="font-size:13px;color:var(--muted)"><input type="checkbox" id="cRemote" style="width:auto"> remote</label>
+    <select id="cLevel"><option value="">any level</option><option>entry</option><option>junior</option>
+      <option>mid</option><option>senior</option><option>lead</option><option>staff</option><option>principal</option></select>
+    <input id="cLimit" type="number" value="15" min="1" max="50" style="width:70px" title="limit">
+    <button id="btnCurate">Curate</button>
+  </div>
+  <pre class="report hidden" id="curateOut"></pre>
+  <div class="cards" id="jobsCards" style="margin-top:12px"></div></section>
 
+<!-- 4. prep -->
 <section id="sec-prep"><h2>Interview prep</h2><div id="prepList"></div></section>
 
-<section id="sec-nudges"><h2>Pending nudges</h2><div id="nudges"></div></section>
+<!-- 5. import + proposals -->
+<section id="sec-import"><h2>Import your data</h2>
+  <p style="color:var(--muted);font-size:14px;margin-top:0">candid <b>never connects to your accounts</b>.
+  You export your own data, then feed the file in below — nothing leaves this machine.</p>
+  <div id="importGuides"></div>
+  <div id="dropzone">Drag &amp; drop a <b>.mbox</b> (Gmail Takeout) or <b>.zip</b> (LinkedIn export) here,
+    or <label style="color:var(--accent);cursor:pointer"><u>browse…</u>
+    <input type="file" id="importFile" accept=".mbox,.zip" class="hidden"></label></div>
+  <div class="progress hidden" id="uploadProgress"><div></div></div>
+  <div style="color:var(--muted);font-size:13px">…or from the terminal:
+    <code>python -m candid import --gmail-takeout mail.mbox</code> ·
+    <code>python -m candid import --linkedin-zip export.zip</code></div>
+  <pre class="report hidden" id="importOut" style="margin-top:12px"></pre>
+  <h2 style="font-size:14px;color:var(--muted);margin-top:16px">Gmail proposals — review before they hit your tracker</h2>
+  <div id="gmailBox"></div><div class="cards" id="proposalCards" style="margin-top:12px"></div></section>
 
-<section id="sec-tools"><h2>Match &amp; tailor</h2>
+<!-- 6. match & tailor lab -->
+<section id="sec-tools"><h2>Match &amp; tailor lab</h2>
   <div class="grid2">
     <div><input id="tCompany" placeholder="Company" style="width:100%;margin-bottom:8px">
          <input id="tRole" placeholder="Role title" style="width:100%;margin-bottom:8px"></div>
@@ -99,33 +165,17 @@
   <textarea id="tJd" placeholder="Paste the job description here…"></textarea>
   <div class="toolbar" style="margin-top:8px">
     <button id="btnMatch">Score match</button>
-    <button class="ghost" id="btnResume">Tailor résumé</button>
-    <button class="ghost" id="btnCover">Cover letter</button>
+    <button class="ghost" id="btnTailorDiff">Tailor + coverage</button>
   </div>
-  <pre class="report hidden" id="toolOut"></pre></section>
+  <div id="matchOut" class="hidden"></div>
+  <div id="tailorOut" class="hidden"></div></section>
 
+<!-- 7. salary -->
 <section id="sec-salary"><h2>Salary insights</h2>
   <div class="toolbar">
     <input id="sCompany" placeholder="Company"><input id="sTitle" placeholder="Title">
     <input id="sLoc" placeholder="Location"><button id="btnSalary">Look up</button>
   </div><pre class="report hidden" id="salaryOut"></pre></section>
-
-<section id="sec-import"><h2>Import your data</h2>
-  <p style="color:var(--muted);font-size:14px;margin-top:0">candid <b>never connects to your accounts</b>.
-  You export your own data, then feed the file in below — nothing leaves this machine.</p>
-  <div id="importGuides"></div>
-  <div class="toolbar" style="margin-top:12px">
-    <input type="file" id="importFile" accept=".mbox,.zip" style="flex:1;min-width:220px">
-    <button id="btnImport">Import file</button>
-  </div>
-  <div style="color:var(--muted);font-size:13px">…or from the terminal:
-    <code>python -m candid import --gmail-takeout mail.mbox</code> ·
-    <code>python -m candid import --linkedin-zip export.zip</code></div>
-  <pre class="report hidden" id="importOut" style="margin-top:12px"></pre>
-</section>
-
-<section id="sec-gmail"><h2>Gmail proposals</h2>
-  <div id="gmailBox"></div><div class="cards" id="proposalCards" style="margin-top:12px"></div></section>
 
 </main>
 <footer>
@@ -136,85 +186,49 @@
 </footer>
 
 <script>
+"use strict";
+/* candid dashboard UI — vanilla JS, no dependencies, works offline.
+   Sections: overview, nudges, apps, jobs, prep, import, lab, salary. */
 const $=id=>document.getElementById(id);
 const api={
-  get:p=>fetch(p).then(r=>r.json()),
-  post:(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json())
+  get:p=>fetch(p).then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;}),
+  post:(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})})
+    .then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;})
 };
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const STATUSES=["saved","applied","selected_for_interview","rejected","offer","withdrawn"];
+const pretty=s=>String(s).replace(/_/g," ");
 
+/* ---------- 1. overview: profile card, stat cards, funnel bars ---------- */
 async function loadOverview(){
   const o=await api.get("/api/overview");
-  const f=$("funnel"); f.innerHTML="";
-  for(const s of STATUSES){
-    const d=document.createElement("div"); d.className="stage"; d.dataset.status=s;
-    d.innerHTML=`<div class="n">${o.funnel[s]||0}</div><div class="l">${s.replace(/_/g," ")}</div>`;
-    d.onclick=()=>{ $("statusFilter").value=s; document.querySelectorAll(".stage").forEach(x=>x.classList.remove("active")); d.classList.add("active"); loadApps(); };
-    f.appendChild(d);
+  if(o.profile.has_profile){
+    $("profileName").textContent=o.profile.name||"Your profile";
+    $("profileHeadline").textContent=o.profile.headline||"";
   }
-  $("rates").textContent=`Response ${o.response_rate}% · Interview ${o.interview_rate}% · Offer ${o.offer_rate}% · ${o.nudge_count} nudge(s)`;
-  if(o.profile.has_profile) $("profileLine").textContent=`${o.profile.name} · ${o.profile.headline} · local-only`;
-  $("gmailLine").innerHTML=
-    `Gmail proposals: <b>${o.gmail_pending_proposals}</b> pending — `+
-    `<a href="#sec-import">import a Takeout mbox</a>`;
-  loadNudges(o.nudges); loadProposals();
-}
-
-async function loadApps(){
-  const st=$("statusFilter").value, q=$("q").value;
-  const apps=await api.get(`/api/apps?status=${encodeURIComponent(st)}&q=${encodeURIComponent(q)}`);
-  const tb=$("appsBody"); tb.innerHTML="";
-  if(!apps.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--muted)">Nothing here. Curate jobs or add an application from the CLI.</td></tr>';return;}
-  for(const a of apps){
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td>
-      <td><span class="pill ${a.status}">${a.status.replace(/_/g," ")}</span></td>
-      <td>${esc(a.date_updated||"")}</td>
-      <td>${a.prep_pack?'<span class="ok">✓ pack</span>':'<span class="warn">—</span>'}</td>
-      <td><select data-id="${a.id}" class="stSel">${STATUSES.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select>
-      <button class="ghost" data-prep="${a.id}" data-c="${esc(a.company)}" data-r="${esc(a.role)}">Prep</button></td>`;
-    tb.appendChild(tr);
-  }
-  tb.querySelectorAll(".stSel").forEach(sel=>sel.onchange=async e=>{
-    const r=await api.post(`/api/apps/${e.target.dataset.id}`,{status:e.target.value});
-    if(r.error) alert(r.error); loadApps(); loadOverview();
+  const cards=[
+    ["Total applications",o.total],
+    ["Response rate",o.response_rate+"%"],
+    ["Interview rate",o.interview_rate+"%"],
+    ["Offer rate",o.offer_rate+"%"],
+    ["Curated jobs",o.curated_count],
+    ["Gmail proposals",o.gmail_pending_proposals],
+  ];
+  $("statCards").innerHTML=cards.map(([l,n])=>
+    `<div class="statcard"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+  const max=Math.max(1,...STATUSES.map(s=>o.funnel[s]||0));
+  $("funnelBars").innerHTML=STATUSES.map(s=>{
+    const n=o.funnel[s]||0, w=Math.round(100*n/max);
+    return `<div class="row" data-status="${s}" title="Filter applications: ${pretty(s)}">
+      <div class="lbl">${pretty(s)}</div>
+      <div class="barwrap"><div class="bar" style="width:${w}%"></div></div>
+      <div class="cnt">${n}</div></div>`;
+  }).join("");
+  $("funnelBars").querySelectorAll(".row").forEach(r=>r.onclick=()=>{
+    state.statusFilter=r.dataset.status; renderChips(); loadApps();
+    document.querySelector("#sec-apps").scrollIntoView({behavior:"smooth"});
   });
-  tb.querySelectorAll("[data-prep]").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.prep));
-}
-
-async function genPrep(company,role,appId){
-  const r=await api.post("/api/prep",{company,role,app_id:parseInt(appId)});
-  alert(r.error?("Error: "+r.error):("Prep pack saved:\n"+r.path)); loadPrep();
-}
-
-async function loadJobs(){
-  const jobs=await api.get("/api/jobs"); const w=$("jobsCards"); w.innerHTML="";
-  if(!jobs.length){w.innerHTML='<div style="color:var(--muted)">No saved jobs. Run <code>python -m candid jobs curate --role "Data Scientist"</code>.</div>';return;}
-  for(const j of jobs){
-    const d=document.createElement("div"); d.className="card";
-    d.innerHTML=`<h3>${esc(j.role)}</h3><div class="meta">${esc(j.company)} · ${esc(j.source||"")}</div>
-      <div class="score">${j.score??"—"}<span style="font-size:13px;color:var(--muted)">/100</span></div>
-      <div class="actions">
-        ${j.url?`<a href="${esc(j.url)}" target="_blank" rel="noopener"><button class="ghost">Apply ↗</button></a>`:""}
-        <button class="ghost" data-m="${j.app_id}">Match</button>
-        <button class="ghost" data-t="${j.app_id}">Tailor</button>
-      </div>`;
-    w.appendChild(d);
-  }
-}
-
-async function loadPrep(){
-  const rows=await api.get("/api/prep-status"); const w=$("prepList"); w.innerHTML="";
-  const need=rows.filter(r=>r.status==="selected_for_interview");
-  if(!need.length){w.innerHTML='<div style="color:var(--muted)">No interviews in the pipeline. Prep packs appear here when a role moves to interview.</div>';return;}
-  for(const r of need){
-    const d=document.createElement("div"); d.className="nudge";
-    d.innerHTML=`<b>${esc(r.role)} @ ${esc(r.company)}</b> — ${r.has_pack?'<span class="ok">✓ pack ready</span>':'<span class="warn">no pack yet</span>'}
-      ${r.has_pack?"":`<button data-c="${esc(r.company)}" data-r="${esc(r.role)}" data-a="${r.app_id}" style="margin-left:10px">Generate pack</button>`}`;
-    w.appendChild(d);
-  }
-  w.querySelectorAll("button").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.a));
+  loadNudges(o.nudges); loadProposals();
 }
 
 function loadNudges(nudges){
@@ -222,83 +236,261 @@ function loadNudges(nudges){
   if(!nudges.length){w.innerHTML='<div style="color:var(--muted)">All quiet. 🎉</div>';return;}
   for(const n of nudges){
     const d=document.createElement("div"); d.className="nudge";
-    d.innerHTML=`<b>[${n.kind.replace(/_/g," ")}]</b> ${esc(n.message)}<br>→ ${esc(n.action)}<code>${esc(n.command)}</code>`;
+    d.innerHTML=`<b>[${pretty(n.kind)}]</b> ${esc(n.message)}<br>→ ${esc(n.action)}<code>${esc(n.command)}</code>`;
     w.appendChild(d);
   }
 }
 
-async function loadProposals(){
-  const ps=await api.get("/api/proposals?status=pending");
-  const w=$("proposalCards"); w.innerHTML="";
-  const box=$("gmailBox");
-  if(!ps.length){box.innerHTML='<div style="color:var(--muted)">No pending proposals. <a href="#sec-import">Import a Gmail Takeout mbox</a> to ingest recruiter mail — nothing is written to your tracker until you confirm here.</div>';return;}
-  box.innerHTML=`<div><b>${ps.length}</b> proposal(s) from Gmail. Confirm to write to your tracker; reject to dismiss.</div>`;
-  for(const p of ps){
-    const d=document.createElement("div"); d.className="card";
-    d.innerHTML=`<h3>${esc(p.role||"(role?)")} @ ${esc(p.company||"(company?)")}</h3>
-      <div class="meta">${esc(p.kind.replace(/_/g," "))} · confidence ${p.confidence} · ${esc(p.date||"")}</div>
-      <div style="font-size:13px">${esc(p.subject||"")}</div>
-      <div style="font-size:12px;color:var(--muted)">${esc(p.snippet||"")}</div>
-      <div class="actions"><button data-ok="${p.id}">Confirm</button><button class="danger" data-no="${p.id}">Reject</button></div>`;
-    w.appendChild(d);
+/* ---------- 2. applications: chips, search, sortable table ---------- */
+const state={statusFilter:"",sortKey:"date_updated",sortDir:-1};
+const COLS=[["id","ID"],["company","Company"],["role","Role"],["status","Status"],["date_updated","Updated"]];
+
+function renderChips(){
+  const w=$("statusChips"); w.innerHTML="";
+  const mk=(val,label)=>{
+    const c=document.createElement("span");
+    c.className="chip"+((state.statusFilter===val)?" active":"");
+    c.textContent=label;
+    c.onclick=()=>{state.statusFilter=val;renderChips();loadApps();};
+    w.appendChild(c);
+  };
+  mk("","All");
+  STATUSES.forEach(s=>mk(s,pretty(s)));
+}
+
+function sortApps(apps){
+  const k=state.sortKey, d=state.sortDir;
+  return [...apps].sort((a,b)=>{
+    let x=a[k]??"", y=b[k]??"";
+    if(k==="id"){x=+x;y=+y;}
+    return (x<y?-1:x>y?1:0)*d;
+  });
+}
+
+async function loadApps(){
+  const q=$("q").value;
+  const apps=await api.get(`/api/apps?status=${encodeURIComponent(state.statusFilter)}&q=${encodeURIComponent(q)}`);
+  $("appsHead").innerHTML=COLS.map(([k,label])=>{
+    const arrow=state.sortKey===k?`<span class="arrow">${state.sortDir===1?"▲":"▼"}</span>`:"";
+    return `<th data-k="${k}">${label} ${arrow}</th>`;
+  }).join("")+"<th>Prep</th><th>Status</th>";
+  $("appsHead").querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    if(state.sortKey===k) state.sortDir*=-1; else {state.sortKey=k;state.sortDir=1;}
+    loadApps();
+  });
+  const tb=$("appsBody"); tb.innerHTML="";
+  if(!apps.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--muted)">Nothing here. Curate jobs or add an application from the CLI.</td></tr>';return;}
+  for(const a of sortApps(apps)){
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td>
+      <td><span class="pill ${a.status}">${pretty(a.status)}</span></td>
+      <td>${esc(a.date_updated||"")}</td>
+      <td>${a.prep_pack?'<span class="ok">✓ pack</span>':'<span class="warn">—</span>'}
+          <button class="ghost" data-prep="${a.id}" data-c="${esc(a.company)}" data-r="${esc(a.role)}" style="padding:4px 8px;font-size:12px">Prep</button></td>
+      <td><select data-id="${a.id}" class="stSel">${STATUSES.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select></td>`;
+    tb.appendChild(tr);
   }
-  w.querySelectorAll("[data-ok]").forEach(b=>b.onclick=async()=>{const r=await api.post(`/api/proposals/${b.dataset.ok}/confirm`);if(r.error)alert(r.error);loadProposals();loadApps();loadOverview();});
-  w.querySelectorAll("[data-no]").forEach(b=>b.onclick=async()=>{await api.post(`/api/proposals/${b.dataset.no}/reject`);loadProposals();loadOverview();});
+  tb.querySelectorAll(".stSel").forEach(sel=>sel.onchange=async e=>{
+    try{await api.post(`/api/apps/${e.target.dataset.id}`,{status:e.target.value});}
+    catch(err){alert("Error: "+err.message);}
+    loadApps(); loadOverview();
+  });
+  tb.querySelectorAll("[data-prep]").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.prep));
+}
+
+async function genPrep(company,role,appId){
+  try{
+    const r=await api.post("/api/prep",{company,role,app_id:parseInt(appId)});
+    alert("Prep pack saved:\n"+r.path);
+  }catch(err){alert("Error: "+err.message);}
+  loadPrep(); loadApps();
 }
 
 $("refreshApps").onclick=loadApps;
 $("q").oninput=loadApps;
-$("statusFilter").onchange=loadApps;
-for(const s of STATUSES){const o=document.createElement("option");o.value=s;o.textContent=s.replace(/_/g," ");$("statusFilter").appendChild(o);}
 
-$("btnMatch").onclick=async()=>{
-  const r=await api.post("/api/match",{company:$("tCompany").value,role:$("tRole").value,jd:$("tJd").value});
-  const o=$("toolOut");o.classList.remove("hidden");
-  o.textContent=r.error?("Error: "+r.error):r.report; o.scrollIntoView({behavior:"smooth"});
-};
-async function tailor(kind){
-  const r=await api.post("/api/tailor",{kind,company:$("tCompany").value,role:$("tRole").value,jd:$("tJd").value,tone:$("tTone").value});
-  const o=$("toolOut");o.classList.remove("hidden");
-  o.textContent=r.error?("Error: "+r.error):("Saved to "+r.path+"\n\n"+r.text.slice(0,4000));
-  o.scrollIntoView({behavior:"smooth"});
+/* ---------- 3. curated jobs: badges, apply, dismiss, tailor, curate ---------- */
+function scoreClass(s){return s==null?"":s>=70?"score-hi":s>=45?"score-mid":"score-lo";}
+
+async function loadJobs(){
+  const jobs=await api.get("/api/jobs"); const w=$("jobsCards"); w.innerHTML="";
+  if(!jobs.length){w.innerHTML='<div style="color:var(--muted)">No saved jobs. Run a curation above or <code>python -m candid jobs curate --role "Data Scientist"</code>.</div>';return;}
+  for(const j of jobs){
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`<h3>${esc(j.role)}</h3><div class="meta">${esc(j.company)} · ${esc(j.source||"")}</div>
+      <div><span class="scorebadge ${scoreClass(j.score)}">${j.score??"—"}/100</span></div>
+      <div class="actions">
+        ${j.url?`<a href="${esc(j.url)}" target="_blank" rel="noopener"><button class="ghost">Apply ↗</button></a>`:""}
+        <button class="ghost" data-tailor="${j.app_id}" data-c="${esc(j.company)}" data-r="${esc(j.role)}">Tailor</button>
+        <button class="danger" data-dismiss="${j.app_id}" data-sid="${esc(j.source_id||"")}">Dismiss</button>
+      </div>`;
+    w.appendChild(d);
+  }
+  w.querySelectorAll("[data-tailor]").forEach(b=>b.onclick=()=>{
+    $("tCompany").value=b.dataset.c; $("tRole").value=b.dataset.r;
+    document.querySelector("#sec-tools").scrollIntoView({behavior:"smooth"});
+    runTailorDiff();
+  });
+  w.querySelectorAll("[data-dismiss]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Dismiss this curated job? It will be hidden, not tracked."))return;
+    try{
+      await api.post("/api/jobs/dismiss",{app_id:parseInt(b.dataset.dismiss),source_id:b.dataset.sid||undefined});
+    }catch(err){alert("Error: "+err.message);}
+    loadJobs(); loadOverview();
+  });
 }
-$("btnResume").onclick=()=>tailor("resume");
-$("btnCover").onclick=()=>tailor("cover-letter");
-$("btnSalary").onclick=async()=>{
-  const r=await api.get(`/api/salary?company=${encodeURIComponent($("sCompany").value)}&title=${encodeURIComponent($("sTitle").value)}&location=${encodeURIComponent($("sLoc").value)}`);
-  const o=$("salaryOut");o.classList.remove("hidden");
-  o.textContent=!r.n?("No salary data yet — import DOL LCA data or parse JDs to build it up.")
-    :`n=${r.n} · p25 $${Math.round(r.p25).toLocaleString()} · median $${Math.round(r.median).toLocaleString()} · p75 $${Math.round(r.p75).toLocaleString()}\nSources: ${(r.sources||[]).join("; ")}`;
+
+$("btnCurate").onclick=async()=>{
+  const role=$("cRole").value.trim();
+  if(!role){alert("Enter a role first (e.g. Data Scientist).");return;}
+  const o=$("curateOut"); o.classList.remove("hidden"); o.textContent="Curating… (fetches live job boards)";
+  try{
+    const r=await api.post("/api/curate",{role,location:$("cLocation").value,
+      remote:$("cRemote").checked,level:$("cLevel").value||null,
+      limit:parseInt($("cLimit").value)||15,sources:null});
+    o.textContent=r.summary;
+  }catch(err){o.textContent="Error: "+err.message;}
+  loadJobs(); loadOverview();
 };
 
+/* ---------- 4. prep cards ---------- */
+async function loadPrep(){
+  const rows=await api.get("/api/prep-status"); const w=$("prepList"); w.innerHTML="";
+  const need=rows.filter(r=>r.status==="selected_for_interview");
+  if(!need.length){w.innerHTML='<div style="color:var(--muted)">No interviews in the pipeline. Prep packs appear here when a role moves to interview.</div>';return;}
+  const grid=document.createElement("div"); grid.className="cards";
+  for(const r of need){
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`<h3>${esc(r.role)} @ ${esc(r.company)}</h3>
+      <div class="meta">${r.has_pack?'<span class="ok">✓ pack ready</span>':'<span class="warn">no pack yet</span>'}</div>
+      <div class="actions">${r.has_pack?"":`<button data-c="${esc(r.company)}" data-r="${esc(r.role)}" data-a="${r.app_id}">Generate pack</button>`}</div>`;
+    grid.appendChild(d);
+  }
+  w.appendChild(grid);
+  w.querySelectorAll("button").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.a));
+}
+
+/* ---------- 5. import: guides, drag&drop, progress, proposals ---------- */
 async function loadImportGuides(){
   const g=await api.get("/api/import-guides");
   const w=$("importGuides"); w.innerHTML="";
   for(const key of ["gmail","linkedin","pattern"]){
     const s=g[key]; if(!s) continue;
     const d=document.createElement("div"); d.className="card"; d.style.marginBottom="10px";
-    const steps=s.steps.map(esc).join("<br>");
-    d.innerHTML=`<h3>${esc(s.title)}</h3><div style="font-size:13px">${steps}</div>`+
+    d.innerHTML=`<h3>${esc(s.title)}</h3><div style="font-size:13px">${s.steps.map(esc).join("<br>")}</div>`+
       (s.command?`<div style="margin-top:6px;font-size:13px;color:var(--muted)"><code>${esc(s.command)}</code></div>`:"")+
       (s.accept?`<div style="font-size:12px;color:var(--muted)">Accepts: ${esc(s.accept)} files</div>`:"");
     w.appendChild(d);
   }
 }
 
-$("btnImport").onclick=async()=>{
-  const inp=$("importFile");
-  if(!inp.files.length){alert("Pick an exported file first (.mbox or .zip).");return;}
-  const fd=new FormData(); fd.append("file",inp.files[0]);
+function uploadFile(file){
   const o=$("importOut"); o.classList.remove("hidden");
-  o.textContent="Importing… (large mbox files can take a minute)";
-  try{
-    const r=await fetch("/api/import",{method:"POST",body:fd}).then(r=>r.json());
+  const bar=$("uploadProgress"); bar.classList.remove("hidden");
+  const fill=bar.firstElementChild; fill.style.width="0%";
+  o.textContent=`Uploading ${file.name}…`;
+  const xhr=new XMLHttpRequest();
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=Math.round(100*e.loaded/e.total)+"%";};
+  xhr.onload=()=>{
+    fill.style.width="100%";
+    let r={};
+    try{r=JSON.parse(xhr.responseText);}catch(e){r={error:"bad server response"};}
+    if(xhr.status!==200){o.textContent="Error: "+(r.error||xhr.status);return;}
     if(r.error){o.textContent="Error: "+r.error;return;}
     o.textContent=r.summary||JSON.stringify(r,null,2);
     loadProposals(); loadOverview(); loadApps();
-  }catch(e){o.textContent="Error: "+e;}
+  };
+  xhr.onerror=()=>{o.textContent="Error: upload failed.";};
+  const fd=new FormData(); fd.append("file",file);
+  xhr.open("POST","/api/import"); xhr.send(fd);
+}
+
+const dz=$("dropzone");
+["dragenter","dragover"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove("over");}));
+dz.addEventListener("drop",e=>{const f=e.dataTransfer.files[0]; if(f)uploadFile(f);});
+$("importFile").onchange=e=>{const f=e.target.files[0]; if(f)uploadFile(f);};
+
+async function loadProposals(){
+  const ps=await api.get("/api/proposals?status=pending");
+  const w=$("proposalCards"); w.innerHTML="";
+  const box=$("gmailBox");
+  if(!ps.length){box.innerHTML='<div style="color:var(--muted)">No pending proposals. Import a Gmail Takeout mbox above to ingest recruiter mail — nothing is written to your tracker until you confirm here.</div>';return;}
+  box.innerHTML=`<div><b>${ps.length}</b> proposal(s) from Gmail. Confirm to write to your tracker; reject to dismiss.</div>`;
+  for(const p of ps){
+    const d=document.createElement("div"); d.className="card";
+    d.innerHTML=`<h3>${esc(p.role||"(role?)")} @ ${esc(p.company||"(company?)")}</h3>
+      <div class="meta">${pretty(p.kind)} · confidence ${p.confidence} · ${esc(p.date||"")}</div>
+      <div style="font-size:13px">${esc(p.subject||"")}</div>
+      <div style="font-size:12px;color:var(--muted)">${esc(p.snippet||"")}</div>
+      <div class="actions"><button data-ok="${p.id}">Confirm</button><button class="danger" data-no="${p.id}">Reject</button></div>`;
+    w.appendChild(d);
+  }
+  w.querySelectorAll("[data-ok]").forEach(b=>b.onclick=async()=>{
+    try{await api.post(`/api/proposals/${b.dataset.ok}/confirm`);}catch(err){alert("Error: "+err.message);}
+    loadProposals(); loadApps(); loadOverview();
+  });
+  w.querySelectorAll("[data-no]").forEach(b=>b.onclick=async()=>{
+    try{await api.post(`/api/proposals/${b.dataset.no}/reject`);}catch(err){alert("Error: "+err.message);}
+    loadProposals(); loadOverview();
+  });
+}
+
+/* ---------- 6. match & tailor lab ---------- */
+const BD_MAX={skills:50,seniority:25,domain:15,title_alignment:10};
+
+async function runMatch(){
+  const o=$("matchOut"); o.classList.remove("hidden"); o.textContent="Scoring…";
+  try{
+    const r=await api.post("/api/match",{company:$("tCompany").value,role:$("tRole").value,jd:$("tJd").value});
+    const bars=Object.entries(r.breakdown||{}).map(([k,v])=>{
+      const max=BD_MAX[k]||100, w=Math.round(100*v/max);
+      return `<div class="bdbar"><div class="row"><div class="lbl">${pretty(k)}</div>
+        <div class="barwrap"><div class="bar" style="width:${w}%"></div></div>
+        <div class="val">${v}/${max}</div></div></div>`;
+    }).join("");
+    const miss=(r.skills_missing||[]).map(s=>`<span class="kwchip missing">${esc(s)}</span>`).join("");
+    o.innerHTML=`<div class="card"><h3>Match score: <span class="score">${r.score}/100</span> — ${esc(r.verdict)}</h3>
+      <div class="meta">${esc(r.verdict_reason||"")}</div>${bars}
+      <div style="margin-top:8px"><b>Missing skills:</b><br>${miss||'<span class="ok">none</span>'}</div>
+      <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted)">Full report</summary>
+      <pre class="report">${esc(r.report||"")}</pre></details></div>`;
+    o.scrollIntoView({behavior:"smooth"});
+  }catch(err){o.innerHTML=`<div class="err">Error: ${esc(err.message)}</div>`;}
+}
+
+async function runTailorDiff(){
+  const o=$("tailorOut"); o.classList.remove("hidden"); o.textContent="Tailoring…";
+  try{
+    const r=await api.post("/api/tailor-diff",{kind:"resume",company:$("tCompany").value,
+      role:$("tRole").value,jd:$("tJd").value,tone:$("tTone").value});
+    const cov=r.coverage||{covered:[],missing:[]};
+    const chips=(cov.covered||[]).map(s=>`<span class="kwchip covered">✓ ${esc(s)}</span>`).join("")+
+      (cov.missing||[]).map(s=>`<span class="kwchip missing">✗ ${esc(s)}</span>`).join("");
+    o.innerHTML=`<div class="card"><h3>Tailored résumé — keyword coverage</h3>
+      <div style="margin:8px 0">${chips||'<span style="color:var(--muted)">no keywords detected</span>'}</div>
+      <details open><summary style="cursor:pointer;color:var(--muted)">Tailored text</summary>
+      <pre class="report">${esc(r.text||"")}</pre></details></div>`;
+    o.scrollIntoView({behavior:"smooth"});
+  }catch(err){o.innerHTML=`<div class="err">Error: ${esc(err.message)}</div>`;}
+}
+
+$("btnMatch").onclick=runMatch;
+$("btnTailorDiff").onclick=runTailorDiff;
+
+/* ---------- 7. salary ---------- */
+$("btnSalary").onclick=async()=>{
+  const o=$("salaryOut"); o.classList.remove("hidden"); o.textContent="Looking up…";
+  try{
+    const r=await api.get(`/api/salary?company=${encodeURIComponent($("sCompany").value)}&title=${encodeURIComponent($("sTitle").value)}&location=${encodeURIComponent($("sLoc").value)}`);
+    o.textContent=!r.n?("No salary data yet — import DOL LCA data or parse JDs to build it up.")
+      :`n=${r.n} · p25 $${Math.round(r.p25).toLocaleString()} · median $${Math.round(r.median).toLocaleString()} · p75 $${Math.round(r.p75).toLocaleString()}\nSources: ${(r.sources||[]).join("; ")}`;
+  }catch(err){o.textContent="Error: "+err.message;}
 };
 
+/* ---------- boot ---------- */
+renderChips();
 loadOverview(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
 </script>
 </body>

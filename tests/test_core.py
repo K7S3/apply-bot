@@ -131,9 +131,12 @@ class TrackerTest(unittest.TestCase):
 
     def test_duplicate_rejected(self):
         from candid import tracker as T
-        T.add("Acme", "Data Scientist", path=self.path)
-        with self.assertRaises(T.TrackerError):
-            T.add("acme", "data scientist", path=self.path)
+        r1 = T.add("Acme", "Data Scientist", path=self.path)
+        r2 = T.add("acme", "data scientist", path=self.path)
+        # duplicates are not re-added: the existing record is returned flagged
+        self.assertTrue(r2.get("duplicate"))
+        self.assertEqual(r2["id"], r1["id"])
+        self.assertEqual(len(T.list_apps(path=self.path)), 1)
 
     def test_bad_status_rejected(self):
         from candid import tracker as T

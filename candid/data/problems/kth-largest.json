@@ -1,0 +1,115 @@
+{
+  "id": "kth-largest",
+  "title": "Kth Largest Element",
+  "topic": "heap",
+  "difficulty": "medium",
+  "statement": "Given an integer array `nums` and an integer `k`, return the kth largest element in the array.\n\nNote: it is the kth largest in sorted order, not the kth distinct element.\n\nExample: nums = [3,2,1,5,6,4], k = 2 -> 5",
+  "function": "solve(nums, k)",
+  "compare": "exact",
+  "visible_tests": [
+    {
+      "args": [
+        [
+          3,
+          2,
+          1,
+          5,
+          6,
+          4
+        ],
+        2
+      ],
+      "expected": 5
+    },
+    {
+      "args": [
+        [
+          3,
+          2,
+          3,
+          1,
+          2,
+          4,
+          5,
+          5,
+          6
+        ],
+        4
+      ],
+      "expected": 4
+    }
+  ],
+  "hidden_tests": [
+    {
+      "args": [
+        [
+          1
+        ],
+        1
+      ],
+      "expected": 1
+    },
+    {
+      "args": [
+        [
+          7,
+          10,
+          4,
+          3,
+          20,
+          15
+        ],
+        3
+      ],
+      "expected": 10
+    },
+    {
+      "args": [
+        [
+          -1,
+          -2,
+          -3
+        ],
+        2
+      ],
+      "expected": -2
+    },
+    {
+      "args": [
+        [
+          5,
+          5,
+          5,
+          5
+        ],
+        4
+      ],
+      "expected": 5
+    },
+    {
+      "args": [
+        [
+          100,
+          90,
+          80,
+          70,
+          60,
+          50,
+          40,
+          30,
+          20,
+          10
+        ],
+        1
+      ],
+      "expected": 100
+    }
+  ],
+  "hints": [
+    "The brute force is sorting: O(n log n). Can you do better than a full sort?",
+    "Keep a min-heap of the k largest elements seen so far; the heap root is your answer.",
+    "heapq.nlargest(k, nums) does this for you, or maintain the heap manually."
+  ],
+  "reference_solution": "def solve(nums, k):\n    import heapq\n    return heapq.nlargest(k, nums)[-1]\n",
+  "complexity": "Time O(n log k) with a size-k heap. Space O(k). (Sorting is O(n log n) and also passes.)"
+}

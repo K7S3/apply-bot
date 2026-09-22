@@ -23,6 +23,9 @@ from pathlib import Path
 from candid import config as C
 
 
+log = C.get_logger("dashboard")
+
+
 class DashboardError(Exception):
     """Raised for dashboard operation problems."""
 
@@ -141,22 +144,175 @@ def list_apps_filtered(status: str | None = None, query: str = "") -> list[dict]
 
 
 def curated_jobs() -> list[dict]:
-    """Saved jobs with match scores and apply links — structured."""
+    """Saved jobs with match scores and apply links — structured.
+
+    Jobs dismissed via POST /api/jobs/dismiss are filtered out here.
+    """
     from candid import tracker as T, jobs as J
+    dismissed = dismissed_ids()
     out = []
     for a in T.list_apps(status="saved"):
+        if a["id"] in dismissed["app_ids"]:
+            continue
         meta = J.get_job_meta(a["id"])
+        sid = _source_id_for_app(a["id"]) or meta.get("source_id") or ""
+        if sid and sid in dismissed["source_ids"]:
+            continue
         out.append({
             "app_id": a["id"],
             "company": a["company"],
             "role": a["role"],
             "score": meta.get("match_score"),
             "source": meta.get("source"),
+            "source_id": sid,
             "url": meta.get("source_url") or a.get("jd_link") or "",
             "date_added": a.get("date_added", ""),
             "has_jd": bool(meta.get("jd_text")),
         })
     return out
+
+
+def run_curate(role: str, location: str = "", remote: bool = False,
+               level: str | None = None, limit: int = 15,
+               sources: list | None = None) -> dict:
+    """Run a job-curation pass from the dashboard.
+
+    Returns the human-readable summary plus the structured result.
+    """
+    from candid import jobs as J, profile as Prof
+    if not (role or "").strip():
+        raise DashboardError("role is required (e.g. 'Data Scientist').")
+    profile = Prof.load_profile()
+    try:
+        result = J.curate(profile, role=role, location=location or "",
+                          remote=bool(remote), level=level or None,
+                          limit=int(limit or 15), sources=sources or None)
+    except J.JobsError as e:
+        raise DashboardError(str(e)) from e
+    return {
+        "summary": J.render_curated(result),
+        "fetched": result["fetched"],
+        "candidates": result["candidates"],
+        "added": result["added"],
+        "skipped": result["skipped"],
+        "errors": result["errors"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# dismissed curated jobs (sidecar state — jobs.py itself is untouched)
+# ---------------------------------------------------------------------------
+
+def _dismissed_path() -> Path:
+    return C.DATA_DIR / "dismissed_jobs.json"
+
+
+def _jobs_seen() -> dict:
+    """Read jobs.py's own {source_id: app_id} map (read-only).
+
+    This is how a curated tracker record is traced back to the job-board
+    posting that produced it.
+    """
+    p = C.DATA_DIR / "jobs.json"
+    if p.exists():
+        try:
+            seen = json.loads(p.read_text(encoding="utf-8")).get("seen", {})
+            return seen if isinstance(seen, dict) else {}
+        except (json.JSONDecodeError, OSError, AttributeError):
+            pass
+    return {}
+
+
+def _source_id_for_app(app_id: int) -> str:
+    for sid, aid in _jobs_seen().items():
+        if aid == app_id:
+            return str(sid)
+    return ""
+
+
+def dismissed_ids() -> dict:
+    """{'source_ids': set[str], 'app_ids': set[int]} of dismissed jobs."""
+    p = _dismissed_path()
+    data: dict = {"source_ids": [], "app_ids": []}
+    if p.exists():
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                data["source_ids"] = raw.get("source_ids", [])
+                data["app_ids"] = raw.get("app_ids", [])
+        except (json.JSONDecodeError, OSError, AttributeError):
+            pass
+    return {"source_ids": {str(s) for s in data["source_ids"]},
+            "app_ids": {int(i) for i in data["app_ids"] if str(i).isdigit()}}
+
+
+def _save_dismissed(d: dict) -> None:
+    C.ensure_data_dirs()
+    _dismissed_path().write_text(json.dumps({
+        "source_ids": sorted(d["source_ids"]),
+        "app_ids": sorted(d["app_ids"]),
+    }, indent=2), encoding="utf-8")
+
+
+def dismiss_job(source_id: str | None = None,
+                app_id: int | None = None) -> dict:
+    """Hide a curated job without tracking it.
+
+    Accepts a curation ``source_id`` and/or a tracker ``app_id`` (resolved
+    to its source_id via jobs.py's ``seen`` map). Dismissed jobs disappear
+    from ``curated_jobs()`` and the dashboard's curated-jobs section.
+    """
+    if app_id is not None:
+        try:
+            app_id = int(app_id)
+        except (TypeError, ValueError):
+            raise DashboardError(f"Bad app_id: {app_id!r}")
+        if not source_id:
+            source_id = _source_id_for_app(app_id)
+    if not source_id and app_id is None:
+        raise DashboardError("Provide a source_id or an app_id to dismiss.")
+    d = dismissed_ids()
+    if source_id:
+        d["source_ids"].add(str(source_id))
+    if app_id is not None:
+        d["app_ids"].add(app_id)
+    _save_dismissed(d)
+    log.debug("dismissed job source_id=%r app_id=%r", source_id, app_id)
+    return {"dismissed": True, "source_id": str(source_id or ""),
+            "app_id": app_id}
+
+
+def run_tailor_diff(kind: str, company: str, role: str, jd: str,
+                    tone: str = "confident", length: str = "one-page") -> dict:
+    """Tailored text + keyword coverage vs the JD.
+
+    Returns {text, coverage: {covered: [...], missing: [...]}, changes: []}.
+    Coverage is computed from the same skill lexicon ``match`` uses, so the
+    chips agree with the match breakdown.
+    """
+    from candid import tailor as T, profile as Prof, match as M
+    if kind not in ("resume", "cover-letter"):
+        raise DashboardError("kind must be 'resume' or 'cover-letter'.")
+    if not (jd or "").strip():
+        raise DashboardError("Paste a job description first.")
+    profile = Prof.load_profile()
+    if kind == "resume":
+        text = T.build_resume(profile, jd, company=company, role=role,
+                              tone=tone, length=length)
+    else:
+        text = T.build_cover_letter(profile, jd, company=company, role=role,
+                                    tone=tone, hook="")
+    must, nice = M._jd_skills(jd)
+    pskills = set(profile.get("skills", []))
+    wanted = must | nice
+    return {
+        "text": text,
+        "coverage": {
+            "covered": sorted(wanted & pskills),
+            "missing": sorted(wanted - pskills),
+        },
+        "changes": [],
+    }
 
 
 def prep_status() -> list[dict]:
@@ -344,6 +500,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path, qs = parsed.path, urllib.parse.parse_qs(parsed.query)
+        log.debug("GET %s", self.path)
         try:
             if path == "/":
                 self._serve_html()
@@ -372,14 +529,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             else:
                 _send_json(self, {"error": "not found"}, 404)
         except DashboardError as e:
+            log.debug("GET %s -> 400: %s", self.path, e)
             _send_json(self, {"error": str(e)}, 400)
         except Exception as e:  # noqa: BLE001 — never leak tracebacks to UI
+            log.warning("GET %s -> 500: %s: %s", self.path,
+                        type(e).__name__, e)
             _send_json(self, {"error": f"{type(e).__name__}: {e}"}, 500)
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         ctype = self.headers.get("Content-Type", "")
+        log.debug("POST %s", self.path)
         # file uploads bypass the JSON reader (it would consume rfile)
         if path == "/api/import" and "multipart/form-data" in ctype:
             try:
@@ -401,12 +562,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     except OSError:
                         pass
             except DashboardError as e:
+                log.debug("POST %s (upload) -> 400: %s", self.path, e)
                 _send_json(self, {"error": str(e)}, 400)
             except Exception as e:  # noqa: BLE001
                 name = type(e).__name__
                 if name in ("GmailError", "LinkedInError", "ValueError"):
+                    log.debug("POST %s (upload) -> 400: %s: %s",
+                              self.path, name, e)
                     _send_json(self, {"error": str(e)}, 400)
                 else:
+                    log.warning("POST %s (upload) -> 500: %s: %s",
+                                self.path, name, e)
                     _send_json(self, {"error": f"{name}: {e}"}, 500)
             return
         body = _read_json(self)
@@ -464,16 +630,40 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     return
                 _send_json(self, run_import(src_name, src_path))
                 return
+            if path == "/api/curate":
+                _send_json(self, run_curate(
+                    role=body.get("role", ""),
+                    location=body.get("location", ""),
+                    remote=bool(body.get("remote", False)),
+                    level=body.get("level") or None,
+                    limit=body.get("limit", 15),
+                    sources=body.get("sources") or None))
+                return
+            if path == "/api/jobs/dismiss":
+                _send_json(self, dismiss_job(
+                    source_id=body.get("source_id"),
+                    app_id=body.get("app_id")))
+                return
+            if path == "/api/tailor-diff":
+                _send_json(self, run_tailor_diff(
+                    body.get("kind", "resume"), body.get("company", ""),
+                    body.get("role", ""), body.get("jd", ""),
+                    tone=body.get("tone", "confident"),
+                    length=body.get("length", "one-page")))
+                return
             _send_json(self, {"error": "not found"}, 404)
         except DashboardError as e:
+            log.debug("POST %s -> 400: %s", self.path, e)
             _send_json(self, {"error": str(e)}, 400)
         except Exception as e:  # noqa: BLE001
             # map known domain errors to 400
             name = type(e).__name__
             if name in ("TrackerError", "PrepError", "GmailError", "OnboardError",
-                        "MatchError", "ValueError"):
+                        "MatchError", "JobsError", "ValueError"):
+                log.debug("POST %s -> 400: %s: %s", self.path, name, e)
                 _send_json(self, {"error": str(e)}, 400)
             else:
+                log.warning("POST %s -> 500: %s: %s", self.path, name, e)
                 _send_json(self, {"error": f"{name}: {e}"}, 500)
 
     def _serve_html(self):

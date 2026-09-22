@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -76,6 +77,31 @@ def _get(row: dict, *names: str) -> str:
     return ""
 
 
+_BULLET_PREFIX = re.compile(r"^\s*(?:[•·▪◦\-\*\+–—>]|\d{1,2}[.)])\s+")
+
+
+def _desc_to_bullets(desc: str, limit: int = 12) -> list[str]:
+    """Turn a LinkedIn position description into clean bullets.
+
+    Handles explicit bullet markers (•, -, *, 1.), line-broken fragments,
+    and paragraph-style descriptions (split into sentences as a fallback).
+    """
+    if not desc or not desc.strip():
+        return []
+    bullets: list[str] = []
+    for raw in desc.splitlines():
+        line = _BULLET_PREFIX.sub("", raw).strip()
+        if line:
+            bullets.append(line)
+    if len(bullets) <= 1 and len(desc.strip()) > 200:
+        # paragraph style: split into sentences
+        sents = [s.strip() for s in
+                 re.split(r"(?<=[.!?])\s+", desc.strip()) if s.strip()]
+        if len(sents) > 1:
+            bullets = sents
+    return bullets[:limit]
+
+
 def _parse_positions(rows: list[dict]) -> list[dict]:
     entries = []
     for r in rows:
@@ -87,12 +113,14 @@ def _parse_positions(rows: list[dict]) -> list[dict]:
         finished = _get(r, "Finished On", "End Date")
         dates = " – ".join(x for x in (started, finished) if x)
         desc = _get(r, "Description")
-        bullets = [b.strip(" •·-*") for b in desc.splitlines() if b.strip()] if desc else []
+        bullets = _desc_to_bullets(desc)
+        loc = _get(r, "Location", "Geo Location")
         entries.append({
             "title": title,
             "company": company,
             "dates": dates,
-            "bullets": bullets[:12],
+            "bullets": bullets,
+            "location": loc,
         })
     return entries
 
@@ -100,15 +128,51 @@ def _parse_positions(rows: list[dict]) -> list[dict]:
 def _parse_education(rows: list[dict]) -> list[dict]:
     entries = []
     for r in rows:
-        school = _get(r, "School Name", "School")
+        school = _get(r, "School Name", "School", "University", "Institution")
         if not school:
             continue
+        degree = _get(r, "Degree Name", "Degree", "Degree Type")
+        field = _get(r, "Field of Study", "Field", "Major", "Area of Study")
+        if field and field.lower() not in (degree or "").lower():
+            degree = f"{degree}, {field}".strip(", ") if degree else field
+        started = _get(r, "Start Date", "Started On")
+        finished = _get(r, "End Date", "Finished On")
+        dates = " – ".join(x for x in (started, finished) if x).strip(" –")
+        notes = _get(r, "Notes", "Activities", "Activities and Societies")
         entries.append({
             "school": school,
-            "degree": _get(r, "Degree Name", "Degree"),
-            "dates": " – ".join(x for x in (_get(r, "Start Date"), _get(r, "End Date")) if x).strip(" –"),
+            "degree": degree,
+            "dates": dates,
+            "notes": notes[:300],
         })
     return entries[:6]
+
+
+def _parse_skills(rows: list[dict]) -> tuple[list[str], list[dict]]:
+    """Skills.csv rows → (names, [{name, endorsements}]).
+
+    Endorsement counts are only present in some export variants; when the
+    column is absent every skill just gets its name.
+    """
+    names: list[str] = []
+    endorsed: list[dict] = []
+    for r in rows:
+        name = _get(r, "Name")
+        if not name:
+            continue
+        names.append(name)
+        raw_count = _get(r, "Endorsements", "Endorsement Count",
+                         "Number of Endorsements", "EndorsementCount",
+                         "Endorsements Count")
+        count = 0
+        if raw_count:
+            try:
+                count = int(re.sub(r"[^\d]", "", raw_count) or "0")
+            except (ValueError, TypeError):
+                count = 0
+        if count:
+            endorsed.append({"name": name, "endorsements": count})
+    return names, endorsed
 
 
 def parse_export(zip_path: str | Path) -> dict:
@@ -128,12 +192,14 @@ def parse_export(zip_path: str | Path) -> dict:
     prof = prof_rows[0] if prof_rows else {}
     first = _get(prof, "First Name")
     last = _get(prof, "Last Name")
+    skills_raw, skills_endorsed = _parse_skills(csvs.get("Skills.csv", []))
     parsed = {
         "name": f"{first} {last}".strip(),
         "headline": _get(prof, "Headline"),
         "location": _get(prof, "Location", "Geo Location"),
         "summary": _get(prof, "Summary")[:600],
-        "skills_raw": [_get(r, "Name") for r in csvs.get("Skills.csv", []) if _get(r, "Name")],
+        "skills_raw": skills_raw,
+        "skills_with_endorsements": skills_endorsed,
         "experience": _parse_positions(csvs.get("Positions.csv", [])),
         "education": _parse_education(csvs.get("Education.csv", [])),
         "files_found": sorted(csvs.keys()),
@@ -160,6 +226,7 @@ def to_profile(parsed: dict) -> dict:
         "summary": parsed.get("summary", ""),
         "skills": skills,
         "linkedin_skills_raw": parsed.get("skills_raw", []),
+        "linkedin_skills_endorsed": parsed.get("skills_with_endorsements", []),
         "experience": experience,
         "education": parsed.get("education", []),
         "years_experience": years,
@@ -189,6 +256,8 @@ def _merge_profiles(base: dict, new: dict) -> dict:
             merged[field] = new[field]
     if new.get("linkedin_skills_raw"):
         merged["linkedin_skills_raw"] = new["linkedin_skills_raw"]
+    if new.get("linkedin_skills_endorsed"):
+        merged["linkedin_skills_endorsed"] = new["linkedin_skills_endorsed"]
     from candid import profile as P
     merged["years_experience"] = P._years_from_dates(merged.get("experience", []))
     merged["seniority"] = P._seniority_for(

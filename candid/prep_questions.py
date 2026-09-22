@@ -6,7 +6,10 @@ its source and, where known, when it was reported — so the generated prep
 packs never invent "recently asked" questions.
 
 Companies are keyed by a normalized name (lowercase, alphanumeric only);
-see interview_prep.normalize_company() for the matching logic.
+see candid.prep._find_company() for the matching logic.
+
+Optional per-question tags: "difficulty" (easy/medium/hard) and "frequency"
+(high/medium/low) - set only where a source states or clearly implies them.
 
 GENERIC_BANKS are role-family question banks clearly labeled in the pack as
 *general preparation* (not verified as asked at that company).
@@ -452,6 +455,176 @@ QUESTIONS_DB: dict[str, list[dict]] = {
             "reported": "~2026 (markets roles; relevant for quant-adjacent loops)",
         },
     ],
+    "meta": [
+        {
+            "q": "Facebook is considering building a restaurant recommendation system for the News Feed. How would you test this feature? What metrics would you look at, and how would you decide whether to roll it out?",
+            "category": "stats",
+            "source": "Medium (@kaylaxie) - 'Dive Deeper into Meta's Interview Questions' (A/B testing analytical-reasoning round)",
+            "url": "https://medium.com/@kaylaxie/dive-deeper-into-metas-interview-questions-25f386b28bc2",
+            "reported": "Mar 2025",
+            "difficulty": "medium",
+            "frequency": "high",
+        },
+        {
+            "q": "Design an A/B test for a new Facebook News Feed ranking algorithm: choose metrics (engagement, time spent, MSI, well-being), size it for power, and say what you would do if a guardrail metric declined while the primary metric improved.",
+            "category": "stats",
+            "source": "Interview Query - Meta Data Scientist Interview Guide (2026), candidate report",
+            "url": "https://www.interviewquery.com/guides/meta-data-scientist",
+            "reported": "2026",
+            "difficulty": "hard",
+            "frequency": "high",
+        },
+        {
+            "q": "How would you make a forecast using historical data that is biased or unreliable - and how would you communicate the uncertainty around it?",
+            "category": "stats",
+            "source": "Interview Query - Meta Data Scientist Interview Guide (2026), candidate report (behavioral/analytical round)",
+            "url": "https://www.interviewquery.com/guides/meta-data-scientist",
+            "reported": "2026",
+            "difficulty": "medium",
+        },
+        {
+            "q": "How do you embrace ambiguity and work comfortably with minimal guidelines or information?",
+            "category": "behavioral",
+            "source": "MasterInterview - Meta interview question bank (MLE/DS tracks)",
+            "url": "https://www.masterinterview.ai/questionset/company/meta-facebook",
+            "reported": "question bank (ongoing)",
+            "difficulty": "hard",
+            "frequency": "medium",
+        },
+    ],
+    "amazon": [
+        {
+            "q": "Write a SQL query for month-to-month user retention rate.",
+            "category": "sql",
+            "source": "Prepfully - Amazon Data Scientist Interview Guide ('most important interview questions')",
+            "url": "https://prepfully.com/interview-guides/amazon-data-scientist",
+            "reported": "guide (ongoing)",
+            "difficulty": "medium",
+            "frequency": "high",
+        },
+        {
+            "q": "Describe different JOINs in SQL.",
+            "category": "sql",
+            "source": "Prepfully - Amazon Data Scientist Interview Guide ('most important interview questions')",
+            "url": "https://prepfully.com/interview-guides/amazon-data-scientist",
+            "reported": "guide (ongoing)",
+            "difficulty": "easy",
+            "frequency": "high",
+        },
+        {
+            "q": "How does a logistic regression model know what the coefficients are?",
+            "category": "ml",
+            "source": "Prepfully - Amazon Data Scientist Interview Guide ('most important interview questions')",
+            "url": "https://prepfully.com/interview-guides/amazon-data-scientist",
+            "reported": "guide (ongoing)",
+            "difficulty": "medium",
+            "frequency": "high",
+        },
+        {
+            "q": "Given an unfair coin with probability of heads not equal to 0.5, what algorithm could you use to create a list of random 1s and 0s?",
+            "category": "stats",
+            "source": "IGotAnOffer - Amazon data scientist interview questions (coding/modeling/DSA)",
+            "url": "https://igotanoffer.com/blogs/tech/amazon-data-science-interview",
+            "reported": "guide (ongoing)",
+            "difficulty": "medium",
+        },
+        {
+            "q": "How do you find the salary gap between the top two highest-paid employees in each department using window functions?",
+            "category": "sql",
+            "source": "Interview Kickstart - 'A 2026 Guide to Cracking Amazon Data Scientist Interview' (SQL section)",
+            "url": "https://interviewkickstart.com/interview-questions/companies/amazon/data-scientist-interview-guide",
+            "reported": "2026",
+            "difficulty": "medium",
+        },
+    ],
+    "google": [
+        {
+            "q": "Design the YouTube recommendation system: data collection, preprocessing, model architecture, loss function, optimization, serving, and monitoring.",
+            "category": "system_design",
+            "source": "IGotAnOffer - Google Machine Learning Engineer Interview Guide (ML system design examples, from Glassdoor/Blind candidate reports)",
+            "url": "https://igotanoffer.com/blogs/tech/google-machine-learning-engineer-interview",
+            "reported": "guide (ongoing)",
+            "difficulty": "hard",
+            "frequency": "high",
+        },
+        {
+            "q": "How would you build, train, and deploy a system that detects if multimedia or ad content violates terms or contains offensive material?",
+            "category": "system_design",
+            "source": "IGotAnOffer - Google Machine Learning Engineer Interview Guide (ML system design examples, from Glassdoor/Blind candidate reports)",
+            "url": "https://igotanoffer.com/blogs/tech/google-machine-learning-engineer-interview",
+            "reported": "guide (ongoing)",
+            "difficulty": "hard",
+        },
+        {
+            "q": "Derive the gradient of cross-entropy loss with respect to softmax inputs.",
+            "category": "ml",
+            "source": "GitHub (anthonyjohn17/ai-pm-kit) - Google ML/DS/AI Interview Guide (math-depth section)",
+            "url": "https://github.com/anthonyjohn17/ai-pm-kit/blob/HEAD/ai-engineering-interview/senior-ai-ml-interview-guide/company-specific/google/interview-guide.md",
+            "reported": "guide (ongoing)",
+            "difficulty": "hard",
+        },
+        {
+            "q": "What is the time complexity of training a support vector machine?",
+            "category": "ml",
+            "source": "Glassdoor - Google Machine Learning Engineer interview report (Mountain View, interviewed Jul 2026)",
+            "url": "https://www.glassdoor.com.hk/Interview/Google-Interview-RVW76653005.htm",
+            "reported": "Jul 2026",
+            "difficulty": "medium",
+        },
+        {
+            "q": "Implement a multi-head attention class, plus modeling questions on state-of-the-art models.",
+            "category": "ml",
+            "source": "Glassdoor - Google Machine Learning Engineer interview questions (candidate report)",
+            "url": "https://www.glassdoor.ca/Interview/Google-Machine-Learning-Engineer-Interview-Questions-EI_IE9079.0,6_KO7,32.htm",
+            "reported": "candidate report (ongoing)",
+            "difficulty": "hard",
+        },
+    ],
+    "openai": [
+        {
+            "q": "Explain why layer normalization improves training stability.",
+            "category": "ml",
+            "source": "Design Gurus - 'OpenAI Interview Guide: Process, Questions, and How to Prepare' (ML/research questions)",
+            "url": "https://www.designgurus.io/blog/openai-interview-guide",
+            "reported": "guide (ongoing)",
+            "difficulty": "medium",
+            "frequency": "high",
+        },
+        {
+            "q": "Find and fix the bugs in a ~300-line transformer implementation, then add KV caching.",
+            "category": "python",
+            "source": "Design Gurus - 'OpenAI Interview Guide: Process, Questions, and How to Prepare' (ML/research questions)",
+            "url": "https://www.designgurus.io/blog/openai-interview-guide",
+            "reported": "guide (ongoing)",
+            "difficulty": "hard",
+        },
+        {
+            "q": "Implement an LRU cache.",
+            "category": "python",
+            "source": "landedjobs/awesome-ai-engineer-interview - OpenAI company guide ('Questions reported in the wild', phone coding round)",
+            "url": "https://github.com/landedjobs/awesome-ai-engineer-interview/blob/HEAD/company/openai.md",
+            "reported": "candidate reports",
+            "difficulty": "medium",
+            "frequency": "high",
+        },
+        {
+            "q": "Design the serving stack for ChatGPT.",
+            "category": "system_design",
+            "source": "landedjobs/awesome-ai-engineer-interview - OpenAI company guide ('Questions reported in the wild', system design round)",
+            "url": "https://github.com/landedjobs/awesome-ai-engineer-interview/blob/HEAD/company/openai.md",
+            "reported": "candidate reports",
+            "difficulty": "hard",
+            "frequency": "high",
+        },
+        {
+            "q": "How do you evaluate a generative model after fine-tuning?",
+            "category": "ml",
+            "source": "landedjobs/awesome-ai-engineer-interview - OpenAI company guide ('Questions reported in the wild', ML domain round)",
+            "url": "https://github.com/landedjobs/awesome-ai-engineer-interview/blob/HEAD/company/openai.md",
+            "reported": "candidate reports",
+            "difficulty": "medium",
+        },
+    ],
 }
 
 
@@ -495,5 +668,13 @@ GENERIC_BANKS: dict[str, list[dict]] = {
         {"q": "Describe your biggest professional failure and what it changed about how you work.", "category": "behavioral"},
         {"q": "Tell me about a time you had to learn something completely new under a deadline.", "category": "behavioral"},
         {"q": "Why this company, and why this role specifically?", "category": "behavioral"},
+    ],
+    "software_engineer": [
+        {"q": "Design a URL shortener: API, data model, and how you scale to 100M URLs a day.", "category": "system_design"},
+        {"q": "Design a rate limiter for an API. Fixed window, sliding window, or token bucket - and why?", "category": "system_design"},
+        {"q": "A production service's p99 latency just spiked. Walk me through your debugging, step by step.", "category": "process"},
+        {"q": "Explain how a hash map works, and when its performance degrades.", "category": "python"},
+        {"q": "How do you make a deploy safe? Talk about canary releases, feature flags, and rollback.", "category": "process"},
+        {"q": "Walk me through what happens, end to end, when you type a URL into a browser and hit enter.", "category": "process"},
     ],
 }

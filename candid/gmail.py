@@ -28,6 +28,7 @@ from candid import config as C
 # proposal kind -> tracker status written on confirm
 KIND_TO_STATUS = {
     "recruiter_outreach": "saved",
+    "recruiter_spam": "saved",
     "interview_invite": "selected_for_interview",
     "offer": "offer",
     "rejection": "rejected",
@@ -74,22 +75,71 @@ def iter_mbox_files(path: str | Path) -> list[Path]:
     raise GmailError(f"Not found: {p}")
 
 
-def _message_text(msg) -> str:
-    """Best-effort plain-text body of an email.message.Message."""
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() == "text/plain" and \
-                    "attachment" not in part.get("Content-Disposition", ""):
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    return payload.decode(charset, errors="replace")
+def _decode_payload(payload, charset: str | None) -> str:
+    """Decode a MIME payload's bytes defensively. Never raises."""
+    if payload is None:
         return ""
-    payload = msg.get_payload(decode=True)
-    if isinstance(payload, bytes):
-        charset = msg.get_content_charset() or "utf-8"
-        return payload.decode(charset, errors="replace")
-    return str(payload or "")
+    if isinstance(payload, str):
+        return payload
+    candidates = [charset, "utf-8", "windows-1252", "latin-1"]
+    for cs in candidates:
+        if not cs:
+            continue
+        try:
+            return payload.decode(cs)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return payload.decode("utf-8", errors="replace")
+
+
+def _strip_html(html: str) -> str:
+    """Remove tags/scripts from an HTML body. Never raises."""
+    try:
+        text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html,
+                      flags=re.I | re.S)
+        text = re.sub(r"<[^>]+>", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+    except Exception:
+        return ""
+
+
+def _message_text(msg) -> str:
+    """Best-effort plain-text body of an email.message.Message.
+
+    Handles nested multiparts, base64/quoted-printable encodings, missing
+    charsets, and falls back to tag-stripped HTML when no text/plain part
+    exists. Never raises — worst case returns "".
+    """
+    try:
+        if msg.is_multipart():
+            plains: list[str] = []
+            htmls: list[str] = []
+            for part in msg.walk():
+                if part.is_multipart():
+                    continue
+                disp = (part.get("Content-Disposition") or "").lower()
+                if "attachment" in disp:
+                    continue
+                ctype = part.get_content_type()
+                text = _decode_payload(part.get_payload(decode=True),
+                                       part.get_content_charset())
+                if ctype == "text/plain":
+                    plains.append(text)
+                elif ctype == "text/html":
+                    htmls.append(text)
+            body = "\n".join(p for p in plains if p.strip()).strip()
+            if body:
+                return body
+            if htmls:
+                return _strip_html("\n".join(htmls))
+            return ""
+        text = _decode_payload(msg.get_payload(decode=True),
+                               msg.get_content_charset())
+        if msg.get_content_type() == "text/html":
+            return _strip_html(text)
+        return text.strip()
+    except Exception:
+        return ""
 
 
 def parse_mbox(path: str | Path) -> list[dict]:
@@ -126,22 +176,49 @@ def parse_mbox(path: str | Path) -> list[dict]:
 
 _REJECTION = re.compile(
     r"unfortunately|not moving forward|decided to (pursue|move forward with) other|"
-    r"regret to inform|won't be (moving|proceeding)", re.I)
+    r"regret to inform|won't be (moving|proceeding)|"
+    r"have decided not to (move|proceed)|position has been filled|"
+    r"thank you for your interest.{0,80}not (?:a |an )?(?:fit|match)",
+    re.I)
 _OFFER = re.compile(
     r"offer letter|offer package|congratulations.{0,60}offer|welcome to the team|"
-    r"your offer from", re.I)
+    r"your offer from|signed offer|compensation package.{0,40}offer|"
+    r"we'?d like to (extend|make) (you )?an offer",
+    re.I)
 _INTERVIEW = re.compile(
     r"interview|phone screen|technical screen|onsite|on-site|next round|"
-    r"schedule (a|your) (call|interview)|your availability|assessment (link|invite)", re.I)
+    r"schedule (a|your) (call|interview)|your availability|assessment (link|invite)|"
+    r"coding (challenge|assessment)|take-home|case study interview",
+    re.I)
+# Mass/staffing spam signals — needs 2+ hits to count as spam so a single
+# "urgent" from a real recruiter doesn't get flagged.
+_SPAM = [
+    "urgent hiring", "immediate opening", "immediate hire", "act fast",
+    "act now", "limited slots", "multiple openings", "mass hiring",
+    "no experience required", "earn $", "make money fast", "work from home",
+    "dear candidate", "dear job seeker", "dear applicant",
+    "click here to apply", "guaranteed placement", "no interview required",
+    "spot offer", "!!!", "$$$", "100% placement",
+]
 _RECRUITER = re.compile(
     r"recruit|talent acquisition|talent partner|staffing|reaching out|"
     r"your (profile|background|experience)|open (role|position|opportunity)|"
-    r"would you be (open|interested)", re.I)
+    r"would you be (open|interested)|saw your (profile|resume)|"
+    r"came across your (profile|resume)",
+    re.I)
+
+
+def _spam_hits(text: str) -> int:
+    low = text.lower()
+    return sum(1 for kw in _SPAM if kw in low)
 
 
 def classify_message(subject: str, sender: str, snippet: str) -> tuple[str, float]:
-    """Classify a message. Returns (kind, confidence). Kinds: interview_invite,
-    offer, rejection, recruiter_outreach, other."""
+    """Classify a message. Returns (kind, confidence).
+
+    Kinds: interview_invite, offer, rejection, recruiter_outreach,
+    recruiter_spam, other.
+    """
     text = f"{subject} {snippet}"
     if _OFFER.search(text):
         return "offer", 0.85
@@ -149,6 +226,8 @@ def classify_message(subject: str, sender: str, snippet: str) -> tuple[str, floa
         return "rejection", 0.8
     if _INTERVIEW.search(text):
         return "interview_invite", 0.75
+    if _spam_hits(text) >= 2:
+        return "recruiter_spam", 0.55
     if _RECRUITER.search(text) or _RECRUITER.search(sender):
         return "recruiter_outreach", 0.6
     return "other", 0.0
@@ -229,22 +308,38 @@ def _save_proposals(proposals: list[dict], path: Path | None = None) -> Path:
     return p
 
 
+def _proposal_key(company: str, role: str, kind: str) -> tuple[str, str, str] | None:
+    """Dedupe key for a proposal. None when there's nothing to key on."""
+    def n(s: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+    key = (n(company), n(role), kind)
+    return key if key[0] else None
+
+
 def import_mbox(path: str | Path, max_messages: int = 0,
                 proposals_path: Path | None = None) -> dict:
     """Import a Takeout .mbox file (or directory of them).
 
     Parses, classifies, and extracts recruiter/interview/offer mail and
-    stores NEW proposals (status=pending). Re-imports dedupe on Message-ID.
-    Nothing is written to the tracker — confirm each proposal yourself.
+    stores NEW proposals (status=pending). Re-imports dedupe on Message-ID,
+    and proposals dedupe on (company, role, kind) so the same thread can't
+    propose the same application twice. Nothing is written to the tracker —
+    confirm each proposal yourself.
 
-    Returns {"files", "messages", "new_proposals", "skipped_other"}.
+    Returns {"files", "messages", "new_proposals", "skipped_other",
+             "skipped_duplicates"}.
     """
     files = iter_mbox_files(path)
     proposals = _load_proposals(proposals_path)
     seen_ids = {p.get("message_id") for p in proposals}
+    seen_keys = {k for p in proposals
+                 if (k := _proposal_key(p.get("company", ""),
+                                        p.get("role", ""),
+                                        p.get("kind", "")))}
     new: list[dict] = []
     total = 0
     skipped_other = 0
+    skipped_duplicates = 0
     for f in files:
         for msg in parse_mbox(f):
             if max_messages and total >= max_messages:
@@ -261,6 +356,12 @@ def import_mbox(path: str | Path, max_messages: int = 0,
             company, role, xconf = extract_company_role(msg["subject"],
                                                         msg["from"],
                                                         msg["snippet"])
+            key = _proposal_key(company, role, kind)
+            if key and key in seen_keys:
+                skipped_duplicates += 1
+                continue
+            if key:
+                seen_keys.add(key)
             new.append({
                 "id": max([p.get("id", 0) for p in proposals] + [0]) + len(new) + 1,
                 "kind": kind,
@@ -285,6 +386,7 @@ def import_mbox(path: str | Path, max_messages: int = 0,
         "messages": total,
         "new_proposals": new,
         "skipped_other": skipped_other,
+        "skipped_duplicates": skipped_duplicates,
     }
 
 

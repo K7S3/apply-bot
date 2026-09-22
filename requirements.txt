@@ -1,6 +1,8 @@
-# applybot dependencies
-google-genai>=1.0.0      # Gemini API (resume review with gemini-3.7-flash)
-openpyxl>=3.1.0          # read/write applications.xlsx
-playwright>=1.40.0       # browser automation (job applications)
-pyyaml>=6.0.0            # profile.yaml parsing
-fpdf2>=2.7.0             # resume PDF generation for upload (portals reject .txt)
+# candid dependencies
+#
+# candid is stdlib-only by design. The single optional dependency below is
+# needed only for `onboard --resume file.pdf` (PDF text extraction).
+# Everything else — matching, tailoring, tracker, dashboard, judge —
+# runs on the standard library alone.
+
+pypdf>=3.0.0  # optional: PDF resume parsing

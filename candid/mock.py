@@ -139,12 +139,29 @@ def run_problem(problem_id: str, code: str) -> dict:
 
 
 def render_verdict(problem_id: str, result: dict) -> str:
+    """Readable verdict block: outcome, pass counts, then failure details."""
     v = result["verdict"]
     icon = {"accepted": "✅", "wrong_answer": "❌", "time_limit_exceeded": "⏱️",
             "runtime_error": "💥"}.get(v, "❓")
-    lines = [f"{icon} Verdict: {v.replace('_', ' ').upper()}",
-             result.get("summary", ""), ""]
+    tests = result.get("tests", [])
+    n = len(tests)
+    passed = sum(1 for t in tests if t.get("verdict") == "accepted")
+    vis = [t for t in tests if not t.get("hidden")]
+    vis_passed = sum(1 for t in vis if t.get("verdict") == "accepted")
+    lines = [
+        f"{icon} {v.replace('_', ' ').upper()} - {problem_id}",
+        f"{passed}/{n} tests passed ({vis_passed}/{len(vis)} visible, "
+        f"{passed - vis_passed}/{n - len(vis)} hidden)",
+    ]
+    summary = result.get("summary", "")
+    if summary:
+        lines.append(summary)
+    lines.append("")
     lines += J.failing_details(result)
+    if v == "time_limit_exceeded":
+        lines += ["",
+                  "Tip: infinite loops fail fast here - add a progress print or a "
+                  "loop counter locally to find where it spins."]
     return "\n".join(lines).strip()
 
 
