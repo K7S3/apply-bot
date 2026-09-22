@@ -36,9 +36,10 @@ COMMANDS = [
 ]
 
 SUBCOMMANDS = {
-    "profile": ["show"],
+    "profile": ["show", "autofill"],
     "tailor": ["resume", "cover-letter"],
-    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
+    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv",
+              "export-ics"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
@@ -55,6 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "AutofillError", "IcalError",
     "ValueError",
 }
 
@@ -72,6 +74,8 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "AutofillError": "python -m candid profile autofill --help",
+    "IcalError": "python -m candid track export-ics --help",
 }
 
 
@@ -147,6 +151,10 @@ def cmd_onboard(a):
 
 
 def cmd_profile_show(a):
+    if getattr(a, "what", "show") == "autofill":
+        from candid import autofill as A
+        print(A.autofill_kit(section=a.section or "all"))
+        return
     from candid import profile as P
     print(P.profile_card(_profile()))
 
@@ -267,6 +275,10 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+    elif a.what == "export-ics":
+        from candid import ical as I
+        path, events, skipped = I.export_ics(a.out)
+        print(I.render_report(path, events, skipped))
 
 
 def cmd_prep(a):
@@ -515,11 +527,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_onboard)
 
     # profile
-    s = _sub(sub, "profile", "Show your stored profile.", [
+    s = _sub(sub, "profile", "Show your stored profile / generate the autofill kit.", [
         "python -m candid profile",
         "python -m candid profile show",
+        "python -m candid profile autofill",
+        "python -m candid profile autofill --section work",
     ])
-    s.add_argument("what", nargs="?", default="show", choices=["show"])
+    s.add_argument("what", nargs="?", default="show", choices=["show", "autofill"],
+                   help="show: profile card · autofill: copy-pasteable form answers (fills, never submits)")
+    s.add_argument("--section", default="all",
+                   choices=["work", "skills", "education", "eeo", "all"],
+                   help="Which autofill section to print (default: all)")
     s.set_defaults(func=cmd_profile_show)
 
     # match
@@ -606,6 +624,12 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track export-csv tracker.csv",
     ])
     t.add_argument("dest", help="Destination CSV file path")
+    t = _sub(ts, "export-ics", "Export interviews + follow-up reminders as an .ics calendar file.", [
+        "python -m candid track export-ics",
+        "python -m candid track export-ics --out calendar.ics",
+    ])
+    t.add_argument("--out", default="candid.ics",
+                   help="Destination .ics file path (default: candid.ics)")
     s.set_defaults(func=cmd_track)
 
     # prep
