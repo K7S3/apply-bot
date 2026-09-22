@@ -40,7 +40,7 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
-    "offer": ["add", "list", "compare", "export"],
+    "offer": ["add", "list", "compare", "export", "parse"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -308,6 +308,15 @@ def cmd_offer(a):
         path = O.export_comparison(O.list_offers(),
                                    path=a.out or None)
         print(f"Offer comparison exported to {path}")
+    elif a.what == "parse":
+        cmd_offer_parse(a)
+
+
+def cmd_offer_parse(a):
+    from candid import offer_parse as OP
+    OP.confirm_and_add(
+        OP.parse_letter_text(OP.read_letter_text(a.letter)),
+        company=a.company, role=a.role, yes=a.yes, source=str(a.letter))
 
 
 def cmd_negotiate(a):
@@ -689,6 +698,14 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid offer export --out offers.md",
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
+    t = _sub(os_, "parse", "Parse an offer letter PDF into an offer record.", [
+        "python -m candid offer parse letter.pdf --company Acme --role \"Data Scientist\"",
+        "python -m candid offer parse letter.pdf --company Acme --role DS --yes",
+    ])
+    t.add_argument("letter", help="Offer letter file (.pdf, .txt, .md)")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--yes", action="store_true",
+                   help="Accept the extracted fields without confirmation")
     s.set_defaults(func=cmd_offer)
 
     # negotiate
