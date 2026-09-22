@@ -32,13 +32,14 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "network",
 ]
 
 SUBCOMMANDS = {
     "profile": ["show"],
     "tailor": ["resume", "cover-letter"],
-    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
+    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv", "ghosts"],
+    "network": ["add", "list", "thanks", "mark-thanked"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
@@ -55,6 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "GhostError", "NetworkError",
     "ValueError",
 }
 
@@ -72,6 +74,8 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "GhostError": "python -m candid track ghosts --help",
+    "NetworkError": "python -m candid network --help",
 }
 
 
@@ -267,6 +271,36 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+    elif a.what == "ghosts":
+        from candid import ghosts as G
+        ghosts = G.find_ghosts(days=a.days)
+        print(G.render_ghosts(ghosts, days=a.days))
+
+
+def cmd_network(a):
+    from candid import network as N
+    if a.what == "add":
+        rec = N.add(a.type, a.contact, company=a.company or "",
+                    role=a.role or "", notes=a.notes or "")
+        print(f"Logged {rec['type']} #{rec['id']}: {rec['contact']}"
+              + (f" @ {rec['company']}" if rec['company'] else ""))
+        if rec["type"] in N.THANK_YOU_TYPES:
+            print("Thank-you owed — see it with: python -m candid network thanks")
+    elif a.what == "list":
+        contacts = N.list_contacts(type_=a.type)
+        if a.json:
+            print(json.dumps(contacts, indent=2, default=str))
+            return
+        print(N.render_list(contacts))
+    elif a.what == "thanks":
+        if a.draft is not None:
+            prof = _profile()
+            print(N.thank_you_draft(a.draft, prof.get("name") or "Your Name"))
+        else:
+            print(N.render_thanks(N.thanks_owed()))
+    elif a.what == "mark-thanked":
+        rec = N.mark_thanked(a.id)
+        print(f"Marked #{rec['id']} ({rec['contact']}) as thanked.")
 
 
 def cmd_prep(a):
@@ -606,7 +640,53 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track export-csv tracker.csv",
     ])
     t.add_argument("dest", help="Destination CSV file path")
+    t = _sub(ts, "ghosts", "Flag applications quiet for N days (default 21).", [
+        "python -m candid track ghosts",
+        "python -m candid track ghosts --days 30",
+    ])
+    t.add_argument("--days", type=int, default=21,
+                   help="Flag apps with no status movement in this many days (default: 21)")
     s.set_defaults(func=cmd_track)
+
+    # network
+    s = _sub(sub, "network", "Networking CRM: coffee chats, referrals, thank-yous owed.", [
+        "python -m candid network add --type coffee-chat --contact \"Jane Doe\" --company Acme",
+        "python -m candid network add --type referral-received --contact \"Sam Lee\" --company Acme --role \"Data Scientist\"",
+        "python -m candid network list",
+        "python -m candid network thanks",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "add", "Log a coffee chat, received referral, or given referral.", [
+        "python -m candid network add --type coffee-chat --contact \"Jane Doe\" --company Acme",
+        "python -m candid network add --type referral-received --contact \"Sam Lee\" --company Acme --role \"Data Scientist\" --notes \"referred me for the ML role\"",
+        "python -m candid network add --type referral-given --contact \"Alex Rivera\" --company Globex --role \"Backend Engineer\"",
+    ])
+    t.add_argument("--type", required=True,
+                   choices=["coffee-chat", "referral-received", "referral-given"],
+                   help="Kind of networking entry")
+    t.add_argument("--contact", required=True, help="Person's name")
+    t.add_argument("--company", default=""); t.add_argument("--role", default="")
+    t.add_argument("--notes", default="")
+    t = _sub(ns, "list", "List networking contacts, optionally filtered by type.", [
+        "python -m candid network list",
+        "python -m candid network list --type coffee-chat",
+        "python -m candid network list --json",
+    ])
+    t.add_argument("--type", default=None,
+                   choices=["coffee-chat", "referral-received", "referral-given"])
+    t.add_argument("--json", action="store_true",
+                   help="Print the contact list as JSON (for scripting)")
+    t = _sub(ns, "thanks", "List thank-yous owed, with follow-up draft hooks.", [
+        "python -m candid network thanks",
+        "python -m candid network thanks --draft 2",
+    ])
+    t.add_argument("--draft", type=int, default=None, metavar="ID",
+                   help="Print the thank-you draft for this contact id")
+    t = _sub(ns, "mark-thanked", "Mark a contact's thank-you as sent.", [
+        "python -m candid network mark-thanked 2",
+    ])
+    t.add_argument("id", type=int, help="Network entry id")
+    s.set_defaults(func=cmd_network)
 
     # prep
     s = _sub(sub, "prep", "Build an interview prep pack.", [

@@ -1,7 +1,9 @@
 """Application tracker: add/list/update applications, filterable views, funnel stats.
 
 Stored as JSON at candid_data/tracker.json (git-ignored).
-Statuses: saved, applied, selected_for_interview, rejected, offer, withdrawn.
+Statuses: saved, applied, selected_for_interview, rejected, offer, withdrawn, archived.
+Terminal states (never flagged by the ghosting detector): offer, rejected,
+withdrawn, archived.
 """
 
 from __future__ import annotations
@@ -172,6 +174,7 @@ NEXT_ACTIONS = {
     "offer": "compare + negotiate",
     "rejected": "note lessons, keep moving",
     "withdrawn": "—",
+    "archived": "—",
 }
 
 
