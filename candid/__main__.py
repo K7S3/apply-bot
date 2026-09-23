@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "startups",
 ]
 
 SUBCOMMANDS = {
@@ -40,7 +40,7 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
-    "offer": ["add", "list", "compare", "export"],
+    "offer": ["add", "list", "compare", "export", "equity-notes", "compare-startup"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "startups": ["import", "list", "add", "remove", "set-stages",
+                "watch", "digest", "signals", "rank"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,9 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "StartupPrepError", "StartupWatchError", "StartupDigestError",
+    "StartupSignalError", "StartupRankError", "StartupListError",
+    "StartupFilterError", "StartupEquityError",
     "ValueError",
 }
 
@@ -72,6 +77,14 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "StartupPrepError": "python -m candid prep --help",
+    "StartupWatchError": "python -m candid startups --help",
+    "StartupDigestError": "python -m candid startups --help",
+    "StartupSignalError": "python -m candid startups --help",
+    "StartupRankError": "python -m candid startups --help",
+    "StartupListError": "python -m candid startups --help",
+    "StartupFilterError": "python -m candid jobs curate --help",
+    "StartupEquityError": "python -m candid offer --help",
 }
 
 
@@ -274,6 +287,10 @@ def cmd_prep(a):
     jd = _jd_text(a) if a.jd else ""
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
                                   app_id=a.app_id, location=a.location or "")
+    if getattr(a, "startup", False):
+        from candid import startup_prep as SP
+        markdown = SP.append_startup_section(markdown, a.company, a.role, jd=jd)
+        path.write_text(markdown, encoding="utf-8")
     print(f"Prep pack saved to {path}\n")
     print(markdown[:3000])
     if len(markdown) > 3000:
@@ -406,6 +423,9 @@ def cmd_jobs(a):
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
                     min_score=getattr(a, "min_score", 0) or 0)
+        if getattr(a, "stage", None) or getattr(a, "size", None):
+            from candid import jobs_startup_filters as SF
+            result["candidates"] = SF.apply_filters(a, result.get("candidates", []))
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -484,6 +504,55 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_startups(a):
+    if a.what in ("import", "list", "add", "remove", "set-stages"):
+        from candid import startup_lists as SL
+        SL.cmd_startups(a)
+        return
+    from candid import startup_watch as W
+    if a.what == "watch":
+        if a.watch_what == "add":
+            rec = W.add(a.name)
+            if rec.get("duplicate"):
+                print(f"{rec['name']} is already on the watchlist.")
+            else:
+                print(f"Watching {rec['name']}. Run `python -m candid startups watch check` to scan curated jobs.")
+        elif a.watch_what == "remove":
+            rec = W.remove(a.name)
+            print(f"Removed {rec['name']} from the watchlist.")
+        elif a.watch_what == "list":
+            print(W.render_list(W.list_watched()))
+        elif a.watch_what == "check":
+            res = W.check()
+            if a.json:
+                print(json.dumps(res, indent=2, default=str))
+            else:
+                print(W.render_check(res))
+    elif a.what == "digest":
+        from candid import startup_digest as D
+        digest = D.build_digest()
+        if a.json:
+            print(json.dumps(digest, indent=2, default=str))
+        elif getattr(a, "markdown", False):
+            print(D.render_markdown(digest))
+        else:
+            print(D.render_text(digest))
+    elif a.what == "signals":
+        from candid import startup_signals as SIG
+        rows = SIG.compute_signals(min_postings=a.min_postings)
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+        else:
+            print(SIG.render_signals(rows))
+    elif a.what == "rank":
+        from candid import startup_rank as SR
+        rows = SR.rank_startups(a.role)
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+        else:
+            print(SR.render_rank(rows, role=a.role))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -619,6 +688,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--startup", action="store_true",
+                   help="Append the startup-interview-loop section (founder chat, deep-dive, take-home planning, reference prep)")
     s.set_defaults(func=cmd_prep)
 
     # followup
@@ -689,6 +760,24 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid offer export --out offers.md",
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
+    from candid import startup_equity as SE
+    t = _sub(os_, "equity-notes", "Startup equity checklist and explainers for an offer.", [
+        "python -m candid offer equity-notes --offer-id 2",
+    ])
+    t.add_argument("--offer-id", dest="offer_id", type=int, required=True)
+    t.set_defaults(func=SE.cmd_offer_equity_notes)
+    t = _sub(os_, "compare-startup", "Model cash-vs-equity tradeoffs over 4 years.", [
+        "python -m candid offer compare-startup --offer-a 1 --offer-b 2",
+        "python -m candid offer compare-startup --offer-a 1 --offer-b 2 --growth high",
+        "python -m candid offer compare-startup --offer-a 1 --offer-b 2 --growth-rate 0.25 --json",
+    ])
+    t.add_argument("--offer-a", dest="offer_a", type=int, required=True)
+    t.add_argument("--offer-b", dest="offer_b", type=int, required=True)
+    t.add_argument("--growth", default="base", choices=["low", "base", "high"])
+    t.add_argument("--growth-rate", dest="growth_rate", type=float, default=None,
+                   help="Custom annual equity growth as a decimal (e.g. 0.25); overrides --growth")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=SE.cmd_offer_compare_startup)
     s.set_defaults(func=cmd_offer)
 
     # negotiate
@@ -821,6 +910,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    from candid import jobs_startup_filters as SF
+    SF.add_filter_args(t)
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
@@ -918,6 +1009,101 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # startups
+    from candid import startup_lists as SL
+    s = _sub(sub, "startups", "Startup ecosystem: registry, watchlist alerts, signals, digest.", [
+        "python -m candid startups import --csv startups.csv",
+        "python -m candid startups list --stage seed --remote-only",
+        "python -m candid startups watch add --name \"Acme AI\"",
+        "python -m candid startups signals",
+        "python -m candid startups digest",
+    ])
+    ss = _nested(s)
+    t = _sub(ss, "import", "Import startups from a CSV file.", [
+        "python -m candid startups import --csv startups.csv",
+    ])
+    t.add_argument("--csv", required=True, help="CSV with columns: name, stage, funding_total_usd, employees, url, remote_policy, notes")
+    t = _sub(ss, "list", "List startups, optionally filtered.", [
+        "python -m candid startups list",
+        "python -m candid startups list --stage seed --remote-only",
+        "python -m candid startups list --preferred --json",
+    ])
+    t.add_argument("--stage", default="", choices=SL.STAGES, help="Filter by funding stage")
+    t.add_argument("--remote-only", action="store_true", help="Only remote-friendly startups")
+    t.add_argument("--preferred", action="store_true", help="Only your preferred stages (see set-stages)")
+    t.add_argument("--json", action="store_true", help="JSON output")
+    t = _sub(ss, "add", "Add one startup.", [
+        'python -m candid startups add --name "Acme Labs" --stage seed --funding-usd 2.5M --remote-policy remote',
+    ])
+    t.add_argument("--name", required=True)
+    t.add_argument("--stage", default="", choices=SL.STAGES)
+    t.add_argument("--funding-usd", default=None, help="Total funding, e.g. 2.5M, 500k")
+    t.add_argument("--employees", default=None)
+    t.add_argument("--url", default="")
+    t.add_argument("--remote-policy", default="")
+    t.add_argument("--notes", default="")
+    t = _sub(ss, "remove", "Remove a startup by name.", [
+        'python -m candid startups remove --name "Acme Labs"',
+    ])
+    t.add_argument("--name", required=True)
+    t = _sub(ss, "set-stages", "Set or show your preferred funding stages.", [
+        "python -m candid startups set-stages --stages seed,series-a",
+        "python -m candid startups set-stages",
+    ])
+    t.add_argument("--stages", default="", help="Comma-separated stages (omit to show current)")
+    w = _sub(ss, "watch", "Watchlist alerts for startup names.", [
+        "python -m candid startups watch add --name \"Acme AI\"",
+        "python -m candid startups watch list",
+        "python -m candid startups watch check --json",
+    ])
+    ws = _nested(w, dest="watch_what")
+    t = _sub(ws, "add", "Watch a startup name.", [
+        "python -m candid startups watch add --name \"Acme AI\"",
+    ])
+    t.add_argument("--name", required=True, help="Startup name to watch (fuzzy matched)")
+    t = _sub(ws, "remove", "Stop watching a startup name.", [
+        "python -m candid startups watch remove --name \"Acme AI\"",
+    ])
+    t.add_argument("--name", required=True)
+    t = _sub(ws, "list", "List watched startup names.", [
+        "python -m candid startups watch list",
+    ])
+    t = _sub(ws, "check", "Scan curated jobs for watchlist hits (no duplicates).", [
+        "python -m candid startups watch check",
+        "python -m candid startups watch check --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the check result as JSON (for scripting)")
+    t = _sub(ss, "digest", "Startup digest: new matches, signal movers, interviews.", [
+        "python -m candid startups digest",
+        "python -m candid startups digest --markdown",
+        "python -m candid startups digest --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the digest as JSON (for scripting)")
+    t.add_argument("--markdown", action="store_true",
+                   help="Render the digest as Markdown")
+    t = _sub(ss, "signals", "Hiring signals from your curated job runs "
+             "(posting velocity, trend, new-vs-repeat).", [
+        "python -m candid startups signals",
+        "python -m candid startups signals --min-postings 3",
+        "python -m candid startups signals --json",
+    ])
+    t.add_argument("--min-postings", type=int, default=2,
+                   help="Only companies with at least N curated postings "
+                        "(default: 2)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the signals as JSON (for scripting)")
+    t = _sub(ss, "rank", "Rank registry startups for a role by keyword fit, "
+             "stage preference, and hiring signal.", [
+        "python -m candid startups rank --role \"ML Engineer\"",
+        "python -m candid startups rank --role \"Data Scientist\" --json",
+    ])
+    t.add_argument("--role", required=True, help="Target role title")
+    t.add_argument("--json", action="store_true",
+                   help="Print the ranking as JSON (for scripting)")
+    s.set_defaults(func=cmd_startups)
 
     return p
 
