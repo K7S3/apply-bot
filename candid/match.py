@@ -56,7 +56,10 @@ def fetch_jd(source: str, timeout: int = 25) -> str:
         except Exception as exc:
             raise MatchError(f"Could not fetch JD from URL: {exc}") from exc
     p = Path(s)
-    if p.exists() and p.is_file():
+    # Only treat the input as a file path when it plausibly is one: pasted
+    # or piped JD text (long / multiline) must not reach the filesystem,
+    # where an over-long "name" raises OSError instead of returning False.
+    if "\n" not in s and len(s) < 1024 and p.exists() and p.is_file():
         text = p.read_text(encoding="utf-8", errors="replace")
         if len(text.strip()) < 50:
             raise MatchError(f"JD file {p} looks empty.")

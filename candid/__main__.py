@@ -11,6 +11,7 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid jdwatch snapshot --company X --role "Y" --jd jd.txt  # JD change alerts
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "jdwatch",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "jdwatch": ["snapshot", "diff", "reposts", "timeline", "alerts",
+                "digest", "watch", "unwatch", "list"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "JDWatchError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "JDWatchError": "python -m candid jdwatch --help",
 }
 
 
@@ -919,7 +923,207 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
+    # jdwatch
+    s = _sub(sub, "jdwatch", "JD change detection: snapshots, diffs, repost + change alerts.", [
+        "python -m candid jdwatch snapshot --company Acme --role \"Data Scientist\" --jd jd.txt",
+        "python -m candid jdwatch diff --company Acme --role \"Data Scientist\"",
+        "python -m candid jdwatch reposts --company Acme",
+        "python -m candid jdwatch digest --days 7",
+    ])
+    js = _nested(s)
+    t = _sub(js, "snapshot", "Capture a JD snapshot; detect changes vs the previous one.", [
+        "python -m candid jdwatch snapshot --company Acme --role \"Data Scientist\" --jd jd.txt",
+        "cat jd.txt | python -m candid jdwatch snapshot --company Acme --role \"Data Scientist\" --jd -",
+    ])
+    t.add_argument("--company", default="", help="Company name")
+    t.add_argument("--role", default="", help="Role title")
+    t.add_argument("--jd", default="", help=JD_HELP)
+    t.add_argument("--url", default="", help="Posting URL (stored with the snapshot)")
+    t.add_argument("--source", default="", help="Where this JD text came from")
+    t.add_argument("--threshold", default=None,
+                   choices=["cosmetic", "minor", "material"],
+                   help="Alert threshold (default: minor, or CANDID_JDWATCH_THRESHOLD)")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(js, "diff", "Unified diff between two snapshots of a posting.", [
+        "python -m candid jdwatch diff --company Acme --role \"Data Scientist\"",
+        "python -m candid jdwatch diff --company Acme --role \"Data Scientist\" --v1 1 --v2 3",
+    ])
+    t.add_argument("--company", default="", help="Company name")
+    t.add_argument("--role", default="", help="Role title")
+    t.add_argument("--v1", type=int, default=None,
+                   help="Older snapshot number, 1-based (default: second-latest)")
+    t.add_argument("--v2", type=int, default=None,
+                   help="Newer snapshot number, 1-based (default: latest)")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(js, "reposts", "Find postings that look like reposts with altered requirements.", [
+        "python -m candid jdwatch reposts --company Acme",
+        "python -m candid jdwatch reposts --min-sim 0.8",
+    ])
+    t.add_argument("--company", default="",
+                   help="Limit to one company (default: all tracked postings)")
+    t.add_argument("--min-sim", type=float, default=0.75,
+                   help="Minimum similarity 0-1 (default: 0.75)")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(js, "timeline", "Chronological change history for a posting.", [
+        "python -m candid jdwatch timeline --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--company", default="", help="Company name")
+    t.add_argument("--role", default="", help="Role title")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(js, "alerts", "List JD-change alerts.", [
+        "python -m candid jdwatch alerts",
+        "python -m candid jdwatch alerts --unread",
+        "python -m candid jdwatch alerts --mark-read",
+    ])
+    t.add_argument("--unread", action="store_true", help="Only unread alerts")
+    t.add_argument("--mark-read", action="store_true", help="Mark all alerts read")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(js, "digest", "Markdown digest of JD changes in a time window.", [
+        "python -m candid jdwatch digest --days 7",
+    ])
+    t.add_argument("--days", type=int, default=7,
+                   help="Lookback window in days (default: 7)")
+    t = _sub(js, "watch", "Watch a company+role for JD changes.", [
+        "python -m candid jdwatch watch --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--company", default="", help="Company name")
+    t.add_argument("--role", default="", help="Role title")
+    t = _sub(js, "unwatch", "Stop watching a company+role.", [
+        "python -m candid jdwatch unwatch --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--company", default="", help="Company name")
+    t.add_argument("--role", default="", help="Role title")
+    t = _sub(js, "list", "List tracked postings and watched roles.", [
+        "python -m candid jdwatch list",
+    ])
+    s.set_defaults(func=cmd_jdwatch)
+
     return p
+
+
+def cmd_jdwatch(a):
+    from candid import jdwatch as W
+    what = a.what
+    if what == "snapshot":
+        jd = _jd_text(a)
+        res = W.snapshot_jd(a.company, a.role, jd, url=a.url, source=a.source,
+                            threshold=a.threshold)
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+            return
+        print(f"Snapshot captured: {a.company} — {a.role} ({res['sha256'][:12]}…)")
+        if res["status"] == "new":
+            print("First snapshot for this posting — future snapshots diff against it.")
+        elif res["status"] == "unchanged":
+            print("No changes since the last snapshot.")
+        else:
+            ch = res["change"]
+            print(f"Status: CHANGED ({ch['severity']}) — {ch['summary']}")
+            for req in ch["requirements"]["added"]:
+                print(f"  + requirement: {req}")
+            for req in ch["requirements"]["removed"]:
+                print(f"  - requirement: {req}")
+            for old_r, new_r in ch["requirements"]["modified"]:
+                print(f"  ~ requirement: {old_r}  →  {new_r}")
+            alert = res.get("alert")
+            if alert:
+                print(f"\nALERT #{alert['id']}: {alert['severity']} change recorded.")
+            else:
+                print(f"\nBelow the alert threshold ({W.default_threshold()}) — "
+                      "no alert recorded.")
+    elif what == "diff":
+        snaps = W.get_snapshots(a.company, a.role)
+        if len(snaps) < 2:
+            sys.exit(f"Need at least 2 snapshots to diff "
+                     f"({len(snaps)} found for {a.company} — {a.role}). "
+                     "Capture another with `python -m candid jdwatch snapshot --help`.")
+        v2 = a.v2 or len(snaps)
+        v1 = a.v1 or (v2 - 1)
+        if not (1 <= v1 < v2 <= len(snaps)):
+            sys.exit(f"Invalid snapshot numbers: need 1 <= v1 < v2 <= {len(snaps)}.")
+        old, new = snaps[v1 - 1], snaps[v2 - 1]
+        if a.json:
+            print(json.dumps(W.detect_changes(old["text"], new["text"]),
+                             indent=2, default=str))
+            return
+        print(f"{a.company} — {a.role}: snapshot {v1} "
+              f"({old.get('captured_at', '')}) → snapshot {v2} "
+              f"({new.get('captured_at', '')})\n")
+        print(W.render_diff(old["text"], new["text"],
+                            old_label=f"v{v1}", new_label=f"v{v2}"), end="")
+    elif what == "reposts":
+        rows = W.find_reposts(a.company or None, min_similarity=a.min_sim)
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            print("No repost candidates found.")
+            return
+        for r in rows:
+            pa, pb = r["posting_a"], r["posting_b"]
+            tag = ("IDENTICAL repost" if r["identical"]
+                   else "repost with altered requirements")
+            print(f"{pa['company']} — {pa['role']}")
+            print(f"  <-> {pb['company']} — {pb['role']}")
+            print(f"  {tag} (similarity {r['similarity']})")
+            for req in r["requirements_added_in_b"]:
+                print(f"    + {req}")
+            for req in r["requirements_removed_in_b"]:
+                print(f"    - {req}")
+            for pair in r["requirements_reworded"]:
+                print(f"    ~ {pair['old']}  →  {pair['new']}")
+    elif what == "timeline":
+        events = W.timeline(a.company, a.role)
+        if not events:
+            sys.exit(f"No snapshots for {a.company} — {a.role}. "
+                     "Capture one with `python -m candid jdwatch snapshot --help`.")
+        if a.json:
+            print(json.dumps(events, indent=2, default=str))
+            return
+        print(f"Change history: {a.company} — {a.role}")
+        for e in events:
+            sev = f" [{e['severity']}]" if e.get("severity") else ""
+            print(f"  {e['captured_at']}  {e['event']}{sev}  {e['summary']}")
+    elif what == "alerts":
+        if a.mark_read:
+            n = W.mark_alerts_read()
+            print(f"Marked {n} alert(s) read.")
+            return
+        rows = W.list_alerts(unread_only=a.unread)
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            print("No alerts." if not a.unread else "No unread alerts.")
+            return
+        for al in rows:
+            flag = "UNREAD" if not al.get("read") else "read"
+            print(f"#{al['id']} [{al['severity']}] ({flag}) "
+                  f"{al['company']} — {al['role']}: {al['summary']}")
+    elif what == "digest":
+        print(W.digest(max(a.days, 0)), end="")
+    elif what == "watch":
+        res = W.watch(a.company, a.role)
+        print(f"Watching {res['company']} — {res['role']}."
+              if res.get("watched") else
+              f"Already watching {res['company']} — {res['role']}.")
+    elif what == "unwatch":
+        res = W.unwatch(a.company, a.role)
+        print(f"Stopped watching {a.company} — {a.role}."
+              if res.get("unwatched") else
+              f"{a.company} — {a.role} was not watched.")
+    elif what == "list":
+        tracked = W.list_snapshot_keys()
+        watched = W.list_watched()
+        print(f"Tracked postings ({len(tracked)}):")
+        for k in tracked:
+            print(f"  {k['company']} — {k['role']} "
+                  f"({k['snapshots']} snapshot(s), last {k['last_captured']})")
+        print(f"Watched roles ({len(watched)}):")
+        for w in watched:
+            print(f"  {w['company']} — {w['role']}")
+    else:  # pragma: no cover - argparse restricts choices
+        sys.exit(f"Unknown jdwatch subcommand: {what}")
 
 
 def _next_command(args, etype: str) -> str:
