@@ -34,6 +34,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin", "patterns",
+    "dashboard", "import", "gmail", "linkedin", "tracks",
 ]
 
 SUBCOMMANDS = {
@@ -54,6 +55,8 @@ SUBCOMMANDS = {
     "linkedin": ["import", "guide"],
     "patterns": ["list", "tags", "plan", "log", "due", "review",
                  "drill", "mastery", "cheatsheet", "reset"],
+    "tracks": ["list", "show", "questions", "concepts", "drills", "plan",
+               "progress", "done", "undone", "reset", "mock", "suggest"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -63,6 +66,7 @@ _EXPECTED_ERRORS = {
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "PatternsError",
     "ValueError",
+    "TrackError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -81,6 +85,7 @@ _NEXT_COMMAND = {
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
+    "TrackError": "python -m candid tracks list",
 }
 
 
@@ -594,6 +599,68 @@ def cmd_patterns(a):
         removed = P.reset_progress()
         print(f"Removed {removed['attempts']} attempts and "
               f"{removed['cards']} review cards.")
+def cmd_tracks(a):
+    from candid import prep_tracks as PT
+    if a.what == "list":
+        tracks = PT.list_tracks()
+        print(f"{'ID':<14}{'Title':<28}{'Q':>4}{'Concepts':>9}{'Drills':>7}  Tagline")
+        for t in tracks:
+            print(f"{t['id']:<14}{t['title'][:27]:<28}{t['questions']:>4}"
+                  f"{t['concepts']:>9}{t['drills']:>7}  {t['tagline'][:60]}")
+    elif a.what == "show":
+        print(PT.render_track(a.track, include_deep_dives=a.deep_dives))
+    elif a.what == "questions":
+        if a.sample:
+            qs = PT.sample_questions(a.track, n=a.sample, seed=a.seed,
+                                     difficulty=a.difficulty)
+        else:
+            qs = PT.track_questions(a.track, category=a.category,
+                                    difficulty=a.difficulty, round_name=a.round)
+        if not qs:
+            print("No questions match those filters.")
+            return
+        for q in qs:
+            print(f"{q['n']}. [{q['category']} · {q['difficulty']} · {q['round']}]")
+            print(f"   {q['q']}\n")
+    elif a.what == "concepts":
+        for c in PT.track_concepts(a.track):
+            print(f"### {c['tag'].replace('_', ' ')}")
+            print(f"Why this track: {c['why']}\n")
+            if a.deep_dives:
+                print(c["deep_dive"] + "\n")
+    elif a.what == "drills":
+        drills = PT.track_drills(a.track, kind=a.kind)
+        for d in drills:
+            print(f"### {d['name']} ({d['minutes']} min) [{d['kind']}]")
+            print(f"id: {d['id']}\n{d['instructions']}\n")
+            for item in d["checklist"]:
+                print(f"  - [ ] {item}")
+            print()
+        print(f"Total drill time: {PT.total_drill_minutes(a.track)} minutes.")
+    elif a.what == "plan":
+        plan = PT.build_plan(a.track, days=a.days, hours_per_day=a.hours)
+        print(PT.render_plan(plan))
+    elif a.what == "progress":
+        print(PT.render_coverage(PT.coverage(a.track)))
+    elif a.what == "done":
+        print(PT.render_coverage(PT.mark_done(a.track, a.kind, a.key)))
+    elif a.what == "undone":
+        print(PT.render_coverage(PT.mark_undone(a.track, a.kind, a.key)))
+    elif a.what == "reset":
+        PT.reset_progress(a.track)
+        print(f"Progress reset for track '{a.track}'.")
+    elif a.what == "mock":
+        for m in PT.mock_preset(a.track):
+            print(f"### {m['round']}\n  {m['command']}\n  {m['note']}\n")
+    elif a.what == "suggest":
+        gaps = (a.gaps or "").split(";") if a.gaps else []
+        suggestions = PT.suggest_tracks([g.strip() for g in gaps if g.strip()])
+        if not suggestions:
+            print("No gap text given. Try: tracks suggest --gaps \"Missing must-have skill: sql; Seniority gap: leadership\"")
+            return
+        for s in suggestions:
+            print(f"- {s['id']}: {s['title']} ({s['hits']} gap hit(s))")
+            print(f"  {s['tagline']}")
 
 
 def cmd_jobs(a):
@@ -1175,6 +1242,85 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--yes", action="store_true", help="Confirm deletion")
     s.set_defaults(func=cmd_patterns)
+    # tracks
+    s = _sub(sub, "tracks", "Role-family prep tracks: questions, concepts, drills, plans.", [
+        "python -m candid tracks list",
+        "python -m candid tracks show mle",
+        "python -m candid tracks questions --track backend --difficulty medium",
+        "python -m candid tracks plan --track data-science --days 14",
+    ])
+    ts = s.add_subparsers(dest="what", required=True)
+    t = _sub(ts, "list", "List all prep tracks.", [
+        "python -m candid tracks list",
+    ])
+    t = _sub(ts, "show", "Show a track: loop, concepts, questions, drills, mock presets.", [
+        "python -m candid tracks show mle",
+        "python -m candid tracks show pm --deep-dives",
+    ])
+    t.add_argument("track", help="Track id: mle, backend, frontend, data-science, pm, em")
+    t.add_argument("--deep-dives", action="store_true",
+                   help="Include full concept deep-dive text")
+    t = _sub(ts, "questions", "Browse or sample a track's question bank.", [
+        "python -m candid tracks questions --track backend",
+        "python -m candid tracks questions --track mle --difficulty hard",
+        "python -m candid tracks questions --track frontend --sample 5 --seed 42",
+    ])
+    t.add_argument("--track", required=True)
+    t.add_argument("--category", default=None)
+    t.add_argument("--difficulty", default=None, choices=["easy", "medium", "hard"])
+    t.add_argument("--round", default=None, help="Filter by loop round name (substring)")
+    t.add_argument("--sample", type=int, default=0,
+                   help="Deterministic sample of N questions (use --seed to vary)")
+    t.add_argument("--seed", type=int, default=0)
+    t = _sub(ts, "concepts", "Concept deep-dives for a track.", [
+        "python -m candid tracks concepts --track data-science",
+        "python -m candid tracks concepts --track mle --deep-dives",
+    ])
+    t.add_argument("--track", required=True)
+    t.add_argument("--deep-dives", action="store_true")
+    t = _sub(ts, "drills", "Timed practice drills for a track.", [
+        "python -m candid tracks drills --track backend",
+        "python -m candid tracks drills --track em --kind qna",
+    ])
+    t.add_argument("--track", required=True)
+    t.add_argument("--kind", default=None, help="Filter by drill kind")
+    t = _sub(ts, "plan", "Build an N-day study plan spreading the track across days.", [
+        "python -m candid tracks plan --track frontend --days 14",
+        "python -m candid tracks plan --track pm --days 7 --hours 2",
+    ])
+    t.add_argument("--track", required=True)
+    t.add_argument("--days", type=int, default=14)
+    t.add_argument("--hours", type=float, default=1.0, help="Study hours per day")
+    t = _sub(ts, "progress", "Show completion coverage for a track.", [
+        "python -m candid tracks progress --track mle",
+    ])
+    t.add_argument("--track", required=True)
+    t = _sub(ts, "done", "Mark a concept, question, or drill done.", [
+        "python -m candid tracks done --track mle --kind concept --key ml_system_design",
+        "python -m candid tracks done --track backend --kind drill --key be-design-45",
+    ])
+    t.add_argument("--track", required=True)
+    t.add_argument("--kind", required=True, choices=["concept", "question", "drill"])
+    t.add_argument("--key", required=True, help="Concept tag, q<N>, or drill id")
+    t = _sub(ts, "undone", "Un-mark an item.", [
+        "python -m candid tracks undone --track mle --kind concept --key ml_system_design",
+    ])
+    t.add_argument("--track", required=True)
+    t.add_argument("--kind", required=True, choices=["concept", "question", "drill"])
+    t.add_argument("--key", required=True)
+    t = _sub(ts, "reset", "Clear all progress for a track.", [
+        "python -m candid tracks reset --track mle",
+    ])
+    t.add_argument("--track", required=True)
+    t = _sub(ts, "mock", "Suggested mock sessions aligned to the track's loop.", [
+        "python -m candid tracks mock --track data-science",
+    ])
+    t.add_argument("--track", required=True)
+    t = _sub(ts, "suggest", "Suggest tracks from match-gap text.", [
+        "python -m candid tracks suggest --gaps \"Missing must-have skill: sql; Seniority gap: leadership\"",
+    ])
+    t.add_argument("--gaps", default="", help="Semicolon-separated gap strings")
+    s.set_defaults(func=cmd_tracks)
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
