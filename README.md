@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `redflags` | JD red-flag detector: scans a posting for warning signs before you apply — unrealistic requirements, vague or missing comp, high-turnover culture language, ghost jobs, bait-and-switch titles, and compliance red flags — each with a plain-language explanation and what to ask. Also surfaces green flags (salary range, growth path, work-life balance). `redflags check FILE [--json]`, `redflags scan DIR`. See [docs/redflags.md](docs/redflags.md). |
 
 ## Job-source coverage (honest)
 

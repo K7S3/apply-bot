@@ -7,6 +7,7 @@
     python -m candid prep --company X --role Y
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
+    python -m candid redflags check jd.txt
     python -m candid dashboard            # local web UI (127.0.0.1 only)
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
@@ -31,7 +32,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "negotiate", "salary", "redflags", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -43,6 +44,7 @@ SUBCOMMANDS = {
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
+    "redflags": ["check", "scan"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
@@ -55,6 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "RedFlagError",
     "ValueError",
 }
 
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "RedFlagError": "python -m candid redflags --help",
 }
 
 
@@ -358,6 +362,29 @@ def cmd_salary(a):
             print(f"Stored range: ${parsed['low']:,.0f}–${parsed['high']:,.0f}/yr")
         else:
             print("No pay range found in that text.")
+
+
+def cmd_redflags(a):
+    from candid.redflags import report as R
+    if a.what == "check":
+        analysis = R.analyze_file(a.file)
+        if a.json:
+            print(json.dumps({
+                "verdict": analysis["verdict"],
+                "risk_score": analysis["risk_score"],
+                "flags": analysis["flags_json"],
+            }, indent=2, default=str))
+        else:
+            print(R.format_report(analysis))
+    elif a.what == "scan":
+        for s in R.scan_directory(a.dir):
+            if "error" in s:
+                print(f"{s['filename']}: error - {s['error']}")
+            else:
+                print(f"{s['filename']}: {s['verdict']} "
+                      f"(score {s['risk_score']}) - "
+                      f"{s['flag_count']} red flag(s), "
+                      f"{s['green_count']} green flag(s)")
 
 
 def cmd_mock(a):
@@ -748,6 +775,26 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--jd", default=""); t.add_argument("--text", default="")
     t.add_argument("--location", default="")
     s.set_defaults(func=cmd_salary)
+
+    # redflags
+    s = _sub(sub, "redflags", "Scan a job description for red and green flags.", [
+        "python -m candid redflags check jd.txt",
+        "python -m candid redflags check jd.txt --json",
+        "python -m candid redflags scan ./jds",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "check", "Analyze one JD file and print the report.", [
+        "python -m candid redflags check jd.txt",
+        "python -m candid redflags check jd.txt --json   # machine-readable output",
+    ])
+    t.add_argument("file", help="JD text or markdown file")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw analysis as JSON (for scripting)")
+    t = _sub(rs, "scan", "Analyze every .txt/.md JD in a directory.", [
+        "python -m candid redflags scan ./jds",
+    ])
+    t.add_argument("dir", help="Directory containing JD .txt/.md files")
+    s.set_defaults(func=cmd_redflags)
 
     # mock
     s = _sub(sub, "mock", "Mock interviews: coding judge, AI interviewer, behavioral, design.", [
