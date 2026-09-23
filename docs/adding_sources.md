@@ -49,6 +49,21 @@ python3 -m candid jobs curate --role "data scientist" --sources myboard --limit 
 python3 -m unittest discover -s tests
 ```
 
+## Freelance sources
+
+Three adapters cover freelance/contract-heavy boards. Adapter names only -
+no keys or secrets are involved anywhere in this pipeline:
+
+- `remotive` - Remotive, a remote-jobs board with a freelance-friendly listing set.
+- `weworkremotely` - WeWorkRemotely, which has dedicated remote + freelance categories.
+- `workingnomads` - Working Nomads, a remote/freelance job feed.
+
+Contract/freelance postings from any adapter flow through
+`detect_contract_type()` in `jobs.py` and `contract_checklist()` in
+`match.py`: `match` output appends a contract due-diligence checklist, the
+tracker adds a `[contract: <type>, <salary_text or rate_text>]` note suffix
+on curated adds, and `contract-compare` does the rate-vs-FTE math.
+
 ## Current coverage (honest)
 
 - `arbeitnow` — Arbeitnow API (general postings, has a `/job-board-api` feed)

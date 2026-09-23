@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 from candid import config as C
+from candid.freelance_sources import CONTRACT_SOURCES, FreelanceError
 
 def _state_path() -> Path:
     return C.DATA_DIR / "jobs.json"
@@ -133,6 +134,9 @@ def _adapt_remoteok() -> list[dict]:
 ADAPTERS: dict[str, object] = {
     "arbeitnow": _adapt_arbeitnow,
     "remoteok": _adapt_remoteok,
+    # Freelance/contract feeds (free, no key, no login). Fetch failures
+    # surface as FreelanceError from candid.freelance_sources.
+    **CONTRACT_SOURCES,
 }
 
 
@@ -260,6 +264,87 @@ def _fresh_enough(job: dict, days: int | None, now: datetime) -> bool:
     return (now - posted).days <= days
 
 
+# ---------------------------------------------------------------------------
+# contract-type detection
+# ---------------------------------------------------------------------------
+
+# Explicit engagement signals. Deliberately NOT included: bare
+# "consultant"/"consulting" — "Solutions Consultant" is a common full-time
+# job family, so only contract-specific tokens count.
+_CONTRACT_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (
+    r"\b1099\b",                          # 1099 (independent-contractor tax form)
+    r"\bc-?2-?c\b",                       # C2C
+    r"corp[- ]to[- ]corp",                # corp-to-corp
+    r"contract[- ]to[- ]hire",            # contract-to-hire / contract to hire
+    r"\bw-?2\s+contract(?:or)?\b",       # W2 contract
+    r"\bcontractor\b",
+    r"\bcontracting\b",
+    r"\btemporary\b",                     # temporary (not bare "temp" — too broad)
+    r"temp[- ]to[- ]perm",                # temp-to-perm
+    r"\bcontract\s+(?:position|role|job|opportunity|basis|assignment)\b",
+    # a 6/12-month duration paired with the word "contract", either order:
+    # "6-month contract", "contract for 12 months"
+    r"(?:\b(?:6|12)\s*-?\s*months?\b.*?\bcontract\b"
+    r"|\bcontract\b.*?\b(?:6|12)\s*-?\s*months?\b)",
+)]
+
+_FREELANCE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (
+    r"\bfreelance[rs]?\b",   # freelance, freelancer(s)
+    r"\bgig\b",
+    r"project[- ]based",
+)]
+
+_FTE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (
+    r"\bfull[- ]time\b",
+    r"\bpermanent\b",
+)]
+
+# "permanent resident/cy" is work authorization, not an FTE signal.
+_AUTHORIZATION_PHRASE = re.compile(r"\bpermanent\s+residen(?:t|cy)\b", re.IGNORECASE)
+
+CONTRACT_TYPES = ("contract", "freelance", "fte", "unknown")
+
+
+def detect_contract_type(title: str, description: str) -> str:
+    """Classify the engagement type of a posting.
+
+    Returns one of "contract" | "freelance" | "fte" | "unknown".
+
+    Precedence (first match wins):
+      1. "contract" — explicit contract signals: 1099, C2C/corp-to-corp,
+         contract-to-hire (or "contract to hire"), W2 contract,
+         contractor, contracting, temporary, temp-to-perm,
+         "contract <position|role|job|opportunity|basis|assignment>",
+         a 6/12-month duration paired with the word "contract"
+         (e.g. "6-month contract", "contract for 12 months"), or the bare
+         word "contract" in the job title (title usage is explicit).
+      2. "freelance" — freelance(r), gig, "project-based".
+      3. "fte" — explicit "full-time" / "permanent" with none of the
+         above signals. Work-authorization phrases like "permanent
+         resident" do NOT count.
+      4. "unknown" — none of the signals matched.
+
+    So "Full-time contract role" is "contract" (contract wins over fte),
+    and "Solutions Consultant" is "unknown" — bare "consultant"/"consulting"
+    is deliberately not a contract signal. "Smart Contract Developer" is
+    also "unknown" (blockchain, not employment type): the title-only
+    "contract" rule excludes "smart contract".
+    Case-insensitive; title and description are scanned together as one text.
+    """
+    text = f"{title or ''}\n{description or ''}"
+    if any(p.search(text) for p in _CONTRACT_PATTERNS):
+        return "contract"
+    # bare "contract" in the title is explicit — except blockchain roles
+    if re.search(r"(?<!smart[\s-])\bcontract\b", title or "", re.IGNORECASE):
+        return "contract"
+    if any(p.search(text) for p in _FREELANCE_PATTERNS):
+        return "freelance"
+    clean = _AUTHORIZATION_PHRASE.sub("", text)
+    if any(p.search(clean) for p in _FTE_PATTERNS):
+        return "fte"
+    return "unknown"
+
+
 def filter_jobs(jobs: list[dict], role: str, location: str = "",
                 remote: bool = False, level: str | None = None,
                 limit: int = DEFAULT_LIMIT, days: int | None = None,
@@ -352,17 +437,26 @@ def _tracked_keys() -> set[tuple[str, str]]:
 def curate(profile: dict, role: str, location: str = "", remote: bool = False,
            level: str | None = None, limit: int = DEFAULT_LIMIT,
            sources: list[str] | None = None, days: int | None = None,
-           min_score: float = 0) -> dict:
+           min_score: float = 0, contract_only: bool = False,
+           exclude_contract: bool = False) -> dict:
     """Run one curation pass.
 
     Returns {fetched, candidates, added, skipped, skipped_low_score, errors}.
     ``days`` filters to postings from the last N days (unparseable dates are
     kept). ``min_score`` gates tracker writes: jobs scoring below it are NOT
     added — they are stashed in jobs.json under ``skipped_low_score`` so a
-    lower threshold can pick them up later.
+    lower threshold can pick them up later. ``contract_only`` keeps only
+    contract/freelance postings; ``exclude_contract`` drops them; "unknown"
+    counts as neither (kept only when neither flag is set, or under
+    ``exclude_contract``). Every listing is tagged with ``contract_type``
+    (see detect_contract_type) right after fetching, before filtering, and
+    the tag is persisted on saved listings in jobs.json.
     """
     from candid import tracker as T
     from candid import salary as S
+
+    if contract_only and exclude_contract:
+        raise JobsError("contract_only and exclude_contract are mutually exclusive")
 
     wanted = sources or list(ADAPTERS)
     unknown = [s for s in wanted if s not in ADAPTERS]
@@ -377,7 +471,16 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
         except JobsError as e:
             errors.append(str(e))
 
+    # tag every listing with its engagement type before filtering
+    for job in raw:
+        job["contract_type"] = detect_contract_type(
+            job.get("title", ""), job.get("description", ""))
+
     candidates = filter_jobs(raw, role, location, remote, level, limit, days=days)
+    if contract_only or exclude_contract:
+        keep = {"contract", "freelance"} if contract_only else {"fte", "unknown"}
+        candidates = [j for j in candidates
+                      if j.get("contract_type", "unknown") in keep]
     state = _load_state()
     seen: dict = state.get("seen", {})
     tracked = _tracked_keys()
@@ -421,6 +524,9 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
                     "match_score": scored["score"], "jd_text": job["description"][:4000]})
         _stash_job_meta(rec["id"], rec)
         seen[job["source_id"]] = rec["id"]
+        # persist the engagement tag on saved listings in jobs.json
+        state.setdefault("contract_types", {})[job["source_id"]] = \
+            job.get("contract_type", "unknown")
         tracked.add(_norm_key(job["title"], job["company"]))
         added.append({**job, **scored, "app_id": rec["id"]})
 
@@ -453,7 +559,8 @@ def _stash_job_meta(app_id: int, meta: dict) -> None:
         except json.JSONDecodeError:
             data = {}
     data[str(app_id)] = {k: meta.get(k) for k in
-                         ("source", "source_url", "match_score", "jd_text")}
+                         ("source", "source_url", "match_score", "jd_text",
+                          "contract_type")}
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -486,7 +593,8 @@ def render_curated(result: dict) -> str:
         lines.append(f"\n✅ {len(result['added'])} new → tracker (status: saved):")
         for j in result["added"]:
             lines.append(f"  [#{j['app_id']}] {j['title']} @ {j['company']} "
-                         f"({j['location']}) — {j['score']}/100 [{j['source']}]")
+                         f"({j['location']}) — {j['score']}/100 "
+                         f"[{j['source']}] [{j.get('contract_type', 'unknown')}]")
             if j["url"]:
                 lines.append(f"      apply: {j['url']}")
     else:
@@ -500,18 +608,28 @@ def render_curated(result: dict) -> str:
     return "\n".join(lines)
 
 
-def render_saved() -> str:
-    """Show the curated pipeline: saved jobs with scores and apply links."""
+def render_saved(contract: str = "any") -> str:
+    """Show the curated pipeline: saved jobs with scores and apply links.
+
+    ``contract`` filters by engagement type: "contract" | "freelance" |
+    "fte" | "any" (default). Listings stashed before engagement tagging
+    read as "unknown".
+    """
     from candid import tracker as T
-    apps = T.list_apps(status="saved")
+    apps = [(a, get_job_meta(a["id"])) for a in T.list_apps(status="saved")]
+    if contract != "any":
+        apps = [(a, m) for a, m in apps
+                if m.get("contract_type", "unknown") == contract]
     if not apps:
+        if T.list_apps(status="saved"):
+            return f"No saved jobs with engagement type '{contract}'."
         return ("No saved jobs yet. Run:\n"
                 "  python -m candid jobs curate --role \"Data Scientist\" --location \"New York\"")
-    lines = [f"{'ID':<4}{'Score':<7}{'Title':<34}{'Company':<22}Apply URL"]
-    for a in apps:
-        meta = get_job_meta(a["id"])
+    lines = [f"{'ID':<4}{'Score':<7}{'Type':<10}{'Title':<30}{'Company':<20}Apply URL"]
+    for a, meta in apps:
         score = meta.get("match_score", "—")
+        ctype = meta.get("contract_type", "unknown")
         url = meta.get("source_url") or a.get("jd_link") or ""
-        lines.append(f"{a['id']:<4}{str(score):<7}{a['role'][:33]:<34}"
-                     f"{a['company'][:21]:<22}{url[:60]}")
+        lines.append(f"{a['id']:<4}{str(score):<7}{ctype:<10}{a['role'][:29]:<30}"
+                     f"{a['company'][:19]:<20}{url[:60]}")
     return "\n".join(lines)

@@ -43,12 +43,21 @@ def _next_id(apps: list[dict]) -> int:
 
 
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
-        notes: str = "", path: str | Path | None = None) -> dict:
+        notes: str = "", path: str | Path | None = None,
+        job: dict | None = None) -> dict:
     """Add an application. Returns the new record.
 
     If the same company+role is already tracked, returns the EXISTING
     record (a copy) with ``"duplicate": True`` instead of duplicating —
     no write happens. Check ``rec.get("duplicate")`` to tell the user.
+
+    ``job`` is the optional normalized job dict this application came from
+    (see candid/jobs.py). When it carries ``contract_type`` "contract" or
+    "freelance", a `` [contract: <type>, <salary_text or rate_text>]`` suffix
+    is appended to the notes so contract postings are visible at a glance.
+    Missing fields are tolerated: the suffix degrades to ``[contract: <type>]``
+    and is skipped entirely when ``contract_type`` is absent or not
+    contract/freelance.
     """
     if not company or not role:
         raise TrackerError("Both --company and --role are required to add an application.")
@@ -58,13 +67,15 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     for a in apps:
         if a["company"].lower() == company.lower() and a["role"].lower() == role.lower():
             return {**a, "duplicate": True}
+    notes = (notes or "").strip()
+    notes = _contract_note_suffix(job, notes)
     rec = {
         "id": _next_id(apps),
         "company": company.strip(),
         "role": role.strip(),
         "jd_link": jd_link.strip(),
         "status": status,
-        "notes": notes.strip(),
+        "notes": notes,
         "date_added": date.today().isoformat(),
         "date_updated": date.today().isoformat(),
         "prep_pack": "",
@@ -72,6 +83,22 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     apps.append(rec)
     _save(apps, path)
     return rec
+
+
+def _contract_note_suffix(job: dict | None, notes: str) -> str:
+    """Append a contract marker to notes when the source job dict says so.
+
+    `` [contract: <contract_type>, <salary_text or rate_text>]`` — additive
+    only, and safe when the job dict or its fields are missing.
+    """
+    if not job or not isinstance(job, dict):
+        return notes
+    ctype = str(job.get("contract_type") or "").strip().lower()
+    if ctype not in ("contract", "freelance"):
+        return notes
+    pay = str(job.get("salary_text") or job.get("rate_text") or "").strip()
+    suffix = f" [contract: {ctype}" + (f", {pay}]" if pay else "]")
+    return f"{notes}{suffix}" if notes else suffix.lstrip()
 
 
 def update(app_id: int, *, status: str | None = None, notes: str | None = None,

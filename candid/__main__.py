@@ -31,8 +31,8 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "followup", "offer", "negotiate", "salary", "contract-compare",
+    "mock", "jobs", "dashboard", "import", "gmail", "linkedin",
 ]
 
 SUBCOMMANDS = {
@@ -360,6 +360,53 @@ def cmd_salary(a):
             print("No pay range found in that text.")
 
 
+_MONEY_HINTS = ("annual", "salary", "benefits", "pay", "comp", "gap",
+                "cost", "rate", "total")
+
+
+def _fmt_cc_value(key: str, value):
+    """Render one contract-compare result value for the table."""
+    if value is None:
+        return "-"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, float) and any(h in key.lower() for h in _MONEY_HINTS):
+        return f"${value:,.0f}"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    if isinstance(value, int) and any(h in key.lower() for h in _MONEY_HINTS):
+        return f"${value:,}"
+    return str(value)
+
+
+def _render_contract_comparison(result) -> str:
+    """Readable table + assumptions from a compare_contract_vs_fte result."""
+    if isinstance(result, str):
+        return result
+    rows = dict(result or {})
+    assumptions = rows.pop("assumptions", None) or []
+    if isinstance(assumptions, str):
+        assumptions = [assumptions]
+    lines = ["Contract vs FTE comparison:", ""]
+    table = [(k.replace("_", " ").title(), _fmt_cc_value(k, v))
+             for k, v in rows.items()
+             if not isinstance(v, (dict, list))]
+    if table:
+        w = max(len(k) for k, _ in table)
+        lines += [f"  {k:<{w}}  {v}" for k, v in table]
+    if assumptions:
+        lines += ["", "Assumptions:"]
+        lines += [f"  - {a}" for a in assumptions]
+    return "\n".join(lines)
+
+
+def cmd_contract_compare(a):
+    from candid.contracts import compare_contract_vs_fte
+    result = compare_contract_vs_fte(
+        a.rate, a.fte, fte_benefits=a.fte_benefits, hours=a.hours)
+    print(_render_contract_comparison(result))
+
+
 def cmd_mock(a):
     from candid import mock as M
     if a.what == "list":
@@ -401,17 +448,25 @@ def cmd_jobs(a):
             sys.exit("--role is required (e.g. --role \"Data Scientist\").\n"
                      "Next: run `python -m candid jobs curate --help`.")
         fn = J.refresh if a.what == "refresh" else J.curate
+        extra = {}
+        if a.what == "curate":
+            extra = {"contract_only": a.contract_only,
+                     "exclude_contract": a.exclude_contract}
         result = fn(_profile(), role=a.role, location=a.location or "",
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    **extra)
         print(J.render_curated(result))
     elif a.what == "list":
+        contract = getattr(a, "contract", "any") or "any"
         if a.json:
             saved = []
             for app in T.list_apps(status="saved"):
                 meta = J.get_job_meta(app["id"])
+                if contract != "any" and meta.get("contract_type", "unknown") != contract:
+                    continue
                 saved.append({
                     "app_id": app["id"],
                     "company": app["company"],
@@ -421,10 +476,11 @@ def cmd_jobs(a):
                     "url": meta.get("source_url") or app.get("jd_link") or "",
                     "date_added": app.get("date_added", ""),
                     "has_jd": bool(meta.get("jd_text")),
+                    "contract_type": meta.get("contract_type", "unknown"),
                 })
             print(json.dumps(saved, indent=2, default=str))
         else:
-            print(J.render_saved())
+            print(J.render_saved(contract=contract))
 
 
 def cmd_dashboard(a):
@@ -749,6 +805,21 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--location", default="")
     s.set_defaults(func=cmd_salary)
 
+    # contract-compare
+    s = _sub(sub, "contract-compare", "Compare a contract rate against an FTE offer.", [
+        "python -m candid contract-compare --rate \"$120/hr\" --fte 200000",
+        "python -m candid contract-compare --rate \"$120/hr\" --fte 200000 --fte-benefits 25000 --hours 1800",
+    ])
+    s.add_argument("--rate", required=True,
+                   help="Contract rate string, e.g. \"$120/hr\", \"90/hr\", \"$15k/mo\"")
+    s.add_argument("--fte", type=float, required=True,
+                   help="FTE annual base salary in $")
+    s.add_argument("--fte-benefits", type=float, default=0,
+                   help="FTE benefits value in $/yr (health, 401k, PTO). Default: 0")
+    s.add_argument("--hours", type=float, default=2080,
+                   help="Billable hours per year for annualizing the rate. Default: 2080")
+    s.set_defaults(func=cmd_contract_compare)
+
     # mock
     s = _sub(sub, "mock", "Mock interviews: coding judge, AI interviewer, behavioral, design.", [
         "python -m candid mock list --topic arrays",
@@ -821,6 +892,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--contract-only", action="store_true",
+                   help="Keep only contract/freelance postings (unknowns are dropped)")
+    t.add_argument("--exclude-contract", action="store_true",
+                   help="Drop contract/freelance postings (fte and unknown are kept)")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
@@ -841,6 +916,9 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
+    t.add_argument("--contract", choices=["contract", "freelance", "fte", "any"],
+                   default="any",
+                   help="Filter saved jobs by engagement type (default: any)")
     s.set_defaults(func=cmd_jobs)
 
     # dashboard

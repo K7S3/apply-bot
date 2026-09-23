@@ -551,9 +551,12 @@ def score_match(profile: dict, jd: str, title: str = "", company: str = "",
 
     market = _market_snapshot(company, title, location)
 
+    contract_type = _contract_type(title, jd)
+
     return {
         "score": total,
         "verdict": verdict,
+        "contract_type": contract_type,
         "verdict_reason": reason,
         "breakdown": {
             "skills": skills_score,
@@ -580,6 +583,41 @@ def score_match(profile: dict, jd: str, title: str = "", company: str = "",
 def json_text(profile: dict) -> str:
     import json as _json
     return _json.dumps(profile)
+
+
+def contract_checklist() -> list[str]:
+    """Due-diligence questions for contract/freelance postings.
+
+    Returned as a plain list of question strings so the caller (report
+    rendering, prep packs, dashboards) can format them however it wants.
+    """
+    return [
+        "What is the contract duration, and are extension/renewal terms in writing?",
+        "Is there a conversion-to-FTE clause, or a realistic path to full-time?",
+        "Corp-to-corp (1099) or W-2 through an agency - who pays employer taxes and handles payroll?",
+        "What benefits and PTO come with the contract (health coverage, 401k, paid time off)?",
+        "Who owns the IP you produce, and are pre-existing IP carve-outs documented?",
+        "How does the rate compare to the FTE equivalent (rate x billable hours vs salary + benefits)?",
+        "What is the notice period for ending the contract, on each side?",
+        "Are there exclusivity or non-compete restrictions, and can you take on other clients?",
+    ]
+
+
+def _contract_type(title: str, jd: str) -> str:
+    """Best-effort contract classification via candid.jobs (sibling module).
+
+    Returns "contract", "freelance", "fte", or "unknown". Never raises:
+    if the sibling's detect_contract_type is unavailable, defaults to
+    "unknown" so the rest of the match pipeline keeps working.
+    """
+    try:
+        from candid.jobs import detect_contract_type
+    except (ImportError, AttributeError):
+        return "unknown"
+    try:
+        return detect_contract_type(title or "", jd or "") or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _market_snapshot(company: str, title: str, location: str) -> dict | None:
@@ -625,6 +663,9 @@ def render_report(result: dict, company: str = "", title: str = "") -> str:
         lines += ["", "Market pay (from salary intelligence): " + _fmt_market(m)]
     elif company or title:
         lines += ["", "Market pay: no data yet - import DOL LCA data or parse JDs to build it up."]
+    if result.get("contract_type") in ("contract", "freelance"):
+        lines += ["", "Contract checklist (due diligence before you sign):"]
+        lines += [f"  ? {q}" for q in contract_checklist()]
     return "\n".join(lines)
 
 
