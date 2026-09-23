@@ -11,6 +11,9 @@ Modules:
     prep_concepts  concept explainer library used by prep
     followup  thank-you / recruiter nudge drafts
     offer     offer comparison and total-comp normalization
+    decision  offer decision journal: pros/cons, scorecards, gut checks,
+              deadlines, lifecycle, regret exercise, snapshots, advice,
+              confidence, export
     negotiate recruiter scripts, counter drafts, BATNA framing
     mock      interactive mock interviews (coding judge, AI interviewer,
               behavioral, system design)
@@ -26,4 +29,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

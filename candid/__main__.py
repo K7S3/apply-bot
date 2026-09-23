@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "decision", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -41,6 +41,13 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
+    "decision": ["pros-add", "pros-list", "pros-remove", "criteria-set",
+                 "criteria-score", "criteria-rank", "gut", "gut-answer",
+                 "gut-list", "deadline-set", "deadline-clear", "deadlines",
+                 "state-set", "note-add", "timeline", "regret-set",
+                 "regret-show", "snapshot", "revisit", "advice-add",
+                 "advice-list", "confidence-set", "confidence-history",
+                 "summary", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -53,7 +60,7 @@ SUBCOMMANDS = {
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "DecisionError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
 }
@@ -65,6 +72,7 @@ _NEXT_COMMAND = {
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
+    "DecisionError": "python -m candid decision --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
@@ -308,6 +316,133 @@ def cmd_offer(a):
         path = O.export_comparison(O.list_offers(),
                                    path=a.out or None)
         print(f"Offer comparison exported to {path}")
+
+
+def cmd_decision(a):
+    from candid import decision as D
+    if a.what == "pros-add":
+        key, offer = D.resolve_offer(a.offer)
+        if bool(a.pro) == bool(a.con):
+            from candid.decision import DecisionError
+            raise DecisionError("Give exactly one of --pro or --con.")
+        side = "pro" if a.pro else "con"
+        rec = D.add_point(key, side, a.pro or a.con, weight=a.weight)
+        print(f"Added {side} to {D.offer_label(key, offer)}: "
+              f"[{rec['weight']}] {rec['text']}")
+    elif a.what == "pros-list":
+        key, offer = D.resolve_offer(a.offer)
+        print(D.render_pros_cons(key, offer))
+    elif a.what == "pros-remove":
+        key, offer = D.resolve_offer(a.offer)
+        rec = D.remove_point(key, a.side, a.index)
+        print(f"Removed {a.side} #{a.index} from {D.offer_label(key, offer)}: "
+              f"{rec['text']}")
+    elif a.what == "criteria-set":
+        weights = dict(kv.split("=", 1) for kv in (a.set or []))
+        clean = D.set_criteria_weights(weights)
+        print("Criteria weights: " +
+              ", ".join(f"{D.CRITERIA_LABELS.get(k, k)}={v:g}"
+                        for k, v in sorted(clean.items())))
+    elif a.what == "criteria-score":
+        key, offer = D.resolve_offer(a.offer)
+        scores = dict(kv.split("=", 1) for kv in (a.set or []))
+        stored = D.score_offer(key, scores)
+        print(f"Scores for {D.offer_label(key, offer)}: " +
+              ", ".join(f"{k}={v:g}" for k, v in sorted(stored.items())))
+    elif a.what == "criteria-rank":
+        rows = D.criteria_rank()
+        print(D.render_criteria_rank(rows, D.get_criteria_weights()))
+    elif a.what == "gut":
+        print("Today's gut check:")
+        print(f"  {D.gut_prompt()}")
+        if a.offer:
+            key, offer = D.resolve_offer(a.offer)
+            ans = D.list_gut_answers(key)
+            if ans:
+                print(f"\nPrevious answers for {D.offer_label(key, offer)}:")
+                for g in ans:
+                    print(f"  - {g['prompt']}\n    > {g['answer']}")
+    elif a.what == "gut-answer":
+        key, offer = D.resolve_offer(a.offer)
+        D.gut_answer(key, a.answer, prompt=a.prompt or None)
+        print(f"Journaled for {D.offer_label(key, offer)}.")
+    elif a.what == "gut-list":
+        key, offer = D.resolve_offer(a.offer)
+        ans = D.list_gut_answers(key)
+        if not ans:
+            print(f"No gut-check answers for {D.offer_label(key, offer)} yet.")
+        for g in ans:
+            print(f"[{g['at'][:10]}] {g['prompt']}\n  > {g['answer']}\n")
+    elif a.what == "deadline-set":
+        key, offer = D.resolve_offer(a.offer)
+        d = D.set_deadline(key, a.date, exploding=a.exploding,
+                           note=a.note or "")
+        print(f"Deadline for {D.offer_label(key, offer)}: {d['date']}"
+              + (" (exploding)" if d["exploding"] else ""))
+    elif a.what == "deadline-clear":
+        key, offer = D.resolve_offer(a.offer)
+        D.clear_deadline(key)
+        print(f"Deadline cleared for {D.offer_label(key, offer)}.")
+    elif a.what == "deadlines":
+        print(D.render_deadlines(D.list_deadlines()))
+    elif a.what == "state-set":
+        key, offer = D.resolve_offer(a.offer)
+        state = D.set_state(key, a.state)
+        print(f"{D.offer_label(key, offer)} is now: {state}")
+    elif a.what == "note-add":
+        key, offer = D.resolve_offer(a.offer)
+        D.add_note(key, a.text)
+        print(f"Note added to {D.offer_label(key, offer)}.")
+    elif a.what == "timeline":
+        key, offer = D.resolve_offer(a.offer)
+        print(D.render_timeline(key, offer))
+    elif a.what == "regret-set":
+        key, offer = D.resolve_offer(a.offer)
+        D.set_regret(key, a.take, a.decline, ten_year=a.ten_year or "")
+        print(f"Regret exercise recorded for {D.offer_label(key, offer)}.")
+    elif a.what == "regret-show":
+        key, offer = D.resolve_offer(a.offer)
+        print(D.render_regret(key, offer))
+    elif a.what == "snapshot":
+        key, offer = D.resolve_offer(a.offer)
+        snap = D.take_snapshot(key, a.reasons)
+        print(f"Reasons snapshot taken for {D.offer_label(key, offer)} "
+              f"({len(snap['reasons'])} reasons).")
+    elif a.what == "revisit":
+        key, offer = D.resolve_offer(a.offer)
+        if a.still_true or a.changed or a.note:
+            D.revisit(key, still_true=a.still_true or "",
+                      changed=a.changed or "", note=a.note or "")
+            print(f"Revisit recorded for {D.offer_label(key, offer)}.")
+        print(D.render_revisit(key, offer))
+    elif a.what == "advice-add":
+        key, offer = D.resolve_offer(a.offer)
+        D.add_advice(key, a.advisor, a.stance, note=a.note or "")
+        print(f"Advice from {a.advisor} logged for "
+              f"{D.offer_label(key, offer)}.")
+    elif a.what == "advice-list":
+        key, offer = D.resolve_offer(a.offer)
+        print(D.render_advice(key, offer))
+    elif a.what == "confidence-set":
+        key, offer = D.resolve_offer(a.offer)
+        D.set_confidence(key, a.level, note=a.note or "")
+        print(f"Confidence {a.level}/10 logged for "
+              f"{D.offer_label(key, offer)}.")
+    elif a.what == "confidence-history":
+        key, offer = D.resolve_offer(a.offer)
+        print(D.render_confidence(key, offer))
+    elif a.what == "summary":
+        key, offer = D.resolve_offer(a.offer)
+        print(D.render_summary(key, offer=offer))
+    elif a.what == "export":
+        if a.offer:
+            key, offer = D.resolve_offer(a.offer)
+            path = D.export_journal(offer_key=key, out=a.out or None)
+            print(f"Decision journal for {D.offer_label(key, offer)} "
+                  f"exported to {path}")
+        else:
+            path = D.export_journal(out=a.out or None)
+            print(f"Decision journal exported to {path}")
 
 
 def cmd_negotiate(a):
@@ -690,6 +825,144 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
     s.set_defaults(func=cmd_offer)
+
+    # decision
+    s = _sub(sub, "decision", "Offer decision journal: pros/cons, scorecards, gut checks, deadlines, and more.", [
+        "python -m candid decision summary --offer 1",
+        "python -m candid decision pros-list --offer 1",
+        "python -m candid decision criteria-rank",
+        "python -m candid decision deadlines",
+        "python -m candid decision export --out journal.md",
+    ])
+    ds = _nested(s)
+    t = _sub(ds, "pros-add", "Add a weighted pro or con to an offer.", [
+        "python -m candid decision pros-add --offer 1 --pro \"Great team\" --weight 3",
+        "python -m candid decision pros-add --offer 1 --con \"Long commute\" --weight 2",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--pro", default=""); t.add_argument("--con", default="")
+    t.add_argument("--weight", type=int, default=2, help="Importance 1-3 (default 2)")
+    t = _sub(ds, "pros-list", "Show the weighted pros/cons scoreboard.", [
+        "python -m candid decision pros-list --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "pros-remove", "Remove a pro or con by its number.", [
+        "python -m candid decision pros-remove --offer 1 --side pro --index 2",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--side", required=True, choices=["pro", "con"])
+    t.add_argument("--index", type=int, required=True)
+    t = _sub(ds, "criteria-set", "Set your decision-criterion weights.", [
+        "python -m candid decision criteria-set --set comp=30 --set growth=25 --set wlb=20 --set manager=15 --set mission=10",
+    ])
+    t.add_argument("--set", action="append", default=[], help="criterion=weight (e.g. comp=30)")
+    t = _sub(ds, "criteria-score", "Score an offer 1-10 per criterion.", [
+        "python -m candid decision criteria-score --offer 1 --set comp=8 --set growth=7",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--set", action="append", default=[], help="criterion=score-1-10 (e.g. comp=8)")
+    _sub(ds, "criteria-rank", "Rank scored offers by weighted criteria.", [
+        "python -m candid decision criteria-rank",
+    ])
+    t = _sub(ds, "gut", "Show today's gut-check prompt (and past answers for --offer).", [
+        "python -m candid decision gut",
+        "python -m candid decision gut --offer 1",
+    ])
+    t.add_argument("--offer", default="")
+    t = _sub(ds, "gut-answer", "Journal an answer to a gut-check prompt.", [
+        "python -m candid decision gut-answer --offer 1 --answer \"I'd be crushed\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--answer", required=True); t.add_argument("--prompt", default="")
+    t = _sub(ds, "gut-list", "List journaled gut-check answers.", [
+        "python -m candid decision gut-list --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "deadline-set", "Set the respond-by deadline for an offer.", [
+        "python -m candid decision deadline-set --offer 1 --date 2026-10-05",
+        "python -m candid decision deadline-set --offer 1 --date 2026-10-05 --exploding --note \"Recruiter said firm\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--date", required=True, help="YYYY-MM-DD")
+    t.add_argument("--exploding", action="store_true")
+    t.add_argument("--note", default="")
+    t = _sub(ds, "deadline-clear", "Clear the deadline for an offer.", [
+        "python -m candid decision deadline-clear --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    _sub(ds, "deadlines", "List all decision deadlines, most urgent first.", [
+        "python -m candid decision deadlines",
+    ])
+    t = _sub(ds, "state-set", "Move an offer through the decision lifecycle.", [
+        "python -m candid decision state-set --offer 1 --state leaning",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--state", required=True,
+                   choices=["considering", "leaning", "negotiating",
+                            "accepted", "declined", "withdrawn"])
+    t = _sub(ds, "note-add", "Add a timestamped journal note.", [
+        "python -m candid decision note-add --offer 1 --text \"Talked to the hiring manager; loved the vision\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--text", required=True)
+    t = _sub(ds, "timeline", "Show the full decision timeline for an offer.", [
+        "python -m candid decision timeline --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "regret-set", "Record the regret-minimization exercise.", [
+        "python -m candid decision regret-set --offer 1 --take \"...\" --decline \"...\" --ten-year \"...\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--take", required=True); t.add_argument("--decline", required=True)
+    t.add_argument("--ten-year", default="")
+    t = _sub(ds, "regret-show", "Show the regret-minimization exercise.", [
+        "python -m candid decision regret-show --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "snapshot", "Freeze your top reasons at decision time.", [
+        "python -m candid decision snapshot --offer 1 --reasons \"team I trust; comp; remote\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--reasons", required=True, help="Semicolon-separated reasons")
+    t = _sub(ds, "revisit", "Revisit a reasons snapshot: what is still true, what changed.", [
+        "python -m candid decision revisit --offer 1",
+        "python -m candid decision revisit --offer 1 --still-true \"team; comp\" --changed \"remote policy\" --note \"...\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--still-true", default=""); t.add_argument("--changed", default="")
+    t.add_argument("--note", default="")
+    t = _sub(ds, "advice-add", "Log advice from someone about an offer.", [
+        "python -m candid decision advice-add --offer 1 --advisor \"Priya (mentor)\" --stance for --note \"Great growth\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--advisor", required=True)
+    t.add_argument("--stance", required=True, choices=["for", "against", "neutral"])
+    t.add_argument("--note", default="")
+    t = _sub(ds, "advice-list", "Show the advice log and consensus.", [
+        "python -m candid decision advice-list --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "confidence-set", "Log 1-10 confidence in your leaning.", [
+        "python -m candid decision confidence-set --offer 1 --level 7 --note \"After the team call\"",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t.add_argument("--level", type=int, required=True)
+    t.add_argument("--note", default="")
+    t = _sub(ds, "confidence-history", "Show confidence over time.", [
+        "python -m candid decision confidence-history --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "summary", "One-screen view of the whole journal for an offer.", [
+        "python -m candid decision summary --offer 1",
+    ])
+    t.add_argument("--offer", required=True, help="Offer id or company name")
+    t = _sub(ds, "export", "Export the decision journal as markdown.", [
+        "python -m candid decision export",
+        "python -m candid decision export --offer 1 --out journal.md",
+    ])
+    t.add_argument("--offer", default="", help="Offer id or company name (default: all)")
+    t.add_argument("--out", default="", help="Output path (default: candid_data/decision_journals/<date>_decision_journal_*.md)")
+    s.set_defaults(func=cmd_decision)
 
     # negotiate
     s = _sub(sub, "negotiate", "Negotiation playbook, scripts, counter drafts.", [

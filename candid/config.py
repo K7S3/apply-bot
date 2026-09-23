@@ -38,6 +38,7 @@ CONFIG_DIR = _config_dir()
 PROFILE_PATH = DATA_DIR / "profile.json"
 TRACKER_PATH = DATA_DIR / "tracker.json"
 OFFERS_PATH = DATA_DIR / "offers.json"
+DECISIONS_PATH = DATA_DIR / "decisions.json"
 SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"

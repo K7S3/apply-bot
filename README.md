@@ -61,6 +61,7 @@ one ends with the exact next command to run.
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
+| `decision` | Offer decision journal: weighted pros/cons, criteria scorecards with ranked decision matrix, rotating gut-check prompts with journaled answers, respond-by deadline tracking with exploding-offer flags, decision lifecycle states + timestamped notes + timeline, regret-minimization exercise, reasons snapshot + revisit-your-reasons view, advice log with consensus, confidence-over-time tracking, one-screen summary, and markdown journal export. See [docs/decisions.md](docs/decisions.md). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
@@ -131,7 +132,7 @@ Rules that hold for every source:
 ## Your data stays yours
 
 Everything candid learns about you lives in `candid_data/` (git-ignored):
-`profile.json`, `tracker.json`, `offers.json`, `salary.db`, prep packs,
+`profile.json`, `tracker.json`, `offers.json`, `decisions.json`, `salary.db`, prep packs,
 tailored output, mock sessions, and `gmail_proposals.json` (pending Gmail
 import proposals). Delete the folder and you're forgotten — including every
 proposal and anything imported from a Takeout export or LinkedIn ZIP.
@@ -157,13 +158,16 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+299 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
 salary (LCA import variants, title aggregation), judge verdicts (incl.
 infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
-STAR prompts), offers (sign-on amortization, markdown export), negotiation
+STAR prompts), offers (sign-on amortization, markdown export), the decision
+journal (all 10 features: pros/cons, scorecards, gut checks, deadlines,
+lifecycle/timeline, regret exercise, snapshots/revisits, advice log,
+confidence, export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
