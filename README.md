@@ -65,6 +65,16 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `em-questions` | EM interview question bank: behavioral, hiring, delivery, org-design, and people-problem themes. Part of the EM track - see [docs/em_track.md](docs/em_track.md). |
+| `prep em` | EM-flavored interview prep pack built on `prep`: EM question themes, leadership gap analysis, comp talking points for management bands. |
+| `em drill` | Rapid-fire EM scenario drills: short people/delivery/org scenarios for reps under time pressure. |
+| `em hiring-loop` | Full mock EM hiring loop: behavioral + hiring + org-design rounds in one session. |
+| `em stories` | STAR story builder tuned for EM themes: hiring wins, conflict, delivery under pressure, growing people. |
+| `team-health storytelling` | Turn team-health evidence (retention, morale, performance turnarounds) into interview-ready stories. |
+| `update-template` | Status update templates: weekly, exec, and incident flavors - what changed, what is next, what is blocked. |
+| `exec-summary` | Distill a project or quarter into a crisp executive summary for skip-levels and leadership reviews. |
+| `plan-30-60-90` | Draft a 30-60-90 day plan for a new EM role: listen, diagnose, then act. |
+| `em reframe` / `em salary` | `python -m candid em reframe`: reframe your resume for EM roles - extracts scope signals (team size, hiring, mentoring, cross-team impact) strictly from your profile and flags missing scope instead of inventing it. `python -m candid em salary [--title T] [--location L]`: p25/median/p75 pay bands for management titles (engineering manager, EM, director) from your salary database, with sparse data labeled honestly. |
 
 ## Job-source coverage (honest)
 

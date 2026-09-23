@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "em",
 ]
 
 SUBCOMMANDS = {
@@ -41,6 +41,7 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
+    "prep": ["em", "em-questions"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -48,6 +49,9 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "em": ["drill", "hiring-loop", "stories", "narrative",
+           "update-template", "exec-summary", "plan-30-60-90",
+           "reframe", "salary"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +59,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "EMPrepError", "EMDrillsError", "EmStoriesError", "EmToolkitError",
     "ValueError",
 }
 
@@ -72,6 +77,10 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "EMPrepError": "python -m candid prep em-questions --help",
+    "EMDrillsError": "python -m candid em --help",
+    "EmStoriesError": "python -m candid em stories --help",
+    "EmToolkitError": "python -m candid em --help",
 }
 
 
@@ -270,6 +279,31 @@ def cmd_track(a):
 
 
 def cmd_prep(a):
+    from candid import em_prep as E
+    if getattr(a, "what", None) == "em-questions":
+        if a.json:
+            print(json.dumps(E.bank_as_json(a.topic), indent=2))
+        else:
+            print(E.render_bank_text(a.topic))
+        return
+    if getattr(a, "what", None) == "em":
+        jd = _jd_text(a) if a.jd else ""
+        markdown, path, _sections = E.build_em_pack(
+            _profile(), role=a.role or "Engineering Manager", jd=jd)
+        if a.json:
+            print(json.dumps({"role": a.role or "Engineering Manager",
+                              "path": str(path), "markdown": markdown},
+                             indent=2))
+        else:
+            print(f"EM prep pack saved to {path}\n")
+            print(markdown[:3000])
+            if len(markdown) > 3000:
+                print(f"\n... ({len(markdown) - 3000} more chars in the file)")
+        return
+    if not a.company or not a.role:
+        raise ValueError(
+            "prep needs --company and --role "
+            "(or use `prep em` / `prep em-questions` for EM prep)")
     from candid import prep as P
     jd = _jd_text(a) if a.jd else ""
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
@@ -292,6 +326,68 @@ def cmd_followup(a):
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def cmd_em(a):
+    if a.what in ("drill", "hiring-loop"):
+        from candid import em_drills as ED
+        if a.what == "drill":
+            if a.list:
+                print(ED.render_scenario_list())
+            elif a.ai:
+                ED.ai_drill(a.scenario)
+            else:
+                ED.run_drill(a.scenario)
+        elif a.list:
+            print(ED.render_packet_list())
+        else:
+            ED.run_hiring_loop(a.packet)
+        return
+    from candid import em_stories as ES, em_toolkit as T
+    if a.what in ("stories", "narrative", "update-template", "exec-summary",
+                  "plan-30-60-90"):
+        prof = _profile()
+        name = prof.get("name") or "Your Name"
+    if a.what == "stories":
+        from candid import config as C
+        if a.rebuild or not (C.DATA_DIR / "em_stories.json").exists():
+            ES.build_em_stories(prof)
+        stories = ES.list_em_stories(competency=a.competency or None,
+                                      query=a.search or None)
+        if not stories:
+            print("No EM stories match. Try --rebuild after adding "
+                  "management bullets to your profile.")
+            return
+        for s in stories:
+            comps = ", ".join(s.get("competencies", [])) or "untagged"
+            print(f"{s['id']}  [{comps}]  {s['title']}")
+    elif a.what == "narrative":
+        result = ES.em_narrative(prof, a.prompt)
+        print(result["narrative"])
+    elif a.what == "update-template":
+        print(T.weekly_update_template(name, a.team or "", a.week or ""))
+    elif a.what == "exec-summary":
+        notes = a.notes
+        if notes is None and not sys.stdin.isatty():
+            notes = sys.stdin.read()
+        print(T.exec_summary(notes or "", name=name))
+    elif a.what == "plan-30-60-90":
+        print(T.plan_30_60_90(a.company, a.team, context=a.context or "",
+                              profile=prof))
+    elif a.what == "reframe":
+        from candid import em_tailor as ET
+        result = ET.build_reframe(_profile())
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(ET.render_reframe(result))
+    elif a.what == "salary":
+        from candid import em_salary as EB
+        result = EB.mgmt_bands(title=a.title or "", location=a.location or "")
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(EB.render_bands(result))
 
 
 def cmd_offer(a):
@@ -613,12 +709,22 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid prep --company Acme --role \"Data Scientist\"",
         "python -m candid prep --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid prep --company Acme --role \"Data Scientist\" --app-id 3",
+        "python -m candid prep em --role \"Engineering Manager\"",
+        "python -m candid prep em-questions --topic hiring",
     ])
-    s.add_argument("--company", required=True)
-    s.add_argument("--role", required=True)
+    s.add_argument("what", nargs="?", choices=["em", "em-questions"],
+                   help="em: EM prep pack · em-questions: verified EM question bank")
+    s.add_argument("--company", default="")
+    s.add_argument("--role", default="")
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--topic", default=None,
+                   help="Question-bank topic for `prep em-questions` "
+                        "(hiring, performance_management, org_design, "
+                        "incident_leadership, managing_up, cross_functional)")
+    s.add_argument("--json", action="store_true",
+                   help="Print `prep em` / `prep em-questions` output as JSON")
     s.set_defaults(func=cmd_prep)
 
     # followup
@@ -918,6 +1024,88 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # em (engineering-manager track)
+    s = _sub(sub, "em", "Engineering-manager interview prep: drills, stories, toolkit.", [
+        "python -m candid em drill --list",
+        "python -m candid em drill --scenario underperformer",
+        "python -m candid em hiring-loop",
+        "python -m candid em stories --competency hiring_bar",
+        "python -m candid em narrative --prompt struggling-team",
+        "python -m candid em update-template --team Payments",
+        "python -m candid em plan-30-60-90 --company Acme --team Payments",
+    ])
+    es = _nested(s)
+    t = _sub(es, "drill", "Interactive people-leadership scenario drill.", [
+        "python -m candid em drill --list",
+        "python -m candid em drill --scenario underperformer",
+        "python -m candid em drill --scenario conflict --ai",
+    ])
+    t.add_argument("--scenario", default=None,
+                   help="Scenario id (default: pick interactively)")
+    t.add_argument("--list", action="store_true", help="List available scenarios")
+    t.add_argument("--ai", action="store_true",
+                   help="AI counterpart via Gemini (falls back to local rubric offline)")
+    t = _sub(es, "hiring-loop", "Practice the hiring-manager round: debrief a candidate packet.", [
+        "python -m candid em hiring-loop --list",
+        "python -m candid em hiring-loop --packet maya",
+    ])
+    t.add_argument("--packet", default=None, help="Packet id (default: pick interactively)")
+    t.add_argument("--list", action="store_true", help="List candidate packets")
+    t = _sub(es, "stories", "List EM STAR story prompts from your resume bullets.", [
+        "python -m candid em stories",
+        "python -m candid em stories --competency growing_engineers",
+        "python -m candid em stories --search outage",
+        "python -m candid em stories --rebuild",
+    ])
+    t.add_argument("--competency", default="",
+                   help="Filter by EM competency (e.g. hiring_bar, growing_engineers)")
+    t.add_argument("--search", default="", help="Free-text search over stories")
+    t.add_argument("--rebuild", action="store_true",
+                   help="Rebuild the story bank from the profile")
+    t = _sub(es, "narrative", "Build a team-health narrative scaffold for a prompt.", [
+        "python -m candid em narrative --prompt struggling-team",
+        "python -m candid em narrative --prompt raised-the-bar",
+    ])
+    t.add_argument("--prompt", required=True,
+                   help="One of: struggling-team, raised-the-bar, managing-up, "
+                        "incident, underperformer, cross-team")
+    t = _sub(es, "update-template", "Render a weekly team-status update template.", [
+        "python -m candid em update-template --team Payments",
+        "python -m candid em update-template --team Payments --week W38",
+    ])
+    t.add_argument("--team", default="")
+    t.add_argument("--week", default="")
+    t = _sub(es, "exec-summary", "Build an exec summary from bullet notes.", [
+        "python -m candid em exec-summary --notes \"- Shipped X\\n- Risk: Y\"",
+        "cat notes.txt | python -m candid em exec-summary",
+    ])
+    t.add_argument("--notes", default=None,
+                   help="Bullet notes (or pipe them via stdin)")
+    t = _sub(es, "plan-30-60-90", "Generate a 30-60-90 day plan for a new EM role.", [
+        "python -m candid em plan-30-60-90 --company Acme --team Payments",
+        "python -m candid em plan-30-60-90 --company Acme --team Payments --context \"Post-launch scale-up\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--team", required=True)
+    t.add_argument("--context", default="")
+    t = _sub(es, "reframe", "Reframe your resume for EM roles: scope signals found, gaps flagged, EM-relevant bullets promoted. Never invents scope.", [
+        "python -m candid em reframe",
+        "python -m candid em reframe --json   # machine-readable output",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the reframe result as JSON (for scripting)")
+    t = _sub(es, "salary", "p25/median/p75 pay bands for management titles (engineering manager, EM, director).", [
+        "python -m candid em salary",
+        "python -m candid em salary --title \"Engineering Manager\" --location \"New York\"",
+        "python -m candid em salary --json",
+    ])
+    t.add_argument("--title", default="", help="Narrow to titles containing this text")
+    t.add_argument("--location", default="", help="Narrow to locations containing this text")
+    t.add_argument("--json", action="store_true",
+                   help="Print the bands as JSON (for scripting)")
+
+    s.set_defaults(func=cmd_em)
 
     return p
 
