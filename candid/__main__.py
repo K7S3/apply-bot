@@ -919,6 +919,19 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
+    # privacy
+    s = _sub(sub, "privacy", "Privacy dashboard: see and control everything candid holds about you.", [
+        "python -m candid privacy inventory",
+        "python -m candid privacy scan",
+        "python -m candid privacy export tracker --redact",
+        "python -m candid privacy purge debriefs --export-first",
+        "python -m candid privacy retention set archive 180",
+        "python -m candid privacy audit",
+    ])
+    ps = _nested(s)
+    from candid import privacy as _privacy
+    _privacy.register_privacy_parsers(ps)
+
     return p
 
 

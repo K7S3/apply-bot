@@ -11,6 +11,7 @@ data functions are importable and unit-tested independently of HTTP.
 
 from __future__ import annotations
 
+import html
 import http.server
 import json
 import re
@@ -490,6 +491,128 @@ def _read_json(handler: http.server.BaseHTTPRequestHandler) -> dict:
         return {}
 
 
+# ---------------------------------------------------------------------------
+# privacy dashboard (candid privacy ...) — local-only pages
+# ---------------------------------------------------------------------------
+_PRIVACY_CSS_CACHE: str | None = None
+
+
+def _privacy_css() -> str:
+    """Reuse the dashboard's own <style> block for /privacy pages."""
+    global _PRIVACY_CSS_CACHE
+    if _PRIVACY_CSS_CACHE is None:
+        try:
+            raw = HTML_PATH.read_text(encoding="utf-8")
+        except OSError:
+            raw = ""
+        m = re.search(r"<style>(.*?)</style>", raw, re.S)
+        _PRIVACY_CSS_CACHE = m.group(1) if m else ""
+    return _PRIVACY_CSS_CACHE
+
+
+def _privacy_page(title: str, body: str) -> bytes:
+    """Full standalone HTML page reusing the dashboard stylesheet."""
+    page = (
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>{html.escape(title)} - candid privacy</title>"
+        f"<style>{_privacy_css()}</style></head><body>"
+        "<main style='max-width:960px'>"
+        "<p><a href='/'>&larr; back to dashboard</a></p>"
+        f"<section><h2>{html.escape(title)}</h2>{body}</section>"
+        "</main></body></html>"
+    )
+    return page.encode("utf-8")
+
+
+def _send_privacy_html(handler: http.server.BaseHTTPRequestHandler,
+                       title: str, body: str, code: int = 200) -> None:
+    data = _privacy_page(title, body)
+    handler.send_response(code)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
+def _privacy_rows_html(rows: list[list[str]], headers: list[str]) -> str:
+    head = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(c)}</td>" for c in r) + "</tr>"
+        for r in rows
+    )
+    return (f"<div style='overflow-x:auto'><table><thead><tr>{head}</tr></thead>"
+            f"<tbody>{body}</tbody></table></div>")
+
+
+def privacy_overview_data() -> dict:
+    """Inventory totals for the privacy dashboard (importable, testable)."""
+    from candid import privacy as P
+
+    rows = P.iter_inventory()
+    return {
+        "categories": rows,
+        "total_bytes": sum(r["bytes"] for r in rows),
+        "total_files": sum(P.category_records(r["name"]) or 0
+                           for r in rows if isinstance(P.category_records(r["name"]), int)),
+        "with_data": sum(1 for r in rows if r["exists"]),
+    }
+
+
+def _dashboard_run_purge(category: str, export_first: bool = False) -> dict:
+    """Non-interactive purge used by the dashboard POST route."""
+    from candid import privacy as P
+    from candid import privacy_purge as pp
+
+    P.require_category(category)
+    files = P.category_files(category)
+    if not files:
+        raise DashboardError(f"Nothing to purge: {category!r} has no files.")
+    backup = ""
+    if export_first:
+        backup = pp._export_category(category).name
+    nbytes = sum(f.stat().st_size for f in files if f.exists())
+    for f in files:
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    pp._remove_empty_dirs(category)
+    P.audit("dashboard.purge",
+            f"category={category} files={len(files)} freed_bytes={nbytes} "
+            f"export_first={export_first} backup={backup or 'none'}")
+    return {"category": category, "files": len(files),
+            "freed": P.human_size(nbytes), "backup": backup}
+
+
+def _dashboard_run_nuke(export_first: bool = False) -> dict:
+    """Non-interactive nuke used by the dashboard POST route."""
+    from candid import privacy as P
+    from candid import privacy_nuke as pn
+
+    backup = pn._export_full_backup().name if export_first else ""
+    files = pn._deletable_files()
+    if not files:
+        return {"files": 0, "freed": P.human_size(0), "backup": backup}
+    nbytes = 0
+    for f in files:
+        try:
+            nbytes += f.stat().st_size
+        except OSError:
+            pass
+    detail = (f"files={len(files)} freed_bytes={nbytes} "
+              f"export_first={export_first} backup={backup or 'none'} via=dashboard")
+    P.audit("nuke", detail)  # written first; re-appended after the wipe
+    for f in files:
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    pn._remove_empty_dirs()
+    P.audit("nuke", detail)
+    return {"files": len(files), "freed": P.human_size(nbytes), "backup": backup}
+
+
 class DashboardHandler(http.server.BaseHTTPRequestHandler):
     server_version = "candid-dashboard/1.0"
 
@@ -526,6 +649,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     status=qs.get("status", [None])[0]))
             elif path == "/api/import-guides":
                 _send_json(self, import_guides())
+            elif path == "/privacy":
+                self._serve_privacy(qs)
             else:
                 _send_json(self, {"error": "not found"}, 404)
         except DashboardError as e:
@@ -536,9 +661,182 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         type(e).__name__, e)
             _send_json(self, {"error": f"{type(e).__name__}: {e}"}, 500)
 
+    def _serve_privacy(self, qs: dict) -> None:
+        """Local-only privacy pages. Destructive actions only render
+        confirmation forms here; execution happens on POST /privacy."""
+        from candid import privacy as P
+        from candid import privacy_purge as pp
+        from candid import privacy_retention as pr
+        from candid import privacy_scan as ps
+
+        action = qs.get("action", [""])[0]
+        category = qs.get("category", [""])[0]
+        try:
+            if action == "scan":
+                result = ps.scan_data()
+                P.audit("dashboard.scan",
+                        f"findings={result['summary']['findings']}")
+                rows = [[f["file"], f["type"], str(f["line"]), f["match"]]
+                        for f in result["findings"][:500]]
+                s = result["summary"]
+                body = (f"<p>Scanned {s['files_scanned']} file(s), "
+                        f"{s['findings']} potential PII finding(s) in "
+                        f"{s['files_with_findings']} file(s) "
+                        f"({s['skipped_binary']} binary skipped). Matches are masked.</p>")
+                body += (_privacy_rows_html(
+                    rows, ["File", "Type", "Line", "Match (masked)"])
+                    if rows else "<p style='color:var(--green)'>No PII detected.</p>")
+                _send_privacy_html(self, "PII scan", body)
+            elif action == "egress":
+                rep = ps.egress_report()
+                P.audit("dashboard.egress", "")
+                rows = [[c["component"], c["url_or_purpose"],
+                         c["when_contacted"], c["data_sent"]]
+                        for c in rep["components"]]
+                body = _privacy_rows_html(
+                    rows, ["Component", "URL / purpose", "When contacted", "Data sent"])
+                if rep.get("warnings"):
+                    body += "<p style='color:var(--red)'>" + "<br>".join(
+                        html.escape(w) for w in rep["warnings"]) + "</p>"
+                else:
+                    body += ("<p style='color:var(--green)'>No unexpected network "
+                             "activity: dashboard binds 127.0.0.1 only.</p>")
+                _send_privacy_html(self, "What leaves this machine", body)
+            elif action == "audit":
+                entries = P.read_audit_log(100)
+                rows = [[e.get("ts", ""), e.get("action", ""), e.get("detail", "")]
+                        for e in entries]
+                body = (_privacy_rows_html(rows, ["Time (UTC)", "Action", "Detail"])
+                        if rows else "<p>No privacy actions recorded yet.</p>")
+                _send_privacy_html(self, "Privacy audit log", body)
+            elif action == "retention":
+                rows = [[r["name"], r["label"],
+                         "not set" if r["days"] is None else str(r["days"]),
+                         r["meaning"]]
+                        for r in pr._show_rows()]
+                body = ("<p>Per-category retention policies. "
+                        "Set them with <code>python -m candid privacy retention set "
+                        "&lt;category&gt; &lt;days&gt;</code>.</p>"
+                        + _privacy_rows_html(
+                            rows, ["Category", "Policy", "What this means"]))
+                _send_privacy_html(self, "Retention policies", body)
+            elif action == "export" and category:
+                P.require_category(category)
+                path = pp._export_category(category)
+                P.audit("dashboard.export",
+                        f"category={category} archive={path.name}")
+                body = (f"<p>Exported <b>{html.escape(category)}</b> to "
+                        f"<code>{html.escape(path.name)}</code> in "
+                        f"<code>privacy_exports/</code>.</p>")
+                _send_privacy_html(self, "Export complete", body)
+            elif action == "purge" and category:
+                P.require_category(category)
+                files = P.category_files(category)
+                if not files:
+                    raise DashboardError(
+                        f"Nothing to purge: {category!r} has no files.")
+                nbytes = sum(f.stat().st_size for f in files if f.exists())
+                body = (
+                    f"<p style='color:var(--red)'>Permanently delete "
+                    f"<b>{len(files)}</b> file(s) ({P.human_size(nbytes)}) from "
+                    f"<b>{html.escape(category)}</b>? This cannot be undone.</p>"
+                    "<form method='post' action='/privacy'>"
+                    f"<input type='hidden' name='action' value='purge'>"
+                    f"<input type='hidden' name='category' "
+                    f"value='{html.escape(category, quote=True)}'>"
+                    "<label style='font-size:13px'>"
+                    "<input type='checkbox' name='export_first' value='1'> "
+                    "Export first (archive before deleting)</label><br><br>"
+                    "<button type='submit' name='confirmed' value='yes' "
+                    "style='background:var(--red);color:#fff'>Delete permanently</button> "
+                    "<a href='/'>Cancel</a></form>")
+                _send_privacy_html(self, "Confirm purge", body)
+            elif action == "nuke":
+                body = (
+                    "<p style='color:var(--red)'><b>This will permanently delete "
+                    "ALL candid user data</b> (every category except "
+                    "privacy_exports). This cannot be undone.</p>"
+                    "<form method='post' action='/privacy'>"
+                    "<input type='hidden' name='action' value='nuke'>"
+                    "<label>Type <code>DELETE</code> to confirm:<br>"
+                    "<input type='text' name='confirm_text' autocomplete='off' "
+                    "style='margin-top:6px'></label><br><br>"
+                    "<label style='font-size:13px'>"
+                    "<input type='checkbox' name='export_first' value='1'> "
+                    "Export everything first</label><br><br>"
+                    "<button type='submit' "
+                    "style='background:var(--red);color:#fff'>Nuke all data</button> "
+                    "<a href='/'>Cancel</a></form>")
+                _send_privacy_html(self, "Confirm nuke", body)
+            else:
+                data = privacy_overview_data()
+                rows = [[r["name"], r["label"], r["size"],
+                         str(r["records"]) if r["records"] is not None else "n/a"]
+                        for r in data["categories"]]
+                body = (f"<p><b>{P.human_size(data['total_bytes'])}</b> across "
+                        f"<b>{data['with_data']}</b> categor(ies) with data.</p>"
+                        + _privacy_rows_html(
+                            rows, ["Category", "Label", "Size", "Records"]))
+                _send_privacy_html(self, "Privacy overview", body)
+        except DashboardError as e:
+            _send_privacy_html(
+                self, "Privacy", f"<p style='color:var(--red)'>Error: "
+                f"{html.escape(str(e))}</p>", 400)
+        except SystemExit as e:
+            _send_privacy_html(
+                self, "Privacy",
+                f"<p style='color:var(--red)'>Error: invalid category.</p>",
+                400 if e.code == 2 else 500)
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        # privacy confirmations: urlencoded forms, destructive only on POST
+        if path == "/privacy":
+            try:
+                length = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                length = 0
+            form = urllib.parse.parse_qs(
+                self.rfile.read(length).decode("utf-8", "replace"))
+            action = form.get("action", [""])[0]
+            category = form.get("category", [""])[0]
+            try:
+                if action == "purge" and form.get("confirmed") == ["yes"]:
+                    export_first = form.get("export_first") == ["1"]
+                    r = _dashboard_run_purge(category,
+                                             export_first=export_first)
+                    body = (f"<p>Purged <b>{r['files']}</b> file(s), freed "
+                            f"<b>{html.escape(r['freed'])}</b> from "
+                            f"<b>{html.escape(r['category'])}</b>."
+                            + (f" Backup: <code>{html.escape(r['backup'])}</code>."
+                               if r["backup"] else "") + "</p>")
+                    _send_privacy_html(self, "Purge complete", body)
+                elif action == "nuke" and form.get("confirm_text") == ["DELETE"]:
+                    export_first = form.get("export_first") == ["1"]
+                    r = _dashboard_run_nuke(export_first=export_first)
+                    body = (f"<p>Nuked <b>{r['files']}</b> file(s), freed "
+                            f"<b>{html.escape(r['freed'])}</b>. "
+                            f"privacy_exports preserved."
+                            + (f" Backup: <code>{html.escape(r['backup'])}</code>."
+                               if r["backup"] else "") + "</p>")
+                    _send_privacy_html(self, "Nuke complete", body)
+                else:
+                    _send_privacy_html(
+                        self, "Privacy",
+                        "<p style='color:var(--amber)'>Confirmation missing or "
+                        "incorrect; nothing was deleted.</p>", 400)
+            except DashboardError as e:
+                _send_privacy_html(
+                    self, "Privacy",
+                    f"<p style='color:var(--red)'>Error: {html.escape(str(e))}</p>",
+                    400)
+            except SystemExit as e:
+                _send_privacy_html(
+                    self, "Privacy",
+                    "<p style='color:var(--red)'>Error: invalid category.</p>",
+                    400 if e.code == 2 else 500)
+            return
         ctype = self.headers.get("Content-Type", "")
         log.debug("POST %s", self.path)
         # file uploads bypass the JSON reader (it would consume rfile)
@@ -672,6 +970,15 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         except OSError:
             _send_json(self, {"error": "dashboard.html missing"}, 500)
             return
+        # inject the privacy tab (server-rendered, local only)
+        try:
+            from candid import privacy_dashboard as _pd
+            frag = _pd.privacy_tab_html().encode("utf-8")
+            marker = b"</main>"
+            if marker in body:
+                body = body.replace(marker, frag + b"\n" + marker, 1)
+        except Exception:  # noqa: BLE001 — privacy tab is optional
+            log.debug("privacy tab injection failed", exc_info=True)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
