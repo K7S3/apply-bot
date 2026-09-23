@@ -65,6 +65,13 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `completions` | Shell completions for bash/zsh/fish, generated from the live parser (`completions bash|zsh|fish`), so they always match the installed CLI. Subcommand-aware. See [docs/completions.md](docs/completions.md). |
+| `demo` | One-command narrated tour on fictional sample data: onboard, match, tailor, track, prep in a throwaway data dir (your real data is untouched). `--keep DIR` to inspect. See [docs/demo.md](docs/demo.md). |
+| `profiles` | Named target-role config profiles (role, seniority, domains, locations, salary floor): `create` / `use` / `show` / `update` / `delete` / `list`. Other commands read the active profile's defaults. See [docs/profiles.md](docs/profiles.md). |
+| `doctor` | One-shot environment diagnostics (Python >= 3.10, data/config dirs, profile/tracker JSON validity, samples, Ollama reachability, disk space): PASS/WARN/FAIL lines with fix hints, `--json` output. See [docs/doctor.md](docs/doctor.md). |
+| `plugins` | Drop-in `*.py` plugins from your config dir: custom job-source adapters + match scorers. A broken plugin can't crash the CLI. `plugins list` / `test <name>`. See [docs/plugins.md](docs/plugins.md). |
+| `export` | Take artifacts elsewhere: `prep-obsidian` splits a prep pack into an Obsidian vault folder (frontmatter + `[[wikilinks]]`); `followup-eml` saves a draft as an importable `.eml`; `contact-vcard` writes vCard 3.0. See [docs/exports.md](docs/exports.md). |
+| `--headless` / `--json` | Scripting mode: every command accepts `--json` for machine-readable output; `--headless` (or `CANDID_HEADLESS=1`) gives CI-safe behavior with stable exit codes (0 ok, 2 usage, 3 expected failure as JSON on stderr). See [docs/headless.md](docs/headless.md). |
 
 ## Job-source coverage (honest)
 
