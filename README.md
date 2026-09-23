@@ -72,6 +72,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `assign` | Take-home assignment planner: pick a structure template (`assign templates`), build a milestone plan against your deadline with a fit check, get a day-by-day time-boxed schedule with a 10% submission buffer, and run a self-review rubric before submitting. Plans and organizes; **never does the work for you** (there is no solve command). |
 
 ## Job-source coverage (honest)
 
@@ -157,6 +158,7 @@ No analytics, no telemetry, no accounts.
 - [docs/adding_problems.md](docs/adding_problems.md) — add coding problems to the mock judge
 - [docs/adding_questions.md](docs/adding_questions.md) — add reported interview questions (source + URL required)
 - [docs/adding_sources.md](docs/adding_sources.md) — add a public job feed
+- [docs/takehome.md](docs/takehome.md) — plan a take-home assignment (templates, milestones, time-boxing, self-review)
 
 ## Tests
 
@@ -164,7 +166,7 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+374 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
@@ -174,7 +176,8 @@ STAR prompts), offers (sign-on amortization, markdown export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
-errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
+errors), the take-home planner (templates, fit check, time-boxing,
+replan, markdown export), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
 `/api/import` multipart upload, import guides, and an HTML↔API
 cross-check). The mock judge is also verified by running every problem's
 reference solution through it (`python scripts/seed_problems.py --verify`).

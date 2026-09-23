@@ -11,6 +11,7 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid assign plan --template rest-api --company Acme --role "Backend Engineer" --deadline 2026-09-29 --hours-per-day 3
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -33,7 +34,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
+    "dashboard", "import", "gmail", "linkedin", "patterns", "assign",
 ]
 
 SUBCOMMANDS = {
@@ -54,6 +55,9 @@ SUBCOMMANDS = {
     "linkedin": ["import", "guide"],
     "patterns": ["list", "tags", "plan", "log", "due", "review",
                  "drill", "mastery", "cheatsheet", "reset"],
+    "assign": ["templates", "suggest", "show", "plan", "list", "status",
+               "schedule", "review", "check", "done", "replan", "export",
+               "delete", "solve"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -61,7 +65,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError",
+    "PatternsError", "AssignError",
     "ValueError",
 }
 
@@ -81,6 +85,7 @@ _NEXT_COMMAND = {
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
+    "AssignError": "python -m candid assign --help",
 }
 
 
@@ -689,6 +694,60 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def cmd_assign(a):
+    from candid import assign as A
+    if a.what == "templates":
+        print(A.render_templates())
+    elif a.what == "suggest":
+        print(A.render_suggestion(A.suggest_template(a.text)))
+    elif a.what == "show":
+        print(A.render_template_detail(a.name))
+    elif a.what == "plan":
+        plan = A.create_plan(template=a.template, company=a.company,
+                             role=a.role, deadline=a.deadline,
+                             hours_per_day=a.hours_per_day, notes=a.notes)
+        print(A.render_plan(plan))
+    elif a.what == "list":
+        print(A.render_plans(A.list_plans()))
+    elif a.what == "status":
+        print(A.render_status(A.plan_status(a.id)))
+    elif a.what == "schedule":
+        print(A.render_schedule(A.timebox_schedule(a.id)))
+    elif a.what == "review":
+        print(A.render_review(A.get_plan(a.id)))
+    elif a.what == "check":
+        item = A.check_item(a.id, a.item, done=not a.uncheck)
+        state = "checked off" if item["done"] else "reopened"
+        print(f"{state} '{item['id']}' for plan #{a.id}.")
+    elif a.what == "done":
+        m = A.complete_milestone(a.id, a.milestone, done=not a.reopen)
+        state = "done" if m["done"] else "reopened"
+        print(f"Milestone {m['id']} marked {state} for plan #{a.id}.")
+    elif a.what == "replan":
+        plan = A.replan(a.id, a.deadline)
+        print(f"Plan #{a.id} re-dated to deadline {plan['deadline']}.")
+        print(A.render_fit(plan["fit"]))
+    elif a.what == "export":
+        md = A.export_markdown(a.id)
+        if a.out:
+            with open(a.out, "w") as f:
+                f.write(md)
+            print(f"Wrote plan #{a.id} to {a.out}")
+        else:
+            print(md)
+    elif a.what == "delete":
+        if not a.yes:
+            plan = A.get_plan(a.id)
+            sys.exit(
+                f"Delete plan #{a.id} ({plan['role']} @ {plan['company']})? "
+                "Re-run with --yes to confirm.\n"
+                "Next: run `python -m candid assign list`")
+        A.delete_plan(a.id)
+        print(f"Deleted plan #{a.id}.")
+    elif a.what == "solve":
+        print(A.SOLVE_REFUSAL)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -1295,6 +1354,83 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # assign
+    s = _sub(sub, "assign", "Plan a take-home assignment (candid never does it for you).", [
+        "python -m candid assign templates",
+        "python -m candid assign plan --template rest-api --company Acme --role \"Backend Engineer\" --deadline 2026-09-29 --hours-per-day 3",
+        "python -m candid assign schedule --id 1",
+        "python -m candid assign review --id 1",
+    ])
+    as_ = _nested(s)
+    t = _sub(as_, "templates", "List assignment structure templates.", [
+        "python -m candid assign templates",
+    ])
+    t = _sub(as_, "suggest", "Suggest a template from the assignment description.", [
+        "python -m candid assign suggest --text \"Build a REST API with three endpoints\"",
+    ])
+    t.add_argument("--text", required=True, help="Paste of the assignment prompt")
+    t = _sub(as_, "show", "Show a template: phases, file map, README skeleton.", [
+        "python -m candid assign show rest-api",
+    ])
+    t.add_argument("name", help="Template name from `assign templates`")
+    t = _sub(as_, "plan", "Create a milestone plan for a deadline.", [
+        "python -m candid assign plan --template rest-api --company Acme --role \"Backend Engineer\" --deadline 2026-09-29 --hours-per-day 3",
+    ])
+    t.add_argument("--template", required=True, help="Template name")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--deadline", required=True, help="YYYY-MM-DD, must be in the future")
+    t.add_argument("--hours-per-day", type=float, required=True)
+    t.add_argument("--notes", default="", help="Free-text notes on the assignment")
+    t = _sub(as_, "list", "List your take-home plans.", [
+        "python -m candid assign list",
+    ])
+    t = _sub(as_, "status", "Progress summary for a plan.", [
+        "python -m candid assign status --id 1",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t = _sub(as_, "schedule", "Day-by-day time-boxed schedule.", [
+        "python -m candid assign schedule --id 1",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t = _sub(as_, "review", "Self-review rubric for a plan.", [
+        "python -m candid assign review --id 1",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t = _sub(as_, "check", "Check off (or reopen) a self-review item.", [
+        "python -m candid assign check --id 1 --item prompt-reread",
+        "python -m candid assign check --id 1 --item prompt-reread --uncheck",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t.add_argument("--item", required=True, help="Review item id")
+    t.add_argument("--uncheck", action="store_true", help="Reopen the item")
+    t = _sub(as_, "done", "Mark a milestone done (or reopen it).", [
+        "python -m candid assign done --id 1 --milestone m1",
+        "python -m candid assign done --id 1 --milestone m1 --reopen",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t.add_argument("--milestone", required=True, help="Milestone id (m1, m2, ...)")
+    t.add_argument("--reopen", action="store_true", help="Reopen the milestone")
+    t = _sub(as_, "replan", "Move the deadline; completed work is kept.", [
+        "python -m candid assign replan --id 1 --deadline 2026-10-06",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t.add_argument("--deadline", required=True, help="New YYYY-MM-DD deadline")
+    t = _sub(as_, "export", "Export the plan as Markdown (stdout or file).", [
+        "python -m candid assign export --id 1",
+        "python -m candid assign export --id 1 --out plan.md",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t.add_argument("--out", default="", help="Write to this file instead of stdout")
+    t = _sub(as_, "delete", "Delete a plan (needs --yes).", [
+        "python -m candid assign delete --id 1 --yes",
+    ])
+    t.add_argument("--id", type=int, required=True, help="Plan id")
+    t.add_argument("--yes", action="store_true", help="Confirm deletion")
+    t = _sub(as_, "solve", "Not a real command: states the boundary.", [
+        "python -m candid assign solve",
+    ])
+    s.set_defaults(func=cmd_assign)
 
     return p
 
