@@ -75,6 +75,7 @@ one ends with the exact next command to run.
 | `alumni` | Alumni network mapper: import LinkedIn `Connections.csv` (or the export ZIP), enrich contacts with schools/past jobs, find school/company overlap with your profile, get ranked warm paths into target companies, a tiered outreach queue, and grounded referral/info-chat/reconnect drafts. Includes an interaction log and a stale-contact re-engagement detector. See `docs/alumni.md`. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `apply` | Supervised job applications: fill only safe contact fields from `profile.yaml`, upload your resume, then **park at review** until you explicitly approve. Sensitive questions (visa, salary, EEO, background, attestations) and anything unrecognized become `needs_input` items you answer with `apply answer`. Login walls and CAPTCHAs stop the run as `blocked`, never solved. See [docs/apply.md](docs/apply.md). |
 
 ## Job-source coverage (honest)
 

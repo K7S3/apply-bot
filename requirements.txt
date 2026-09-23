@@ -1,8 +1,12 @@
 # candid dependencies
 #
-# candid is stdlib-only by design. The single optional dependency below is
-# needed only for `onboard --resume file.pdf` (PDF text extraction).
+# candid's core is stdlib-only by design. The dependencies below are needed
+# for specific features only:
+#   - pypdf:   `onboard --resume file.pdf` (PDF text extraction)
+#   - pyyaml:  `apply` job specs (jobs/*.yaml) and the apply contact
+#              profile (profile.yaml)
 # Everything else — matching, tailoring, tracker, dashboard, judge —
 # runs on the standard library alone.
 
-pypdf>=3.0.0  # optional: PDF resume parsing
+pypdf>=3.0.0   # optional: PDF resume parsing
+pyyaml>=6.0    # needed by `candid apply` (job specs + apply profile)

@@ -18,6 +18,24 @@ years_experience: "3"
 work_authorization: "Yes"          # e.g. "Are you authorized to work in the US?"
 requires_sponsorship: "No"        # e.g. "Will you require sponsorship?"
 
+# --- Apply contact fields (used by `candid apply`) ---
+# The apply pipeline only auto-fills SAFE contact fields, and only when the
+# profile provides a value. The apply loader accepts exactly these 13 keys;
+# unknown keys are rejected, and keys that classify as sensitive (visa,
+# compensation, EEO, background, attestations) are rejected too. Sensitive
+# questions are never auto-filled: they become needs_input items you answer
+# explicitly with `candid apply answer`.
+# NOTE: the legacy top-level keys above (location, years_experience,
+# work_authorization, requires_sponsorship, smtp) are NOT in this set, so a
+# profile.yaml copied verbatim from this example will not load for apply.
+# Use exactly the keys below for the apply contact store.
+address: "123 Main St, Apt 4B"
+city: "New York"
+state: "NY"
+zip: "10001"
+country: "United States"
+github: "https://github.com/PLACEHOLDER"
+
 # --- Email summary (sent to you after each run) ---
 # The password is NEVER stored here — set the SMTP_PASSWORD env var.
 smtp:

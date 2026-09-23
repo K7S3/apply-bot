@@ -1,0 +1,25 @@
+# Example job spec for the candid apply pipeline.
+#
+# Copy this file to jobs/my-job.yaml, fill in YOUR values, and keep the real
+# file private: it points at your resume and the jobs you are applying to,
+# so never commit filled-in specs to a public repo.
+#
+# Required keys: id, company, role, url.
+# - id: a short unique slug for this job, e.g. "acme-ml-001".
+# - company: the employer's name as you want it shown.
+# - role: the job title from the posting.
+# - url: the full posting URL. Must start with http:// or https://.
+#
+# Optional keys:
+# - resume_pdf: path to the PDF resume to submit. If omitted (or the file
+#   does not exist), candid falls back to the tailored resume in
+#   <DATA_DIR>/tailored/<company>-<role>.pdf (see `candid tailor resume`).
+# - ats: adapter hint for the application portal:
+#   generic | greenhouse | lever | ashby (default: generic).
+
+id: example-000
+company: Example Corp
+role: Example Engineer
+url: https://example.com/careers/example-000
+# resume_pdf: /path/to/your/resume.pdf
+# ats: generic

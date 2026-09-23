@@ -11,6 +11,7 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid apply --job jobs/example.yaml    # supervised application (parks at review)
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -34,6 +35,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "benefits", "vesting", "negotiate", "salary", "mock",
     "jobs", "dashboard", "import", "gmail", "linkedin", "patterns", "tracks",
+    "apply",
 ]
 
 SUBCOMMANDS = {
@@ -58,6 +60,7 @@ SUBCOMMANDS = {
                  "drill", "mastery", "cheatsheet", "reset"],
     "tracks": ["list", "show", "questions", "concepts", "drills", "plan",
                "progress", "done", "undone", "reset", "mock", "suggest"],
+    "apply": ["run", "status", "answer", "approve", "submit"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -66,7 +69,7 @@ _EXPECTED_ERRORS = {
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "OfferError", "VestingError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError", "AlumniError",
+    "PatternsError", "AlumniError", "ApplyError",
     "ValueError",
     "TrackError", "ValueError",
 }
@@ -89,6 +92,7 @@ _NEXT_COMMAND = {
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
     "TrackError": "python -m candid tracks list",
+    "ApplyError": "python -m candid apply --help",
 }
 
 
@@ -960,6 +964,97 @@ def cmd_alumni(a):
             print(A.render_stats(s))
 
 
+def _render_apply_status(info: dict) -> str:
+    """Human-readable one-job apply summary."""
+    lines = [f"job {info['job_id']}: {info['state']}"]
+    job = info.get("job") or {}
+    if job.get("company"):
+        lines.append(f"  {job.get('role')} @ {job.get('company')}")
+        lines.append(f"  {job.get('url')}")
+    if info.get("needs_open"):
+        lines.append(f"needs input ({info['needs_open']}):")
+        for label in info["needs"]:
+            lines.append(f"  - {label}")
+    appr = info.get("approval")
+    if appr:
+        lines.append(f"approved by {appr.get('by')} at {appr.get('at')}")
+    return "\n".join(lines)
+
+
+def cmd_apply(a):
+    from candid import apply_runner as R
+    runner = R.Runner()
+    action = a.action or "run"
+
+    def _seen(job_id: str) -> dict:
+        data = runner.store.load(job_id)
+        if (data.get("state") == "new" and not data.get("history")
+                and not data.get("job")):
+            raise R.ApplyError(
+                f"no apply record for job id {job_id!r}; "
+                "run `python -m candid apply --job <spec.yaml>` first."
+            )
+        return data
+
+    if action == "run":
+        if not a.job:
+            sys.exit("apply run needs --job jobs/x.yaml "
+                     "(try jobs/example.yaml).")
+        data = runner.apply(a.job, headless=a.headless,
+                            auto_submit=a.auto_submit and not a.park)
+        needs = data.get("needs", [])
+        if needs:
+            print(f"{len(needs)} question(s) need your answers; "
+                  f"the run is parked.")
+            for n in needs:
+                print(f"  - [{n.get('kind')}] {n.get('label')}")
+            jid = data.get("job_id")
+            print("answer with: python -m candid apply answer "
+                  f"--job-id {jid} --answers '{{\"field\": \"value\"}}'")
+        else:
+            print(f"job {data.get('job_id')}: {data.get('state')}")
+    elif action == "status":
+        if not a.job_id:
+            sys.exit("apply status needs --job-id ID.")
+        _seen(a.job_id)
+        info = runner.status(a.job_id)
+        if a.json:
+            print(json.dumps(info, indent=2))
+        else:
+            print(_render_apply_status(info))
+    elif action == "answer":
+        if not a.job_id:
+            sys.exit("apply answer needs --job-id ID.")
+        if not a.answers:
+            sys.exit("apply answer needs --answers "
+                     "'{\"field\": \"value\"}'.")
+        try:
+            answers = json.loads(a.answers)
+        except json.JSONDecodeError as e:
+            raise R.ApplyError(f"--answers is not valid JSON: {e}")
+        if not isinstance(answers, dict):
+            raise R.ApplyError(
+                "--answers must be a JSON object: "
+                "'{\"field\": \"value\"}'")
+        _seen(a.job_id)
+        runner.answer(a.job_id, answers)
+    elif action == "approve":
+        if not a.job_id:
+            sys.exit("apply approve needs --job-id ID.")
+        if not a.by:
+            sys.exit("apply approve needs --by NAME "
+                     "(who is approving?).")
+        _seen(a.job_id)
+        runner.approve(a.job_id, a.by)
+    elif action == "submit":
+        if not a.job_id:
+            sys.exit("apply submit needs --job-id ID.")
+        if not a.job:
+            sys.exit("apply submit needs --job jobs/x.yaml.")
+        _seen(a.job_id)
+        runner.submit(a.job_id, a.job, headless=a.headless)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -1813,6 +1908,45 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_alumni)
+
+    # apply
+    s = _sub(sub, "apply", "Supervised job applications: fill safe fields, park at review, approve, submit.", [
+        "python -m candid apply --job jobs/example.yaml",
+        "python -m candid apply --job jobs/acme.yaml --auto-submit",
+        "python -m candid apply status --job-id acme-swe-1",
+        "python -m candid apply status --job-id acme-swe-1 --json",
+        "python -m candid apply answer --job-id acme-swe-1 --answers '{\"salary\": \"150k\"}'",
+        "python -m candid apply approve --job-id acme-swe-1 --by Keshavan",
+        "python -m candid apply submit --job-id acme-swe-1 --job jobs/acme.yaml",
+    ])
+    s.add_argument("action", nargs="?", default="run",
+                   choices=["run", "status", "answer", "approve", "submit"],
+                   help="run (default): fill the form and park at review; "
+                        "status/answer/approve/submit manage an in-flight application")
+    s.add_argument("--job", default=None,
+                   help="Job spec YAML, e.g. jobs/example.yaml (run, submit)")
+    s.add_argument("--park", action="store_true",
+                   help="Park at review instead of submitting (this is the "
+                        "default; also overrides --auto-submit)")
+    s.add_argument("--auto-submit", action="store_true",
+                   help="Only submits when zero needs_input items are "
+                        "unresolved; otherwise parks for review. Explicit "
+                        "approval is the default.")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--headless", dest="headless", action="store_true",
+                   default=True, help="Run the browser headless (default)")
+    g.add_argument("--no-headless", dest="headless", action="store_false",
+                   help="Show the browser window while applying")
+    s.add_argument("--job-id", default=None,
+                   help="Job id (status, answer, approve, submit)")
+    s.add_argument("--answers", default=None,
+                   help="JSON object of answers for open questions, "
+                        "e.g. '{\"salary\": \"150k\"}' (answer)")
+    s.add_argument("--by", default=None,
+                   help="Approver name (approve)")
+    s.add_argument("--json", action="store_true",
+                   help="Print status as JSON (status)")
+    s.set_defaults(func=cmd_apply)
 
     return p
 
