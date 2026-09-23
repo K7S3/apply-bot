@@ -8,8 +8,9 @@
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
     python -m candid dashboard            # local web UI (127.0.0.1 only)
-    python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
-    python -m candid linkedin import --zip LinkedIn-export.zip
+    python -m candid followup thank-you --person "Jane Doe" --role "Data Scientist" --company Acme
+    python -m candid outreach sequence --target Sam --role "Data Scientist" --company Acme
+    python -m candid negotiate script --which expectation_range --set role="Data Scientist" --set company=Acme
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
 
 Run `python -m candid <command> --help` for details on each command.
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "outreach",
 ]
 
 SUBCOMMANDS = {
@@ -41,13 +42,15 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
-    "negotiate": ["playbook", "script", "counter"],
+    "negotiate": ["playbook", "script", "counter", "practice"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "outreach": ["sequence", "ladder", "connect", "connect-company",
+                 "reply", "call-prep", "announce", "resign", "tone"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "OutreachError", "RecruiterError", "ResignError",
     "ValueError",
 }
 
@@ -72,6 +76,9 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "OutreachError": "python -m candid outreach --help",
+    "RecruiterError": "python -m candid outreach connect --help",
+    "ResignError": "python -m candid outreach resign --help",
 }
 
 
@@ -310,12 +317,134 @@ def cmd_offer(a):
         print(f"Offer comparison exported to {path}")
 
 
+def _name_or_profile(a) -> str:
+    """--name if given, else the name on the stored profile, else ''."""
+    name = (getattr(a, "name", "") or "").strip()
+    if not name:
+        try:
+            name = (_profile().get("name") or "").strip()
+        except Exception:
+            name = ""
+    return name
+
+
+def cmd_outreach(a):
+    from candid import outreach as O
+    from candid import recruiter as R
+    from candid import offer as OF
+    from candid import resign as RE
+    from candid import tone as TO
+
+    name = _name_or_profile(a)
+
+    if a.what == "sequence":
+        print(O.render_sequence(name, a.target, a.role, a.company,
+                                context=a.context or ""))
+    elif a.what == "ladder":
+        print(O.render_ladder(name, a.recruiter, a.role, a.company,
+                              last_contact=a.last_contact or ""))
+    elif a.what == "connect":
+        print(R.connection_note(name, a.contact, a.company, a.role,
+                                context=a.context or ""))
+    elif a.what == "connect-company":
+        notes = R.connection_notes_for_company(name, a.company, a.role,
+                                                top_n=a.top_n)
+        if not notes:
+            print(f"No referral candidates found for {a.company}.")
+            return
+        for n in notes:
+            print(f"- {n['contact_name']} ({n['position']}, {n['company']})")
+            print(f"  Why: {n['why_this_contact']}")
+            print(f"  Note: {n['note']}\n")
+    elif a.what == "reply":
+        r = R.recruiter_reply(a.kind, name, a.recruiter, a.role, a.company,
+                              detail=a.detail or "")
+        print(R.render_reply(r))
+    elif a.what == "call-prep":
+        print(R.render_call_prep(R.call_prep(a.role, a.company)))
+    elif a.what == "announce":
+        print(OF.render_announcement(name, a.role, a.company,
+                                     start_date=a.start_date or "",
+                                     tone=a.tone))
+    elif a.what == "resign":
+        if a.talking_points:
+            for pt in RE.talking_points():
+                print(f"- {pt}")
+            return
+        for field in ("manager", "company", "last_day"):
+            if not getattr(a, field, ""):
+                sys.exit(f"--{field.replace('_', '-')} is required unless --talking-points.\n"
+                         "Next: run `python -m candid outreach resign --help`.")
+        print(RE.letter(name, a.manager, a.company, a.last_day,
+                        tone=a.tone, reason=a.reason or ""))
+    elif a.what == "tone":
+        text = a.text or ""
+        if a.file:
+            with open(a.file, encoding="utf-8") as f:
+                text = f.read()
+        if a.detect:
+            if not text.strip():
+                sys.exit("Provide --text or --file to detect.\n"
+                         "Next: run `python -m candid outreach tone --help`.")
+            print(TO.detect_tone(text))
+        elif a.match_voice:
+            sample = a.sample or ""
+            if not text.strip() or not sample.strip():
+                sys.exit("match-voice needs --text (or --file) and --sample.\n"
+                         "Next: run `python -m candid outreach tone --help`.")
+            print(TO.match_voice(text, sample))
+        else:
+            if not text.strip():
+                sys.exit("Provide --text or --file to retune.\n"
+                         "Next: run `python -m candid outreach tone --help`.")
+            print(TO.tune(text, a.tone or "warm"))
+
+
+def _cmd_negotiate_practice(a):
+    from candid import negotiate as N
+    current_offer = {
+        "base": a.base or 0,
+        "sign_on": a.sign_on or 0,
+        "equity": a.equity or 0,
+    }
+    batna = {
+        "description": a.batna or "Stay at current role",
+        "value": a.batna_value or 0,
+    }
+    session = N.start_counter_session(current_offer, batna,
+                                      scenario=a.scenario)
+    print("Practice counteroffer negotiation. Type your replies; "
+          "`quit` ends and prints the transcript.\n")
+    print(N.counter_recruiter_reply(session))
+    while True:
+        try:
+            line = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if line.strip().lower() in ("quit", "exit"):
+            break
+        if not line.strip():
+            continue
+        try:
+            session = N.counter_user_reply(session, line)
+        except ValueError as e:
+            print(f"(skipped: {e})")
+            continue
+        print(N.counter_recruiter_reply(session))
+    print("\n" + N.counter_transcript(session))
+
+
 def cmd_negotiate(a):
     from candid import negotiate as N
     if a.what == "playbook":
         print(N.render_playbook())
     elif a.what == "script":
         fields = dict(kv.split("=", 1) for kv in (a.set or []))
+        if a.which in ("expectation_range", "expectation_deflect",
+                       "expectation_anchor"):
+            # these scripts need you on them; --set can override
+            fields.setdefault("name", _name_or_profile(a) or "Your Name")
         print(N.get_script(a.which, **fields))
     elif a.what == "counter":
         prof = _profile()
@@ -324,6 +453,8 @@ def cmd_negotiate(a):
                               base_ask_reason=a.base_ask, second_item=a.second_item,
                               second_ask_reason=a.second_ask or "",
                               target_summary=a.target or "", call_time=a.call_time))
+    elif a.what == "practice":
+        _cmd_negotiate_practice(a)
 
 
 def cmd_salary(a):
@@ -692,10 +823,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_offer)
 
     # negotiate
-    s = _sub(sub, "negotiate", "Negotiation playbook, scripts, counter drafts.", [
+    s = _sub(sub, "negotiate", "Negotiation playbook, scripts, counter drafts, practice.", [
         "python -m candid negotiate playbook",
         "python -m candid negotiate script --which competing_offer --set company=Acme",
         "python -m candid negotiate counter --person Jane --role \"Data Scientist\" --company Acme --base-ask \"190k base\"",
+        "python -m candid negotiate practice --scenario lowball --base 160000",
     ])
     ns = _nested(s)
     _sub(ns, "playbook", "Show the negotiation playbook.", [
@@ -704,11 +836,18 @@ def build_parser() -> argparse.ArgumentParser:
     t = _sub(ns, "script", "Get a script for a specific scenario.", [
         "python -m candid negotiate script --which lowball_anchor",
         "python -m candid negotiate script --which competing_offer --set company=Acme --set number=190000",
+        "python -m candid negotiate script --which expectation_range --set role=\"Data Scientist\" --set company=Acme",
+        "python -m candid negotiate script --which expectation_deflect",
     ])
     t.add_argument("--which", required=True,
         choices=["lowball_anchor", "competing_offer", "exploding_deadline",
-                 "level_pushback", "leveling_up_push", "remote_flexibility"])
+                 "level_pushback", "leveling_up_push", "remote_flexibility",
+                 "expectation_range", "expectation_deflect", "expectation_anchor"],
+        help="expectation_*: answer 'what are your salary expectations?' "
+             "(needs role/company via --set; pulls researched ranges)")
     t.add_argument("--set", action="append", default=[], help="key=value template fields")
+    t.add_argument("--name", default="",
+                   help="Your name (default: from your profile; used by expectation_* scripts)")
     t = _sub(ns, "counter", "Draft a counter-offer email.", [
         "python -m candid negotiate counter --person Jane --role \"Data Scientist\" --company Acme --base-ask \"190k base\"",
     ])
@@ -717,6 +856,20 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--base-ask", required=True); t.add_argument("--second-item", default="Sign-on bonus")
     t.add_argument("--second-ask", default=""); t.add_argument("--target", default="")
     t.add_argument("--call-time", default="tomorrow")
+    t = _sub(ns, "practice", "Practice a counteroffer conversation against a recruiter persona.", [
+        "python -m candid negotiate practice --scenario lowball --base 160000",
+        "python -m candid negotiate practice --scenario competing_offer --base 170000 --sign-on 20000 --batna \"stay at CurrentCo\" --batna-value 190000",
+    ])
+    t.add_argument("--scenario", default="lowball",
+                   choices=["lowball", "competing_offer", "exploding_deadline", "level_pushback"],
+                   help="Recruiter persona scenario (default: lowball)")
+    t.add_argument("--base", type=float, default=0, help="Current offer base $")
+    t.add_argument("--sign-on", type=float, default=0, help="Current offer sign-on $")
+    t.add_argument("--equity", type=float, default=0, help="Current offer equity $")
+    t.add_argument("--batna", default="Stay at current role",
+                   help="Your best alternative (description)")
+    t.add_argument("--batna-value", type=float, default=0,
+                   help="BATNA value in $ (optional)")
     s.set_defaults(func=cmd_negotiate)
 
     # salary
@@ -899,6 +1052,96 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid gmail guide",
     ])
     s.set_defaults(func=cmd_gmail)
+
+    # outreach
+    s = _sub(sub, "outreach", "Cold outreach sequences, recruiter drafts, tone tuner, resignation.", [
+        "python -m candid outreach sequence --name \"Jane Doe\" --target Sam --role \"Data Scientist\" --company Acme",
+        "python -m candid outreach ladder --name \"Jane Doe\" --recruiter Priya --role \"Data Scientist\" --company Acme",
+        "python -m candid outreach connect --name \"Jane Doe\" --contact Sam --company Acme --role \"Data Scientist\"",
+        "python -m candid outreach tone --tone direct --text \"Hi, I was wondering if you could take a look...\"",
+    ])
+    os_ = _nested(s)
+    t = _sub(os_, "sequence", "Build a 4-touch cold outreach sequence (days 0/4/11/21).", [
+        "python -m candid outreach sequence --name \"Jane Doe\" --target Sam --role \"Data Scientist\" --company Acme",
+        "python -m candid outreach sequence --target Sam --role \"Data Scientist\" --company Acme --context \"saw your team ship X\"",
+    ])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--target", required=True, help="Person you are writing to")
+    t.add_argument("--role", required=True); t.add_argument("--company", required=True)
+    t.add_argument("--context", default="", help="One-line hook about them/their work")
+    t = _sub(os_, "ladder", "Build a 3-stage follow-up escalation ladder for recruiter silence.", [
+        "python -m candid outreach ladder --name \"Jane Doe\" --recruiter Priya --role \"Data Scientist\" --company Acme",
+        "python -m candid outreach ladder --recruiter Priya --role \"Data Scientist\" --company Acme --last-contact \"2026-09-01\"",
+    ])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--recruiter", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--company", required=True)
+    t.add_argument("--last-contact", default="", help="When you last heard from them")
+    t = _sub(os_, "connect", "Draft a short LinkedIn-style connection note (<=300 chars).", [
+        "python -m candid outreach connect --name \"Jane Doe\" --contact Sam --company Acme --role \"Data Scientist\"",
+        "python -m candid outreach connect --contact Sam --company Acme --role \"Data Scientist\" --context \"also a Waterloo grad\"",
+    ])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--contact", required=True, help="Person you want to connect with")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--context", default="")
+    t = _sub(os_, "connect-company", "Draft connection notes for the top referral candidates at a company.", [
+        "python -m candid outreach connect-company --name \"Jane Doe\" --company Acme --role \"Data Scientist\"",
+        "python -m candid outreach connect-company --company Acme --role \"Data Scientist\" --top-n 5",
+    ])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--top-n", type=int, default=3, help="How many contacts (default: 3)")
+    t = _sub(os_, "reply", "Draft a reply to recruiter outreach (interested / not interested / need details).", [
+        "python -m candid outreach reply --kind interested --name \"Jane Doe\" --recruiter Priya --role \"Data Scientist\" --company Acme",
+        "python -m candid outreach reply --kind need_details --recruiter Priya --role \"Data Scientist\" --company Acme",
+    ])
+    t.add_argument("--kind", required=True,
+                   choices=["interested", "not_interested", "need_details"])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--recruiter", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--company", required=True)
+    t.add_argument("--detail", default="")
+    t = _sub(os_, "call-prep", "Questions to ask and red flags for a recruiter call.", [
+        "python -m candid outreach call-prep --role \"Data Scientist\" --company Acme",
+    ])
+    t.add_argument("--role", required=True); t.add_argument("--company", required=True)
+    t = _sub(os_, "announce", "Draft offer-acceptance announcements (LinkedIn post + network message).", [
+        "python -m candid outreach announce --name \"Jane Doe\" --role \"Data Scientist\" --company Acme",
+        "python -m candid outreach announce --role \"Data Scientist\" --company Acme --start-date \"2026-10-20\" --tone concise",
+    ])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--role", required=True); t.add_argument("--company", required=True)
+    t.add_argument("--start-date", default="")
+    t.add_argument("--tone", default="warm", choices=["warm", "concise"])
+    t = _sub(os_, "resign", "Draft a resignation letter, or print talking points.", [
+        "python -m candid outreach resign --name \"Jane Doe\" --manager \"Alex Lee\" --company CurrentCo --last-day \"2026-10-30\"",
+        "python -m candid outreach resign --talking-points",
+        "python -m candid outreach resign --manager \"Alex Lee\" --company CurrentCo --last-day \"2026-10-30\" --tone brief",
+    ])
+    t.add_argument("--name", default="", help="Your name (default: from your profile)")
+    t.add_argument("--manager", default=""); t.add_argument("--company", default="")
+    t.add_argument("--last-day", default="", help="Your last working day")
+    t.add_argument("--tone", default="gracious", choices=["gracious", "brief"])
+    t.add_argument("--reason", default="")
+    t.add_argument("--talking-points", action="store_true",
+                   help="Print the resignation talking-points checklist instead of a letter")
+    t = _sub(os_, "tone", "Retune a draft to a tone, detect a tone, or match your voice.", [
+        "python -m candid outreach tone --tone direct --text \"Hi, I was wondering if you could take a look...\"",
+        "python -m candid outreach tone --tone formal --file draft.txt",
+        "python -m candid outreach tone --detect --file draft.txt",
+        "python -m candid outreach tone --match-voice --file draft.txt --sample voice-sample.txt",
+    ])
+    t.add_argument("--tone", default=None,
+                   choices=["warm", "formal", "concise", "enthusiastic", "direct"],
+                   help="Target tone for retuning (default: warm)")
+    t.add_argument("--text", default="", help="Draft text (or use --file)")
+    t.add_argument("--file", default="", help="Read the draft from a file")
+    t.add_argument("--detect", action="store_true", help="Detect the tone of --text/--file")
+    t.add_argument("--match-voice", action="store_true",
+                   help="Match the voice in --sample instead of retuning to a tone")
+    t.add_argument("--sample", default="", help="Your writing sample for --match-voice")
+    s.set_defaults(func=cmd_outreach)
 
     # linkedin
     s = _sub(sub, "linkedin", "Import LinkedIn's official data export (no scraping).", [

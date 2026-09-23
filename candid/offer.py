@@ -27,7 +27,7 @@ from pathlib import Path
 from candid import config as C
 
 
-class OfferError(Exception):
+class OfferError(ValueError):
     """Raised for invalid offer data or operations."""
 
 
@@ -224,3 +224,91 @@ def _fmt(x) -> str:
         return f"${float(x or 0):,.0f}"
     except (TypeError, ValueError):
         return "—"
+
+
+_ANNOUNCE_TONES = ("warm", "concise")
+
+
+def _start_phrase(start_date: str) -> str:
+    start_date = (start_date or "").strip()
+    return f", starting {start_date}" if start_date else ""
+
+
+def announcement(name: str, role: str, company: str, start_date: str = "",
+                 tone: str = "warm") -> dict:
+    """Draft announcement texts for after you sign.
+
+    Returns a dict with two variants:
+      - "linkedin_post": a tasteful public post (gratitude, new role and
+        company, start date if given).
+      - "network_message": a short DM-style note for telling contacts
+        individually.
+
+    Comp numbers are never included in any variant. Tones: "warm"
+    (default), "concise". These are drafts - nothing posts or sends
+    itself.
+    """
+    if tone not in _ANNOUNCE_TONES:
+        raise OfferError(f"Unknown tone '{tone}'. Choose from {list(_ANNOUNCE_TONES)}.")
+    for label, value in (("name", name), ("role", role), ("company", company)):
+        if not str(value or "").strip():
+            raise OfferError(f"Announcement needs a {label}.")
+    name, role, company = name.strip(), role.strip(), company.strip()
+    start = _start_phrase(start_date)
+    if tone == "concise":
+        linkedin_post = (
+            f"Excited to share some personal news: I'm joining {company} "
+            f"as a {role}{start}.\n\n"
+            f"Thanks to everyone who supported me through the search. "
+            f"Looking forward to what's ahead!\n\n"
+            f"- {name}"
+        )
+        network_message = (
+            f"Quick personal update: I'm joining {company} as a "
+            f"{role}{start}. Thanks for your support during the search - "
+            f"let's catch up once I settle in!\n\n"
+            f"- {name}"
+        )
+    else:
+        linkedin_post = (
+            f"Some personal news I'm excited to share: I'm joining {company} "
+            f"as a {role}{start}.\n\n"
+            f"Huge thanks to everyone who supported me through the search - "
+            f"the mentors who took my calls, the friends who talked me "
+            f"through tough decisions, and everyone who cheered me on. "
+            f"I'm grateful for this opportunity and looking forward to "
+            f"what's ahead.\n\n"
+            f"- {name}"
+        )
+        network_message = (
+            f"Hi! Wanted to share some news with you personally: I've signed "
+            f"an offer and I'm joining {company} as a {role}{start}.\n\n"
+            f"Thanks for all your support during the search - it really "
+            f"meant a lot. Would love to catch up properly once I settle in!\n\n"
+            f"- {name}"
+        )
+    return {"linkedin_post": linkedin_post, "network_message": network_message}
+
+
+def render_announcement(name: str, role: str, company: str, start_date: str = "",
+                        tone: str = "warm") -> str:
+    """Render both announcement variants as Markdown."""
+    variants = announcement(name, role, company, start_date=start_date, tone=tone)
+    lines = [
+        "# Offer Announcement Drafts",
+        "",
+        f"*For: {name.strip()} - {role.strip()} at {company.strip()}*",
+        "",
+        "## LinkedIn post",
+        "",
+        variants["linkedin_post"],
+        "",
+        "## Message to your network",
+        "",
+        variants["network_message"],
+        "",
+        "_These are drafts. Nothing posts or sends itself - copy, edit, and "
+        "share yourself._",
+        "",
+    ]
+    return "\n".join(lines)
