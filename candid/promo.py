@@ -169,7 +169,10 @@ def coverage(profile: dict | None, criteria: list[str],
         kw = criterion_keywords(crit)
         ev_hits = []
         for ev in evidence:
-            tag_kw = criterion_keywords(ev.get("criterion") or "")
+            # Evidence is often tagged with the hyphen-joined tag produced by
+            # criterion_tag() (the CLI prints tags in gap suggestions), so
+            # expand hyphens back into words before keyword matching.
+            tag_kw = criterion_keywords((ev.get("criterion") or "").replace("-", " "))
             shared = set(tag_kw) & set(kw)
             if shared or _hits(ev.get("text", ""), kw):
                 ev_hits.append(ev)

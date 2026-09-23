@@ -68,6 +68,10 @@ How it works:
 - Everything is deterministic and local. No profile yet? The commands
   still work, minus personalization - run `onboard` for the full
   version.
+- The `--criterion` tag printed by `gaps` (e.g.
+  `technical-leadership-others-follow`) is recognized as evidence for
+  that criterion even when your story shares no keywords with it:
+  tag it once, and the checklist counts it as covered.
 
 Data hygiene: evidence lives in `candid_data/promo_evidence.json`
 (git-ignored, like the tracker). Leveling reference data is committed

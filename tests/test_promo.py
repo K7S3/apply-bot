@@ -114,6 +114,18 @@ class CoverageTest(unittest.TestCase):
         cov = P.coverage(None, ["Impact at team-plus scope"], [])
         self.assertEqual(cov[0]["score"], 0.0)
 
+    def test_hyphen_tag_from_gap_suggestion_matches(self):
+        # Regression: the CLI tells users to add evidence with the tag printed
+        # by `promo gaps` (criterion_tag), so the tag alone must cover the
+        # criterion even when the free text shares no keywords.
+        crit = "Demonstrates impact beyond your team"
+        tag = P.criterion_tag(crit)
+        ev = [{"id": 1, "text": "Something completely unrelated",
+               "criterion": tag, "company": "", "date": ""}]
+        cov = P.coverage(None, [crit], ev)
+        self.assertEqual(cov[0]["score"], 1.0)
+        self.assertEqual(len(cov[0]["evidence_hits"]), 1)
+
 
 class ChecklistTest(unittest.TestCase):
     def test_verdict_ready(self):
