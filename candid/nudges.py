@@ -164,6 +164,13 @@ def pending_nudges(apps: list[dict] | None = None,
             except Exception:
                 pass  # date parsing must never break the nudge list
 
+    # first-job checklist reminders (never break the tracker nudges)
+    try:
+        from candid import checklist as CL
+        nudges.extend(CL.checklist_nudges(today=today))
+    except Exception:
+        pass
+
     order = {"interview_soon": 0, "follow_up_due": 1, "quiet_applied": 2,
              "stale_saved": 3}
     nudges.sort(key=lambda n: order.get(n["kind"], 9))

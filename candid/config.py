@@ -37,14 +37,28 @@ DATA_DIR = _data_dir()
 CONFIG_DIR = _config_dir()
 PROFILE_PATH = DATA_DIR / "profile.json"
 TRACKER_PATH = DATA_DIR / "tracker.json"
+INTERNSHIPS_PATH = DATA_DIR / "internships.json"
 OFFERS_PATH = DATA_DIR / "offers.json"
 SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
 GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
+FAIRS_PATH = DATA_DIR / "fairs.json"
+CHECKLIST_PATH = DATA_DIR / "checklist.json"
 
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"
+
+# --- internship pipeline stages ----------------------------------------------
+INTERN_STATUSES = [
+    "applied",
+    "oa",        # online assessment
+    "phone",     # phone / recruiter screen
+    "onsite",
+    "offer",
+    "accepted",
+    "rejected",
+]
 
 # --- application tracker statuses --------------------------------------------
 STATUSES = [

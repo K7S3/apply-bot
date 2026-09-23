@@ -24,6 +24,7 @@ import re
 import sys
 
 from candid import __version__
+from candid import config as C
 
 # ---------------------------------------------------------------------------
 # command inventory (kept in sync with build_parser below)
@@ -32,22 +33,29 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "campus", "convert", "fair",
+    "internships", "checklist", "referrals",
 ]
 
 SUBCOMMANDS = {
     "profile": ["show"],
     "tailor": ["resume", "cover-letter"],
-    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
+    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv",
+              "conversion-stats"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
-    "salary": ["lookup", "import-lca", "parse-range"],
+    "salary": ["lookup", "import-lca", "parse-range", "newgrad"],
+    "internships": ["add", "list", "update", "remove", "import-csv", "deadlines"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
-    "jobs": ["curate", "refresh", "list"],
+    "jobs": ["curate", "refresh", "list", "newgrad-guide"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "campus": ["timeline", "deadlines"],
+    "fair": ["add", "list", "companies", "followup"],
+    "checklist": ["newgrad", "show", "check"],
+    "referrals": ["classmates"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +63,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "CampusError", "FairError", "InternshipsError", "ChecklistError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +80,10 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "CampusError": "python -m candid campus --help",
+    "FairError": "python -m candid fair --help",
+    "InternshipsError": "python -m candid internships --help",
+    "ChecklistError": "python -m candid checklist --help",
 }
 
 
@@ -211,12 +223,15 @@ def cmd_tailor(a):
     prof = _profile()
     if a.what == "resume":
         out = T.build_resume(prof, jd, company=company, role=role,
-                             tone=a.tone, length=a.length)
+                             tone=a.tone, length=a.length,
+                             new_grad=a.new_grad,
+                             include_coursework=a.include_coursework)
     else:
         if not company or not role:
             sys.exit("Cover letters need --company and --role (or --app-id of a tracked job).")
         out = T.build_cover_letter(prof, jd, company=company, role=role,
-                                   tone=a.tone, hook=a.hook or "")
+                                   tone=a.tone, hook=a.hook or "",
+                                   new_grad=a.new_grad)
     if a.out:
         with open(a.out, "w", encoding="utf-8") as f:
             f.write(out)
@@ -229,12 +244,13 @@ def cmd_track(a):
     from candid import tracker as T
     if a.what == "add":
         rec = T.add(a.company, a.role, jd_link=a.jd_link or "", status=a.status,
-                    notes=a.notes or "")
+                    notes=a.notes or "", internship=a.internship)
         if rec.get("duplicate"):
             print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
                   f"[{rec['status']}] — not duplicated.")
         else:
-            print(f"Added application #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['status']}]")
+            tag = " [internship]" if rec.get("internship") else ""
+            print(f"Added application #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['status']}{tag}]")
     elif a.what == "list":
         apps = T.list_apps(status=a.status, company=a.company)
         if a.json:
@@ -247,12 +263,18 @@ def cmd_track(a):
                  if len(apps) > limit else ""))
         print(T.render_list(shown))
     elif a.what == "update":
-        rec = T.update(a.id, status=a.status, notes=a.notes)
-        print(f"Updated #{rec['id']}: status={rec['status']}")
+        rec = T.update(a.id, status=a.status, notes=a.notes,
+                       return_offer=a.return_offer)
+        print(f"Updated #{rec['id']}: status={rec['status']}"
+              + (f" return_offer={rec['return_offer']}" if rec.get("return_offer") else ""))
         if rec["status"] == "selected_for_interview":
             print("\n🎯 Interview! Generate a prep pack with:")
             print(f"   python -m candid prep --company \"{rec['company']}\" "
                   f"--role \"{rec['role']}\" --app-id {rec['id']}")
+        if rec.get("return_offer") == "yes":
+            print("\n🎉 Return offer! Link the full-time app with:")
+            print(f"   python -m candid convert --from {rec['id']} "
+                  f"--company \"{rec['company']}\" --role \"<full-time role>\"")
     elif a.what == "remove":
         T.remove(a.id)
         print(f"Removed application #{a.id}.")
@@ -267,13 +289,68 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+    elif a.what == "conversion-stats":
+        print(T.render_conversion_stats(T.conversion_stats()))
+
+
+def cmd_convert(a):
+    from candid import tracker as T
+    rec = T.convert(a.from_id, company=a.company, role=a.role,
+                    notes=a.notes or "", status=a.status)
+    if rec.get("duplicate"):
+        print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
+              f"[{rec['status']}] — not duplicated.")
+    else:
+        print(f"Created full-time application #{rec['id']}: {rec['role']} @ "
+              f"{rec['company']} [{rec['status']}] (converts from #{a.from_id})")
+
+
+def cmd_fair(a):
+    from candid import fairs as FR
+    if a.what == "add":
+        rec = FR.add_fair(a.name, date_=a.date or "", school=a.school or "")
+        print(f"Added fair #{rec['id']}: {rec['name']}"
+              + (f" ({rec['date']})" if rec["date"] else "")
+              + (f" — {rec['school']}" if rec["school"] else ""))
+    elif a.what == "list":
+        fairs = FR.list_fairs()
+        if a.json:
+            print(json.dumps(fairs, indent=2, default=str))
+        else:
+            print(FR.render_fairs(fairs))
+    elif a.what == "companies":
+        if a.done:
+            entry = FR.mark_followup_done(a.fair, a.done)
+            who = entry.get("person") or entry.get("company")
+            print(f"Marked follow-up done for {who} @ {entry.get('company')}.")
+        elif a.add:
+            entry = FR.add_company(a.fair, a.add)
+            who = entry.get("person") or "(no name)"
+            print(f"Logged: {who} @ {entry['company']} "
+                  f"(fair #{a.fair}) — follow-up pending.")
+        else:
+            print(FR.render_companies(FR.get_fair(a.fair)))
+    elif a.what == "followup":
+        entries = FR.followups(fair_id=a.fair)
+        if a.draft:
+            idx = a.draft
+            if idx < 1 or idx > len(entries):
+                sys.exit(f"No follow-up #{idx}: only {len(entries)} pending.")
+            try:
+                name = _profile().get("name") or "Your Name"
+            except Exception:
+                name = "Your Name"  # fair logging works without onboarding
+            print(FR.draft_followup(name, entries[idx - 1], role=a.role or ""))
+        else:
+            print(FR.render_followups(entries))
 
 
 def cmd_prep(a):
     from candid import prep as P
     jd = _jd_text(a) if a.jd else ""
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
-                                  app_id=a.app_id, location=a.location or "")
+                                  app_id=a.app_id, location=a.location or "",
+                                  new_grad=a.new_grad)
     print(f"Prep pack saved to {path}\n")
     print(markdown[:3000])
     if len(markdown) > 3000:
@@ -291,7 +368,44 @@ def cmd_followup(a):
         print(F.check_in(name, a.person, a.role, a.company,
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
-        print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+        if getattr(a, "new_grad", False):
+            from candid import referrals as R
+            info = R.school_info(prof)
+            school = a.school or info["school"]
+            year = a.class_year or info["class_year"]
+            print(F.new_grad_referral_ask(name, a.person, a.role, a.company,
+                                          school, year, variant=a.variant))
+        else:
+            print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def cmd_checklist(a):
+    from candid import checklist as CL
+    if a.what == "newgrad":
+        if not a.graduation:
+            sys.exit("Pass --graduation YYYY-MM-DD, e.g.\n"
+                     "    python -m candid checklist newgrad --graduation 2026-05-15")
+        state = CL.generate(a.graduation)
+        done, total = CL.progress(state)
+        print(f"Checklist created for graduation {a.graduation} ({total} milestones).")
+        print(CL.render(state))
+    elif a.what == "show":
+        state = CL.load()
+        if state is None:
+            sys.exit("No checklist yet. Create one first:\n"
+                     "    python -m candid checklist newgrad --graduation YYYY-MM-DD")
+        print(CL.render(state))
+    elif a.what == "check":
+        state = CL.set_done(a.item_id, done=not a.undo)
+        done, total = CL.progress(state)
+        status = "done" if not a.undo else "not done"
+        print(f"Marked '{a.item_id}' as {status}. Progress: {done}/{total}.")
+
+
+def cmd_referrals(a):
+    from candid import referrals as R
+    if a.what == "classmates":
+        print(R.render_classmates(_profile(), a.company))
 
 
 def cmd_offer(a):
@@ -358,6 +472,55 @@ def cmd_salary(a):
             print(f"Stored range: ${parsed['low']:,.0f}–${parsed['high']:,.0f}/yr")
         else:
             print("No pay range found in that text.")
+    elif a.what == "newgrad":
+        result = S.newgrad(title=a.title, location=a.location or "",
+                           company=a.company or "")
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(S.render_newgrad(result))
+
+
+def cmd_internships(a):
+    from candid import internships as I
+    if a.what == "add":
+        rec = I.add(a.company, a.role, location=a.location or "",
+                    deadline=a.deadline or "", url=a.url or "",
+                    stage=a.stage, notes=a.notes or "")
+        if rec.get("duplicate"):
+            print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
+                  f"[{rec['stage']}] — not duplicated.")
+        else:
+            print(f"Added internship #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['stage']}]")
+    elif a.what == "list":
+        items = I.list_internships(stage=a.stage, company=a.company)
+        if a.json:
+            print(json.dumps(items, indent=2, default=str))
+            return
+        limit = a.limit if a.limit and a.limit > 0 else 25
+        shown = items[:limit]
+        print(f"{len(items)} internship(s) tracked"
+              + (f" — showing first {limit} (use --limit N for more)"
+                 if len(items) > limit else ""))
+        print(I.render_list(shown))
+    elif a.what == "update":
+        rec = I.update(a.id, stage=a.stage, deadline=a.deadline,
+                       notes=a.notes, url=a.url, role=a.role)
+        print(f"Updated #{rec['id']}: stage={rec['stage']} "
+              f"deadline={rec['deadline'] or '-'}")
+    elif a.what == "remove":
+        I.remove(a.id)
+        print(f"Removed internship #{a.id}.")
+    elif a.what == "import-csv":
+        res = I.import_csv(a.file)
+        print(f"Imported {res['added']} internship(s) from {a.file}; "
+              f"skipped {res['skipped_duplicates']} duplicate(s), "
+              f"{res['skipped_bad']} bad row(s).")
+        for e in res["errors"][:10]:
+            print(f"  ! {e}")
+    elif a.what == "deadlines":
+        items = I.deadlines(days=a.days)
+        print(I.render_deadlines(items))
 
 
 def cmd_mock(a):
@@ -405,8 +568,11 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    new_grad=getattr(a, "new_grad", False) or False)
         print(J.render_curated(result))
+    elif a.what == "newgrad-guide":
+        print(J.render_newgrad_guide())
     elif a.what == "list":
         if a.json:
             saved = []
@@ -425,6 +591,17 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+
+
+def cmd_campus(a):
+    from candid import campus as CA
+    if a.what == "timeline":
+        print(CA.render_timeline(school_type=a.school_type))
+    elif a.what == "deadlines":
+        if a.days is not None and a.days < 0:
+            sys.exit("--days must be 0 or more.\n"
+                     "Next: run `python -m candid campus deadlines --help`.")
+        print(CA.render_deadlines(days=a.days or 30))
 
 
 def cmd_dashboard(a):
@@ -555,6 +732,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tone", default="confident", choices=["concise", "confident", "formal", "warm"])
     s.add_argument("--length", default="one-page", choices=["one-page", "detailed"])
     s.add_argument("--hook", default="", help="One-line 'why this company' for cover letters")
+    s.add_argument("--new-grad", action="store_true",
+                   help="New-grad mode: projects-first resume, entry-level framing; "
+                        "with cover-letter, adds an entry-level paragraph")
+    s.add_argument("--include-coursework", action="store_true",
+                   help="Opt in to a coursework/GPA line under EDUCATION (from profile data only)")
     s.add_argument("--out", help="Write to file instead of stdout")
     s.set_defaults(func=cmd_tailor)
 
@@ -573,6 +755,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd-link", default=""); t.add_argument("--status", default="saved")
     t.add_argument("--notes", default="")
+    t.add_argument("--internship", action="store_true",
+                   help="Mark this application as an internship")
     t = _sub(ts, "list", "List tracked applications (default view: newest first, up to --limit).", [
         "python -m candid track list",
         "python -m candid track list --status applied",
@@ -587,9 +771,12 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track update 3 --status applied",
         "python -m candid track update 3 --status selected_for_interview",
         "python -m candid track update 3 --notes \"met hiring manager at meetup\"",
+        "python -m candid track update 3 --return-offer yes",
     ])
     t.add_argument("id", type=int)
     t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--return-offer", default=None, choices=["yes", "pending", "no"],
+                   help="Record a return offer on an internship application")
     t = _sub(ts, "remove", "Remove an application.", [
         "python -m candid track remove 3",
     ])
@@ -606,7 +793,62 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track export-csv tracker.csv",
     ])
     t.add_argument("dest", help="Destination CSV file path")
+    _sub(ts, "conversion-stats", "Internship -> full-time conversion funnel.", [
+        "python -m candid track conversion-stats",
+    ])
     s.set_defaults(func=cmd_track)
+
+    # convert (new-grad track): link a full-time app to an internship app
+    s = _sub(sub, "convert", "Create a full-time application linked to an internship.", [
+        "python -m candid convert --from 3 --company Acme --role \"Software Engineer\"",
+        "python -m candid convert --from 3 --company Acme --role \"SWE I\" --status applied",
+    ])
+    s.add_argument("--from", dest="from_id", type=int, required=True,
+                   help="Internship application id being converted")
+    s.add_argument("--company", required=True)
+    s.add_argument("--role", required=True, help="Full-time role title")
+    s.add_argument("--notes", default="")
+    s.add_argument("--status", default="saved")
+    s.set_defaults(func=cmd_convert)
+
+    # fair (new-grad track): career fair logger
+    s = _sub(sub, "fair", "Career fair logger: fairs, companies met, follow-ups.", [
+        "python -m candid fair add --name \"Fall Career Fair\" --date 2026-09-15 --school Rutgers",
+        "python -m candid fair list",
+        "python -m candid fair companies --fair 1 --add \"Jane Smith, Stripe, jane@.., talked about new grad roles\"",
+        "python -m candid fair followup",
+    ])
+    fsubs = _nested(s)
+    t = _sub(fsubs, "add", "Log a career fair.", [
+        "python -m candid fair add --name \"Fall Career Fair\" --date 2026-09-15 --school Rutgers",
+    ])
+    t.add_argument("--name", required=True)
+    t.add_argument("--date", default="", help="Fair date, YYYY-MM-DD")
+    t.add_argument("--school", default="")
+    t = _sub(fsubs, "list", "List logged fairs.", [
+        "python -m candid fair list",
+        "python -m candid fair list --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the fair list as JSON (for scripting)")
+    t = _sub(fsubs, "companies", "Log or view the companies/people you talked to.", [
+        "python -m candid fair companies --fair 1 --add \"Jane Smith, Stripe, jane@.., talked about new grad roles\"",
+        "python -m candid fair companies --fair 1",
+        "python -m candid fair companies --fair 1 --done \"Jane Smith\"",
+    ])
+    t.add_argument("--fair", type=int, required=True, help="Fair id")
+    t.add_argument("--add", default="", help="Company entry: \"Name, Company, contact, notes\"")
+    t.add_argument("--done", default="", help="Mark a follow-up done (match by person or company)")
+    t = _sub(fsubs, "followup", "List pending follow-ups, or print a draft.", [
+        "python -m candid fair followup",
+        "python -m candid fair followup --fair 1",
+        "python -m candid fair followup --draft 1",
+    ])
+    t.add_argument("--fair", type=int, default=None, help="Only this fair's follow-ups")
+    t.add_argument("--draft", type=int, default=None,
+                   help="Print the ready-to-use follow-up draft for entry N")
+    t.add_argument("--role", default="", help="Role to mention in the draft")
+    s.set_defaults(func=cmd_fair)
 
     # prep
     s = _sub(sub, "prep", "Build an interview prep pack.", [
@@ -619,6 +861,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--new-grad", action="store_true",
+                   help="Entry-level mode: fundamentals-weighted questions, new-grad "
+                        "behavioral set, fundamentals deep-dives, lighter "
+                        "system-design expectations")
     s.set_defaults(func=cmd_prep)
 
     # followup
@@ -646,11 +892,21 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--last-contact", default="")
     t = _sub(fs, "referral", "Draft a referral request.", [
         "python -m candid followup referral --person Sam --role \"Data Scientist\" --company Acme",
+        "python -m candid followup referral --person Priya --role \"New Grad SWE\" --company Acme --new-grad",
+        "python -m candid followup referral --person Priya --role \"New Grad SWE\" --company Acme --new-grad --variant warm",
     ])
     t.add_argument("--person", required=True, help="Interviewer / recruiter / contact name")
     t.add_argument("--role", required=True); t.add_argument("--company", required=True)
     t.add_argument("--tone", default="warm", choices=["warm", "formal", "concise"])
     t.add_argument("--topics", default="", help="Your connection to them")
+    t.add_argument("--new-grad", action="store_true",
+                   help="Peer-level new-grad outreach to alumni/classmates (connection-note length)")
+    t.add_argument("--variant", default="cold", choices=["cold", "warm"],
+                   help="With --new-grad: 'cold' = fellow alum you have not met, 'warm' = classmate you know")
+    t.add_argument("--school", default="",
+                   help="Override the school pulled from your profile education")
+    t.add_argument("--class-year", default="",
+                   help="Override the class year pulled from your profile education")
     s.set_defaults(func=cmd_followup)
 
     # offer
@@ -747,7 +1003,65 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd", default=""); t.add_argument("--text", default="")
     t.add_argument("--location", default="")
+    t = _sub(ss, "newgrad", "Entry-level pay benchmark for a new-grad title.", [
+        "python -m candid salary newgrad --title \"Software Engineer\" --location \"New York\"",
+        "python -m candid salary newgrad --title \"Data Scientist\" --company Acme --json",
+    ])
+    t.add_argument("--title", required=True); t.add_argument("--location", default="")
+    t.add_argument("--company", default="")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw new-grad result as JSON (for scripting)")
     s.set_defaults(func=cmd_salary)
+
+    # internships
+    s = _sub(sub, "internships", "Internship applications: bulk tracker + deadlines.", [
+        "python -m candid internships add --company Acme --role \"SWE Intern\" --deadline 2026-10-15",
+        "python -m candid internships import-csv internships.csv",
+        "python -m candid internships deadlines --days 30",
+    ])
+    ins = _nested(s)
+    t = _sub(ins, "add", "Add an internship application.", [
+        "python -m candid internships add --company Acme --role \"SWE Intern\"",
+        "python -m candid internships add --company Acme --role \"SWE Intern\" --location \"NYC\" --deadline 2026-10-15 --url https://example.com/apply",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--location", default=""); t.add_argument("--deadline", default="")
+    t.add_argument("--url", default=""); t.add_argument("--notes", default="")
+    t.add_argument("--stage", default="applied", choices=C.INTERN_STATUSES)
+    t = _sub(ins, "list", "List tracked internships (up to --limit).", [
+        "python -m candid internships list",
+        "python -m candid internships list --stage oa",
+        "python -m candid internships list --company Acme --json",
+    ])
+    t.add_argument("--stage", default=None, choices=C.INTERN_STATUSES)
+    t.add_argument("--company", default=None)
+    t.add_argument("--limit", type=int, default=0)
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw list as JSON (for scripting)")
+    t = _sub(ins, "update", "Update an internship's stage/deadline/notes/url/role.", [
+        "python -m candid internships update 1 --stage oa",
+        "python -m candid internships update 1 --stage phone --notes \"recruiter call on Friday\"",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--stage", default=None, choices=C.INTERN_STATUSES)
+    t.add_argument("--deadline", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--url", default=None); t.add_argument("--role", default=None)
+    t = _sub(ins, "remove", "Remove an internship application.", [
+        "python -m candid internships remove 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ins, "import-csv", "Bulk-add internships from a CSV.", [
+        "python -m candid internships import-csv internships.csv",
+    ])
+    t.add_argument("file",
+                   help="CSV with columns: company, role (required); location, deadline, url (optional)")
+    t = _sub(ins, "deadlines", "Upcoming application deadlines, soonest first.", [
+        "python -m candid internships deadlines",
+        "python -m candid internships deadlines --days 14",
+    ])
+    t.add_argument("--days", type=int, default=30,
+                   help="Window in days from today (default 30)")
+    s.set_defaults(func=cmd_internships)
 
     # mock
     s = _sub(sub, "mock", "Mock interviews: coding judge, AI interviewer, behavioral, design.", [
@@ -821,6 +1135,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--new-grad", action="store_true",
+                   help="New-grad track: add entry-level query signals, drop "
+                        "senior-signaled postings, boost entry-level ones")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
@@ -835,13 +1152,39 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--new-grad", action="store_true",
+                   help="New-grad track: add entry-level query signals, drop "
+                        "senior-signaled postings, boost entry-level ones")
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",
         "python -m candid jobs list --json   # machine-readable output",
     ])
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
+    t = _sub(js, "newgrad-guide", "New-grad job-search tips: where entry-level roles appear.", [
+        "python -m candid jobs newgrad-guide",
+    ])
     s.set_defaults(func=cmd_jobs)
+
+    # campus
+    s = _sub(sub, "campus", "Campus recruiting timeline (new-grad track).", [
+        "python -m candid campus timeline",
+        "python -m candid campus timeline --school-type non-target",
+        "python -m candid campus deadlines --days 60",
+    ])
+    cs = _nested(s)
+    t = _sub(cs, "timeline", "Typical campus recruiting windows (seeded, not scraped).", [
+        "python -m candid campus timeline",
+        "python -m candid campus timeline --school-type target",
+    ])
+    t.add_argument("--school-type", default=None,
+                   help="target|non-target|bootcamp: tailors the advice section")
+    t = _sub(cs, "deadlines", "Window opens/closes happening in the next N days.", [
+        "python -m candid campus deadlines --days 60",
+    ])
+    t.add_argument("--days", type=int, default=30,
+                   help="Look-ahead window in days (default 30)")
+    s.set_defaults(func=cmd_campus)
 
     # dashboard
     s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 only).", [
@@ -918,6 +1261,41 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # checklist
+    s = _sub(sub, "checklist", "First-job checklist: dated milestones for new grads.", [
+        "python -m candid checklist newgrad --graduation 2026-05-15",
+        "python -m candid checklist show",
+        "python -m candid checklist check start-applying",
+    ])
+    cs = _nested(s)
+    t = _sub(cs, "newgrad", "Build a milestone timeline anchored to your graduation date.", [
+        "python -m candid checklist newgrad --graduation 2026-05-15",
+    ])
+    t.add_argument("--graduation", required=True,
+                   help="Graduation date as YYYY-MM-DD (e.g. 2026-05-15)")
+    t = _sub(cs, "show", "Show the checklist and your progress.", [
+        "python -m candid checklist show",
+    ])
+    t = _sub(cs, "check", "Mark a checklist item done (or --undo to uncheck).", [
+        "python -m candid checklist check start-applying",
+        "python -m candid checklist check start-applying --undo",
+    ])
+    t.add_argument("item_id", help="Milestone id, e.g. start-applying")
+    t.add_argument("--undo", action="store_true",
+                   help="Mark the item not done instead of done")
+    s.set_defaults(func=cmd_checklist)
+
+    # referrals
+    s = _sub(sub, "referrals", "Alumni/classmate referral outreach helpers (drafts only).", [
+        "python -m candid referrals classmates --company Acme",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "classmates", "Search checklist + message templates for alumni at a company.", [
+        "python -m candid referrals classmates --company Acme",
+    ])
+    t.add_argument("--company", required=True, help="Target company")
+    s.set_defaults(func=cmd_referrals)
 
     return p
 

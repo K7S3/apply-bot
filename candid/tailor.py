@@ -113,8 +113,18 @@ def _what_changed(original: list[dict], tailored: list[dict]) -> list[str]:
 
 
 def build_resume(profile: dict, jd: str, company: str = "", role: str = "",
-                 tone: str = "confident", length: str = "one-page") -> str:
-    """Build a tailored plain-text resume. Never invents experience."""
+                 tone: str = "confident", length: str = "one-page",
+                 new_grad: bool = False,
+                 include_coursework: bool = False) -> str:
+    """Build a tailored plain-text resume. Never invents experience.
+
+    new_grad: projects-first layout for thin experience (fewer than 2 roles
+    or under 1 year total) - PROJECTS leads, SKILLS emphasized, plus bullet
+    feedback that suggests the user add their own scope numbers.
+
+    include_coursework: opt-in coursework/GPA line under EDUCATION (only
+    from profile data; never invented).
+    """
     if tone not in TONES:
         raise ValueError(f"Unknown tone '{tone}'. Choose from {TONES}.")
     if length not in LENGTHS:
@@ -123,7 +133,9 @@ def build_resume(profile: dict, jd: str, company: str = "", role: str = "",
     must, nice = _jd_skills(jd)
     jd_skills = must | nice
     detailed = length == "detailed"
-    seniority = profile.get("seniority", "mid")
+    thin = new_grad and is_thin_experience(profile)
+    seniority = ("entry-level" if thin
+                 else profile.get("seniority", "mid"))
     years = profile.get("years_experience", 0)
     family = _role_family_label(profile)
     domains = _top_domains(profile, jd)
@@ -142,40 +154,71 @@ def build_resume(profile: dict, jd: str, company: str = "", role: str = "",
     contact_bits = [b for b in [profile.get("location"), profile.get("headline")] if b]
     if contact_bits:
         lines.append(" | ".join(contact_bits))
-    lines += ["", "SUMMARY", summary, "", "EXPERIENCE", ""]
+    lines += ["", "SUMMARY", summary, ""]
 
     experience = profile.get("experience", [])
     tailored = _tailor_bullets(experience, jd_skills, detailed)
-    for e in tailored:
-        header = " - ".join(b for b in [e["title"], e["company"]] if b)
-        if e["dates"]:
-            header += f" | {e['dates']}"
-        lines.append(header)
-        for b in e["bullets"]:
-            lines.append(f"• {b}")
-        lines.append("")
-
-    if profile.get("education"):
-        lines.append("EDUCATION")
-        for ed in profile["education"]:
-            ed_line = " - ".join(b for b in [ed.get("school"), ed.get("degree")] if b)
-            if ed.get("dates"):
-                ed_line += f" | {ed['dates']}"
-            lines.append(ed_line)
-        lines.append("")
-
     matched_skills = sorted(set(profile.get("skills", [])) & jd_skills)
     other_skills = sorted(set(profile.get("skills", [])) - jd_skills)
-    lines.append("SKILLS")
-    if matched_skills:
-        lines.append("Most relevant to this role: " + ", ".join(matched_skills))
-    lines.append("Also: " + ", ".join(other_skills[:20]))
 
-    lines += ["", "ATS KEYWORD CHECK", _ats_keyword_check("\n".join(lines), jd), "",
+    order = new_grad_section_order(profile) if new_grad else \
+        ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS"]
+
+    for section in order:
+        if section == "PROJECTS":
+            proj_lines = build_projects_section(profile, jd_skills, detailed)
+            if proj_lines:
+                lines += proj_lines
+            else:
+                lines += ["PROJECTS", "",
+                          "(no projects in profile - add a \"projects\" list "
+                          "to profile.json to lead with it)", ""]
+        elif section == "EXPERIENCE":
+            lines += ["EXPERIENCE", ""]
+            for e in tailored:
+                header = " - ".join(b for b in [e["title"], e["company"]] if b)
+                if e["dates"]:
+                    header += f" | {e['dates']}"
+                lines.append(header)
+                for b in e["bullets"]:
+                    lines.append(f"• {b}")
+                lines.append("")
+        elif section == "EDUCATION":
+            if profile.get("education"):
+                lines += ["EDUCATION"]
+                lines += new_grad_education_lines(profile,
+                                                  include_coursework=include_coursework)
+                lines += [""]
+        elif section == "SKILLS":
+            lines.append("SKILLS")
+            if matched_skills:
+                lines.append("Most relevant to this role: " + ", ".join(matched_skills))
+            lines.append("Also: " + ", ".join(other_skills[:20]))
+            if thin:
+                lines.append("_Skills are emphasized because professional "
+                             "experience is thin - make sure this list reflects "
+                             "what you can demonstrate in projects._")
+            lines.append("")
+
+    if thin:
+        fb_bullets = [b for e in experience for b in e.get("bullets", [])]
+        fb_bullets += [b for p in profile.get("projects", []) or []
+                       for b in p.get("bullets", [])]
+        feedback = weak_bullet_feedback(fb_bullets)
+        lines += ["BULLET FEEDBACK (your numbers to add - nothing auto-filled)", ""]
+        if feedback:
+            lines += [f"- {f}" for f in feedback] + [""]
+        else:
+            lines += ["- All bullets already carry scope numbers and strong "
+                      "verbs. Nice.", ""]
+
+    lines += ["ATS KEYWORD CHECK", _ats_keyword_check("\n".join(lines), jd), "",
               "WHAT CHANGED"] + _what_changed(experience, tailored) + [""]
 
     if role or company:
         lines += [f"- Tailored for {role} @ {company} on {date.today().isoformat()} -"]
+    if thin:
+        lines += ["- New-grad layout: projects first, skills emphasized -"]
     return "\n".join(lines).strip() + "\n"
 
 
@@ -185,7 +228,7 @@ _COVER_TEMPLATES = {
         "I'm applying for the {role} role at {company}. As a {seniority} {family} "
         "specialist with {years} years of experience, my recent work includes {proof_short}. "
         "What excites me about this role is {hook}.\n\n"
-        "I'd welcome the chance to discuss how I can contribute. Thank you for your consideration.\n\n"
+        "I'd welcome the chance to discuss how I can contribute. Thank you for your consideration.{new_grad_para}\n\n"
         "Best regards,\n{name}"
     ),
     "confident": (
@@ -194,7 +237,7 @@ _COVER_TEMPLATES = {
         "of what I do best: {domains}. Over the last {years} years as a {seniority} {family} "
         "specialist, {proof_sentence}\n\n"
         "{hook_sentence}\n\n"
-        "I'd love to bring that same impact to {company}. Happy to walk through the details anytime.\n\n"
+        "I'd love to bring that same impact to {company}. Happy to walk through the details anytime.{new_grad_para}\n\n"
         "Best,\n{name}"
     ),
     "formal": (
@@ -204,7 +247,7 @@ _COVER_TEMPLATES = {
         "{domains} expertise demonstrated through {proof}. "
         "I am particularly drawn to this opportunity because {hook}.\n\n"
         "I would appreciate the opportunity to discuss my qualifications further. "
-        "Thank you for your time and consideration.\n\n"
+        "Thank you for your time and consideration.{new_grad_para}\n\n"
         "Sincerely,\n{name}"
     ),
     "warm": (
@@ -212,10 +255,133 @@ _COVER_TEMPLATES = {
         "I'm {name}, a {seniority} {family} specialist ({years} yrs), and I couldn't not "
         "apply for the {role} role - {hook}. "
         "Recently, {proof_sentence}\n\n"
-        "Would love to chat about what you're building.\n\n"
+        "Would love to chat about what you're building.{new_grad_para}\n\n"
         "Warmly,\n{name}"
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# New-grad mode: projects-first resume tailoring.
+#
+# Pure functions (detection + restructuring); build_resume/build_cover_letter
+# stay the entry points. Groundedness rule: nothing is ever invented -
+# projects, coursework, and GPA come from the profile, and bullet feedback
+# only *suggests* the user add their own scope numbers.
+# ---------------------------------------------------------------------------
+
+def is_thin_experience(profile: dict) -> bool:
+    """Pure detection: True when professional experience is thin.
+
+    Thin = fewer than 2 experience roles OR under 1 year of total experience.
+    """
+    exp = profile.get("experience", []) or []
+    try:
+        years = float(profile.get("years_experience", 0) or 0)
+    except (TypeError, ValueError):
+        years = 0.0
+    return len(exp) < 2 or years < 1.0
+
+
+def build_projects_section(profile: dict, jd_skills: set[str] | None = None,
+                           detailed: bool = False) -> list[str]:
+    """Pure: PROJECTS section lines from profile['projects'] (may be empty).
+
+    Expected project dict: {"name", "tech"/"stack", "dates", "link",
+    "bullets"}. Never invents projects - empty list means no section.
+    """
+    projects = profile.get("projects", []) or []
+    if not projects:
+        return []
+    lines = ["PROJECTS", ""]
+    for p in projects:
+        header = p.get("name", "") or "Untitled project"
+        tech = p.get("tech") or p.get("stack", "")
+        if tech:
+            header += f" | {tech}"
+        if p.get("dates"):
+            header += f" | {p['dates']}"
+        if p.get("link"):
+            header += f" | {p['link']}"
+        lines.append(header)
+        bullets = p.get("bullets", []) or []
+        if jd_skills:
+            scored = sorted((( _bullet_score(b, jd_skills), b) for b in bullets),
+                            reverse=True)
+            bullets = [b for _, b in scored]
+        keep = len(bullets) if detailed else min(len(bullets), 4)
+        for b in bullets[:keep]:
+            lines.append(f"• {b}")
+        lines.append("")
+    return lines
+
+
+_WEAK_VERBS = ("helped", "worked on", "assisted", "participated",
+               "responsible for", "involved in")
+
+
+def weak_bullet_feedback(bullets: list[str]) -> list[str]:
+    """Pure: flag weak bullets with suggestions; never invents metrics.
+
+    A bullet is "weak" when it has no numbers (scope/scale evidence) or
+    leans on a vague verb. Each suggestion points the user at what *they*
+    can add from their own work - the tool never fills in numbers itself.
+    """
+    notes = []
+    for b in bullets:
+        text = str(b).strip()
+        if not text:
+            continue
+        has_number = bool(re.search(r"\d", text))
+        has_weak_verb = any(v in text.lower() for v in _WEAK_VERBS)
+        if has_number and not has_weak_verb:
+            continue
+        asks = []
+        if not has_number:
+            asks.append("add a scope number (users, records, requests/sec, "
+                        "dataset size, runtime, team size)")
+        if has_weak_verb:
+            asks.append("lead with a strong verb: built, shipped, designed, "
+                        "automated, optimized, launched")
+        notes.append(f'"{_short(text, 80)}" -> {"; ".join(asks)}')
+    return notes
+
+
+def new_grad_education_lines(profile: dict,
+                             include_coursework: bool = False) -> list[str]:
+    """Pure: EDUCATION lines; coursework/GPA only when the user opts in.
+
+    Coursework/GPA are read from the profile's education entries
+    (keys "coursework" / "gpa"). If opted in but absent, say so explicitly
+    instead of inventing anything.
+    """
+    lines = []
+    for ed in profile.get("education", []) or []:
+        ed_line = " - ".join(b for b in [ed.get("school"), ed.get("degree")] if b)
+        if ed.get("dates"):
+            ed_line += f" | {ed['dates']}"
+        lines.append(ed_line)
+        if include_coursework:
+            cw = ed.get("coursework")
+            gpa = ed.get("gpa")
+            if cw:
+                cw_str = ", ".join(cw) if isinstance(cw, list) else str(cw)
+                lines.append(f"  Relevant coursework: {cw_str}")
+            if gpa:
+                lines.append(f"  GPA: {gpa}")
+            if not cw and not gpa:
+                lines.append("  (no coursework/GPA in profile - add "
+                             '"coursework"/"gpa" to your education entry in '
+                             "profile.json to include it)")
+    return lines
+
+
+def new_grad_section_order(profile: dict) -> list[str]:
+    """Pure: resume section order. Thin experience -> projects first."""
+    order = ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS"]
+    if is_thin_experience(profile):
+        order = ["SUMMARY", "PROJECTS", "SKILLS", "EXPERIENCE", "EDUCATION"]
+    return order
 
 
 def _proof_bullet(profile: dict, jd: str) -> str:
@@ -237,8 +403,14 @@ def _proof_sentence(profile: dict, jd: str) -> str:
 
 
 def build_cover_letter(profile: dict, jd: str, company: str, role: str,
-                       tone: str = "confident", hook: str = "") -> str:
-    """Build a cover letter. `hook` = why this company/role (one line, optional)."""
+                       tone: str = "confident", hook: str = "",
+                       new_grad: bool = False) -> str:
+    """Build a cover letter. `hook` = why this company/role (one line, optional).
+
+    new_grad: adds an entry-level paragraph framing the company as a first
+    job and pointing at project work / learning speed. Still grounded -
+    only references what the profile contains.
+    """
     if tone not in TONES:
         raise ValueError(f"Unknown tone '{tone}'. Choose from {TONES}.")
     if not company or not role:
@@ -252,11 +424,21 @@ def build_cover_letter(profile: dict, jd: str, company: str, role: str,
     proof_bullet = _proof_bullet(profile, jd)
     proof_short = proof_bullet[0].lower() + proof_bullet[1:] if proof_bullet else proof_bullet
     hook = hook or "the problems you're solving are exactly the ones I've spent my career on"
+    if new_grad:
+        new_grad_para = (
+            " As an entry-level candidate, I see this role as an ideal first "
+            "job: a place to contribute from day one while growing fast. My "
+            "project work shows I learn new stacks quickly and finish what I "
+            "start, and I'd love to bring that energy to your team."
+        )
+    else:
+        new_grad_para = ""
     return tpl.format(
         company=company, role=role, seniority=seniority, years=years,
         family=family, domains=domains, proof=proof,
         proof_sentence=proof[0].upper() + proof[1:] if proof else proof,
         proof_short=proof_short,
         hook=hook, hook_sentence=f"What draws me to {company} is {hook}.",
+        new_grad_para=new_grad_para,
         name=profile.get("name") or "Your Name",
     )

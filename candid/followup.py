@@ -21,11 +21,54 @@ TIMING = {
     "thank_you": "Send within 24 hours of the interview - same evening is ideal, next morning at the latest.",
     "check_in": "Send 5-7 business days after your last contact, or 2 days past any timeline the recruiter gave you - whichever is later.",
     "referral_ask": "Send on a weekday morning; give your contact at least a week before any application deadline.",
+    "new_grad_referral": "Send on a weekday morning (Tue-Thu gets the best reply rates); attach your resume to the first note.",
 }
+
+# LinkedIn connection notes cap at 300 characters - new-grad drafts stay under it.
+_CONNECTION_NOTE_LIMIT = 300
 
 
 def _timing_line(kind: str) -> str:
     return f"\n\n*Timing: {TIMING[kind]}*"
+
+
+def new_grad_referral_ask(name: str, contact: str, role: str, company: str,
+                          school: str, class_year: str = "",
+                          variant: str = "cold") -> str:
+    """Draft a peer-level referral outreach for a new grad.
+
+    Aimed at alumni/classmates rather than senior employees: warm,
+    peer-level tone, short enough for a LinkedIn connection note
+    (300 characters). Two variants:
+
+    - "cold": a fellow alum you have not met (references shared school).
+    - "warm": a classmate you know (references shared classes).
+
+    Both ask for a 15-minute chat AND the referral path.
+    """
+    if variant not in ("cold", "warm"):
+        raise ValueError(f"Unknown variant '{variant}'. Choose 'cold' or 'warm'.")
+    school = school or "your school"
+    year = f" (class of {class_year})" if class_year else ""
+    if variant == "cold":
+        body = (
+            f"Hi {contact} - fellow {school} alum here{year}. I'm applying for "
+            f"the {role} role at {company} and would love a 15-min chat about "
+            f"your time there, plus any tips on the referral path. Happy to "
+            f"send my resume over. Thanks! - {name}"
+        )
+    else:
+        body = (
+            f"Hi {contact}! {name} here - we were classmates at {school}{year}. "
+            f"I'm applying for the {role} role at {company} and would love a "
+            f"15-min chat, plus any referral tips if you're open to it. "
+            f"Resume's ready to send. Thanks!"
+        )
+    if len(body) > _CONNECTION_NOTE_LIMIT:
+        raise ValueError(
+            f"Draft is {len(body)} chars; LinkedIn connection notes cap at "
+            f"{_CONNECTION_NOTE_LIMIT}. Shorten role/company.")
+    return body + _timing_line("new_grad_referral")
 
 
 def thank_you(name: str, interviewer: str, role: str, company: str,

@@ -43,6 +43,77 @@ class JobsError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# new-grad track: query signals, senior filter, entry-level boost
+# ---------------------------------------------------------------------------
+#
+# Pure helpers (no I/O): feed them title/description strings and get a
+# decision back, so they are trivial to unit-test.
+
+#: Query signals appended to the role string when --new-grad is set.
+NEW_GRAD_QUERY_SIGNALS = ["new grad", "university graduate", "early career",
+                          "entry level"]
+
+#: Title/description signals that disqualify a posting for the new-grad track.
+SENIOR_SIGNALS = ["senior", "staff", "principal", "lead", "manager",
+                  "director", "5+ years", "8+ years", "10+ years"]
+
+#: Title/description signals that earn an entry-level relevance boost.
+ENTRY_LEVEL_SIGNALS = ["0-1 years", "entry level", "entry-level", "new grad",
+                       "new college graduate", "university grad",
+                       "recent graduate", "early career"]
+
+ENTRY_LEVEL_BOOST = 6.0
+
+
+def _signal_matches(text: str, signal: str) -> bool:
+    """Case-insensitive signal match.
+
+    Plain words and multi-word phrases use word boundaries (so "lead"
+    matches "Team Lead" but not "leader"); signals with punctuation like
+    "5+ years" use a plain substring check.
+    """
+    if re.fullmatch(r"[a-z0-9 ]+", signal):
+        return re.search(r"\b" + re.escape(signal) + r"\b", text,
+                         re.IGNORECASE) is not None
+    return signal.lower() in text.lower()
+
+
+def new_grad_role(role: str) -> str:
+    """Append new-grad-friendly query signals to the role string.
+
+    Signals already present are not duplicated. The extra terms feed the
+    relevance scorer, so postings that say "new grad" or "entry level"
+    rank higher.
+    """
+    role = (role or "").strip()
+    low = role.lower()
+    extra = [s for s in NEW_GRAD_QUERY_SIGNALS if s not in low]
+    return f"{role} {' '.join(extra)}".strip() if extra else role
+
+
+def senior_signals_found(title: str, description: str = "") -> list[str]:
+    """Which senior signals appear in the title/description (possibly none)."""
+    text = f"{title or ''}\n{description or ''}"
+    return [s for s in SENIOR_SIGNALS if _signal_matches(text, s)]
+
+
+def is_senior_role(title: str, description: str = "") -> bool:
+    """True when a posting reads as a senior-level role."""
+    return bool(senior_signals_found(title, description))
+
+
+def entry_signals_found(title: str, description: str = "") -> list[str]:
+    """Which entry-level signals appear in the title/description."""
+    text = f"{title or ''}\n{description or ''}"
+    return [s for s in ENTRY_LEVEL_SIGNALS if _signal_matches(text, s)]
+
+
+def entry_level_boost(title: str, description: str = "") -> float:
+    """Relevance boost for entry-level postings (0.0 when none match)."""
+    return ENTRY_LEVEL_BOOST if entry_signals_found(title, description) else 0.0
+
+
+# ---------------------------------------------------------------------------
 # adapters — each returns normalized job dicts:
 # {source, source_id, title, company, location, url, description,
 #  salary_text, remote (bool), posted_at}
@@ -263,14 +334,16 @@ def _fresh_enough(job: dict, days: int | None, now: datetime) -> bool:
 def filter_jobs(jobs: list[dict], role: str, location: str = "",
                 remote: bool = False, level: str | None = None,
                 limit: int = DEFAULT_LIMIT, days: int | None = None,
-                exclude_ids: set[str] | None = None) -> list[dict]:
+                exclude_ids: set[str] | None = None,
+                new_grad: bool = False) -> list[dict]:
     """Filter + rank raw adapter output for the requested role.
 
     ``days``: keep only jobs posted within the last N days (jobs with
     unparseable/missing dates are kept). ``exclude_ids``: skip jobs whose
     ``source_id`` (or ``id``) is in the set (dashboard dismiss support).
-    Cross-source dupes (same normalized title+company) are collapsed,
-    keeping the highest-relevance copy.
+    ``new_grad``: drop postings matching senior signals and boost ones
+    matching entry-level signals. Cross-source dupes (same normalized
+    title+company) are collapsed, keeping the highest-relevance copy.
     """
     role_terms = _tokens(role) - {"a", "the", "and", "for"}
     role_phrases = tuple(_role_phrases(role))
@@ -288,6 +361,11 @@ def filter_jobs(jobs: list[dict], role: str, location: str = "",
         if not _fresh_enough(job, days, now):
             continue
         rel = _relevance(job, role_terms, role_phrases)
+        if new_grad:
+            if is_senior_role(job.get("title", ""), job.get("description", "")):
+                continue
+            rel += entry_level_boost(job.get("title", ""),
+                                     job.get("description", ""))
         if rel <= 0:
             continue
         key = _norm_key(job.get("title", ""), job.get("company", ""))
@@ -352,17 +430,22 @@ def _tracked_keys() -> set[tuple[str, str]]:
 def curate(profile: dict, role: str, location: str = "", remote: bool = False,
            level: str | None = None, limit: int = DEFAULT_LIMIT,
            sources: list[str] | None = None, days: int | None = None,
-           min_score: float = 0) -> dict:
+           min_score: float = 0, new_grad: bool = False) -> dict:
     """Run one curation pass.
 
     Returns {fetched, candidates, added, skipped, skipped_low_score, errors}.
     ``days`` filters to postings from the last N days (unparseable dates are
     kept). ``min_score`` gates tracker writes: jobs scoring below it are NOT
     added — they are stashed in jobs.json under ``skipped_low_score`` so a
-    lower threshold can pick them up later.
+    lower threshold can pick them up later. ``new_grad`` adds new-grad query
+    signals to the role, drops senior-signaled postings, and boosts
+    entry-level ones.
     """
     from candid import tracker as T
     from candid import salary as S
+
+    if new_grad:
+        role = new_grad_role(role)
 
     wanted = sources or list(ADAPTERS)
     unknown = [s for s in wanted if s not in ADAPTERS]
@@ -377,7 +460,8 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
         except JobsError as e:
             errors.append(str(e))
 
-    candidates = filter_jobs(raw, role, location, remote, level, limit, days=days)
+    candidates = filter_jobs(raw, role, location, remote, level, limit,
+                             days=days, new_grad=new_grad)
     state = _load_state()
     seen: dict = state.get("seen", {})
     tracked = _tracked_keys()
@@ -470,10 +554,42 @@ def get_job_meta(app_id: int) -> dict:
 def refresh(profile: dict, role: str, location: str = "", remote: bool = False,
             level: str | None = None, limit: int = DEFAULT_LIMIT,
             sources: Optional[List[str]] = None, days: int | None = None,
-            min_score: float = 0) -> dict:
+            min_score: float = 0, new_grad: bool = False) -> dict:
     """Re-run curation; the result's ``added`` holds only genuinely new jobs."""
     return curate(profile, role, location, remote, level, limit, sources=sources,
-                  days=days, min_score=min_score)
+                  days=days, min_score=min_score, new_grad=new_grad)
+
+
+def render_newgrad_guide() -> str:
+    """New-grad job-search tips: where entry-level roles actually appear."""
+    return "\n".join([
+        "New-grad job search guide",
+        "",
+        "Where new-grad roles actually appear:",
+        "* Company university / careers pages: most large companies post",
+        "  new-grad roles under a 'Students & Grads' or 'University' section,",
+        "  not on the general job board. Bookmark the ones you like.",
+        "* Curated new-grad lists: community lists in the style of Simplify's",
+        "  new-grad spreadsheet collect entry-level postings each season.",
+        "  They are crowd-maintained, so verify anything you apply to.",
+        "* Career fairs and on-campus recruiting: the highest-signal channel",
+        "  if your school has it; talk to the recruiter, then apply online",
+        "  the same day.",
+        "* Referrals: one warm intro beats fifty cold applications. Ask",
+        "  alumni from your school, not strangers with open-to-connect badges.",
+        "",
+        "How to read a posting:",
+        "* 'New grad', 'university graduate', 'recent graduate', '0-1 years',",
+        "  and 'entry level' are green flags.",
+        "* Senior, staff, principal, lead, manager, director, '5+ years', and",
+        "  '8+ years' mean the role is not for you - skip it fast.",
+        "* Watch the graduation-year filter: some roles target a specific",
+        "  class year. A 2026-grad role will auto-reject a 2027 grad.",
+        "",
+        "Timing: use `python -m candid campus timeline` to see the typical",
+        "recruiting windows, then filter your curation with",
+        "`python -m candid jobs curate --role \"Software Engineer\" --new-grad`.",
+    ])
 
 
 def render_curated(result: dict) -> str:

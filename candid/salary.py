@@ -459,3 +459,171 @@ def render_title_aggregation(agg: dict) -> str:
         lines.append(f"  • {c['company']}: ${c['median']:,.0f}/yr "
                      f"({c['rows']} row{'s' if c['rows'] != 1 else ''})")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# new-grad benchmarks
+# ---------------------------------------------------------------------------
+
+_NEWGRAD_DISCLAIMER = (
+    "New-grad offers vary widely by company tier (big tech vs. startups vs. "
+    "finance vs. other), location, internship history, and interview "
+    "performance. Treat these bands as benchmarks for negotiation, not "
+    "predictions of any specific offer."
+)
+
+_BLS_NOTE = (
+    "candid has no BLS OES import yet, so no BLS-backed percentile estimate "
+    "is shown here. LCA disclosures do not record the DOL prevailing-wage "
+    "level, so the LCA band below is an entry-level PROXY (the bottom slice "
+    "of certified wage floors), not an official Level I figure."
+)
+
+
+def _matching_rows(rows: list[tuple], *, company: str, title: str,
+                   location: str, source: str) -> list[tuple]:
+    """Fuzzy-filter DB rows by source + company/title/location tokens."""
+    c_toks = set(_norm(company).split())
+    t_toks = set(_norm(title).split())
+    loc = _norm(location)
+    out = []
+    for r in rows:
+        if r[5] != source:
+            continue
+        rc, rt, rl = _norm(r[0]), _norm(r[1]), _norm(r[2])
+        if c_toks and not (c_toks & set(rc.split())):
+            continue
+        if t_toks and not (t_toks & set(rt.split())):
+            continue
+        if loc and loc not in rl:
+            continue
+        out.append(r)
+    return out
+
+
+def newgrad(title: str, location: str = "", company: str = "",
+            path: str | Path | None = None) -> dict:
+    """Entry-level pay benchmark for a new-grad title.
+
+    Combines two local sources:
+      (a) DOL LCA certified cases as an entry-level proxy: the p10-p50
+          band of the wage-range FLOORS of matched LCA rows. (LCA
+          disclosures do not record the DOL wage level, so the bottom
+          slice of certified wages stands in for entry level.)
+      (b) Posted pay ranges parsed from JDs (source='job_post') matching
+          the title/location.
+
+    There is no BLS OES import machinery in candid, so no BLS-backed
+    percentile is produced — the result says so explicitly.
+
+    Returns a dict with per-source bands, a combined envelope, source
+    labels, and flags for the graceful no-data paths. Never invents
+    numbers: if no rows match, the band is None with an explanatory note.
+    """
+    if not title:
+        raise SalaryError("--title is required for a new-grad benchmark.")
+    conn = connect(path)
+    rows = conn.execute(
+        "SELECT company, title, location, low, high, source, source_detail FROM ranges"
+    ).fetchall()
+    conn.close()
+
+    lca_all = [r for r in rows if r[5] == "dol_lca"]
+    lca = _matching_rows(lca_all, company=company, title=title,
+                         location=location, source="dol_lca")
+    posts = _matching_rows(rows, company=company, title=title,
+                           location=location, source="job_post")
+
+    sources_used: dict[str, dict] = {}
+
+    if lca:
+        floors = sorted(r[3] for r in lca)
+        sources_used["dol_lca"] = {
+            "label": ("DOL H-1B LCA entry-level PROXY: 10th-50th percentile of "
+                      "certified wage-range floors"),
+            "low": _percentile(floors, 10),
+            "high": _percentile(floors, 50),
+            "n": len(lca),
+            "note": ("LCA disclosures do not record the DOL prevailing-wage "
+                     "level; the bottom slice of certified wages is used as "
+                     "an approximation of entry-level pay."),
+        }
+    if posts:
+        floors = sorted(r[3] for r in posts)
+        ceilings = sorted(r[4] for r in posts)
+        sources_used["job_post"] = {
+            "label": "Posted pay ranges parsed from job descriptions",
+            "low": _percentile(floors, 10),
+            "high": _percentile(ceilings, 90),
+            "n": len(posts),
+            "note": ("Entry-level posted ranges found in the local salary "
+                     "database; reflects what employers disclosed publicly."),
+        }
+
+    combined = None
+    if sources_used:
+        lows = [s["low"] for s in sources_used.values() if s["low"]]
+        highs = [s["high"] for s in sources_used.values() if s["high"]]
+        combined = {
+            "low": min(lows),
+            "high": max(highs),
+            "label": ("Combined envelope: lowest source floor to highest "
+                      "source ceiling across the labeled sources above."),
+        }
+
+    return {
+        "title": title,
+        "location": location,
+        "company": company,
+        "lca_data_imported": bool(lca_all),
+        "sources": sources_used,
+        "combined": combined,
+        "bls": None,
+        "bls_note": _BLS_NOTE,
+        "disclaimer": _NEWGRAD_DISCLAIMER,
+    }
+
+
+def render_newgrad(result: dict) -> str:
+    """Render newgrad() output: estimate range with every source labeled."""
+    title = result.get("title", "")
+    location = result.get("location", "")
+    company = result.get("company", "")
+    what = " ".join(x for x in (company, title, location) if x)
+
+    if not result.get("lca_data_imported") and not result.get("sources"):
+        return (
+            f"No salary data imported yet — nothing to benchmark '{what}'.\n"
+            "Build the database first:\n"
+            "  python -m candid salary import-lca <dol_h1b_csv>\n"
+            "  python -m candid salary parse-range --company X --role Y --jd jd.txt"
+        )
+    if not result.get("sources"):
+        detail = "the title/company/location filters" if what else "your query"
+        return (
+            f"No LCA or posted-range rows match {detail} for '{what}'.\n"
+            "Try a broader title (e.g. 'Software Engineer' instead of a niche "
+            "role), drop the location filter, or import more LCA data:\n"
+            "  python -m candid salary import-lca <dol_h1b_csv>"
+        )
+
+    lines = [f"New-grad pay benchmark for '{what}':", ""]
+    for key in ("dol_lca", "job_post"):
+        s = result["sources"].get(key)
+        if not s:
+            continue
+        lines.append(f"  [{key}] {s['label']}")
+        lines.append(f"          ${s['low']:,.0f}–${s['high']:,.0f}/yr "
+                     f"(n={s['n']} rows)")
+        lines.append(f"          {s['note']}")
+        lines.append("")
+    c = result.get("combined")
+    if c:
+        lines.append(f"Estimated entry-level range: "
+                     f"${c['low']:,.0f}–${c['high']:,.0f}/yr")
+        lines.append(f"  ({c['label']})")
+        lines.append("")
+    lines.append(f"Note: {result['bls_note']}")
+    lines.append("")
+    lines.append(f"Disclaimer: {result['disclaimer']}")
+    return "\n".join(lines)

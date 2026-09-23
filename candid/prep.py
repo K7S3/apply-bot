@@ -44,6 +44,165 @@ def _find_company(company: str) -> str | None:
     return slug if slug in QUESTIONS_DB else None
 
 
+# ---------------------------------------------------------------------------
+# New-grad question banks: entry-level fundamentals.
+#
+# These are general, widely-asked entry-level topics - they are labeled as
+# general preparation in the pack, never attributed to a specific company.
+# Weights express how much of the pack each area gets for a new grad.
+# ---------------------------------------------------------------------------
+
+NEW_GRAD_BANKS: dict[str, list[dict]] = {
+    "dsa": [
+        {"q": "What is Big-O notation? Compare the time and space complexity of a hash map lookup vs a linear scan.", "category": "dsa_fundamentals"},
+        {"q": "Implement a function to reverse a singly linked list, iteratively and recursively. What is the complexity?", "category": "dsa_fundamentals"},
+        {"q": "Given an array of integers, find two that sum to a target. Walk through the brute-force and hash-map solutions.", "category": "dsa_fundamentals"},
+        {"q": "When would you use a stack vs a queue? Give a real example of each.", "category": "dsa_fundamentals"},
+        {"q": "Explain breadth-first search and depth-first search. When does each make sense?", "category": "dsa_fundamentals"},
+        {"q": "Implement binary search. What are the preconditions, and what is the complexity?", "category": "dsa_fundamentals"},
+        {"q": "How does quicksort work at a high level, and why is it O(n log n) on average but O(n^2) in the worst case?", "category": "dsa_fundamentals"},
+        {"q": "Explain how a hash map handles collisions (chaining vs open addressing).", "category": "dsa_fundamentals"},
+    ],
+    "oop": [
+        {"q": "What are the four pillars of OOP? Give a concrete code example of each.", "category": "oop"},
+        {"q": "Inheritance vs composition: which do you prefer and why? Give an example where composition is cleaner.", "category": "oop"},
+        {"q": "What is polymorphism? Show how it simplifies a design.", "category": "oop"},
+        {"q": "Abstract class vs interface: how do you decide which to use?", "category": "oop"},
+        {"q": "What does encapsulation buy you in a large codebase? How does it relate to API design?", "category": "oop"},
+    ],
+    "sql_basics": [
+        {"q": "Explain INNER JOIN, LEFT JOIN, RIGHT JOIN, and FULL OUTER JOIN with a small example.", "category": "sql_basics"},
+        {"q": "What is the difference between WHERE and HAVING? When must you use GROUP BY?", "category": "sql_basics"},
+        {"q": "Write a query that finds the top 3 departments by average salary using aggregate functions.", "category": "sql_basics"},
+        {"q": "How do NULLs behave in comparisons and aggregates? How do you handle them safely?", "category": "sql_basics"},
+        {"q": "What does an index do, and what is the cost of adding one?", "category": "sql_basics"},
+    ],
+    "os_networking": [
+        {"q": "Process vs thread: what is shared, what is not? When would you use multiprocessing over multithreading?", "category": "os_networking"},
+        {"q": "What is a deadlock? Describe the four necessary conditions and one way to prevent it.", "category": "os_networking"},
+        {"q": "Walk through what happens when you type a URL into a browser and press enter (DNS, TCP/TLS, HTTP).", "category": "os_networking"},
+        {"q": "TCP vs UDP: what guarantees does TCP give, and what does it cost?", "category": "os_networking"},
+        {"q": "Stack vs heap memory: what lives where, and what happens on a stack overflow?", "category": "os_networking"},
+        {"q": "What is caching, and where can caches live in a web request path?", "category": "os_networking"},
+    ],
+    "behavioral": [
+        {"q": "Tell me about a team project (school, hackathon, or open source) where you had to divide work and hit a deadline.", "category": "new_grad_behavioral"},
+        {"q": "Describe a time you had to learn a new technology or skill quickly for a project. How did you approach it?", "category": "new_grad_behavioral"},
+        {"q": "Tell me about a time you received critical feedback on your work (code review, grade, internship review). What did you change?", "category": "new_grad_behavioral"},
+        {"q": "Describe a situation where the requirements were ambiguous and you had limited experience to draw on. What did you do?", "category": "new_grad_behavioral"},
+        {"q": "Why this company, and why this role as your first full-time job? What do you want to learn here?", "category": "new_grad_behavioral"},
+        {"q": "Tell me about a bug or problem that took you much longer to solve than expected. How did you get unstuck?", "category": "new_grad_behavioral"},
+    ],
+}
+
+# How many questions each area contributes to a new-grad pack, in order.
+NEW_GRAD_WEIGHTS: dict[str, int] = {
+    "dsa": 4,
+    "sql_basics": 3,
+    "oop": 3,
+    "os_networking": 3,
+    "behavioral": 5,
+}
+
+
+def select_new_grad_questions(
+    banks: dict[str, list[dict]] | None = None,
+    weights: dict[str, int] | None = None,
+) -> list[dict]:
+    """Pure selection: weighted, ordered new-grad questions.
+
+    Fundamentals (DSA, SQL, OOP, OS/networking) come before advanced topics;
+    behavioral questions round out the set. Never touches company data.
+    """
+    banks = NEW_GRAD_BANKS if banks is None else banks
+    weights = NEW_GRAD_WEIGHTS if weights is None else weights
+    out: list[dict] = []
+    for area in weights:
+        out.extend(banks.get(area, [])[: weights[area]])
+    return out
+
+
+_NEW_GRAD_STAR_ROTATION = [
+    "Tell me about a time you worked on a team project with a real deadline.",
+    "Tell me about a time you learned something technical fast under pressure.",
+    "Tell me about a time you received tough feedback and changed course.",
+    "Tell me about a time you owned an ambiguous problem with no playbook.",
+    "Tell me about a time you debugged something hard and finally cracked it.",
+]
+
+NEW_GRAD_DEEPDIVES: list[str] = [
+    """### Fundamentals First: Arrays, Hash Maps, and Big-O
+
+**The idea in 60 seconds.** Entry-level coding rounds test whether you can
+pick the right data structure and reason about cost. Arrays give O(1) index
+access but O(n) inserts in the middle; hash maps give average O(1) lookup
+at the cost of extra memory; trees and heaps add ordering guarantees at
+O(log n). Interviewers care less about memorized solutions than about you
+saying "this is O(n^2), I can get O(n) with a hash map" *before* writing code.
+
+**How to practice.** For every problem: state the brute force and its Big-O,
+name the bottleneck, then optimize. Say the complexity out loud - it is half
+the score.""",
+    """### SQL Fundamentals: Joins, Grouping, and NULLs
+
+**The idea in 60 seconds.** New-grad SQL rounds stay at the basics: join the
+right tables, filter with WHERE, aggregate with GROUP BY, and filter groups
+with HAVING. The two classic traps: NULL silently breaking comparisons
+(`WHERE x != NULL` matches nothing - use `IS NULL`), and forgetting that
+non-aggregated SELECT columns must appear in GROUP BY.
+
+**How to practice.** Write 10 queries against any sample dataset covering:
+inner/left join, self-join, GROUP BY + HAVING, and a subquery. Narrate the
+row flow: "first we join, then we filter, then we group." """,
+    """### The Web Request Lifecycle (OS + Networking in One)
+
+**The idea in 60 seconds.** "What happens when you type a URL?" is the most
+common entry-level systems question because it touches everything: DNS
+resolves the name, TCP + TLS set up a secure channel, HTTP requests the
+resource, caches (browser, CDN) may short-circuit it, and the server's
+processes/threads handle it concurrently. You do not need distributed-systems
+depth - you need the full path in order, with one sentence per hop.
+
+**How to answer.** Draw the pipeline left to right, name each hop, and for
+each hop say what could go wrong (DNS fails, TLS handshake slow, cache
+stale). That shows systems thinking without advanced system design.""",
+    """### OOP Design: Composition Over Inheritance
+
+**The idea in 60 seconds.** Entry-level OOP questions reward clean modeling,
+not design patterns trivia. Encapsulation hides internals behind a small
+API; inheritance shares behavior but couples classes; composition builds
+behavior from small parts and is usually more flexible. When asked to model
+something (a deck of cards, a parking lot), start with nouns as classes,
+verbs as methods, and keep each class to one job.
+
+**How to practice.** Model two small domains on paper: list classes,
+their state, their public methods, and where you'd use composition instead
+of inheritance. Talk through tradeoffs out loud.""",
+]
+
+NEW_GRAD_SYSTEM_DESIGN_NOTE = """### A note on system design for new grads
+
+_System design expectations are much lighter for entry-level roles._ Most
+new-grad loops do not include a dedicated system-design round; when they do,
+interviewers look for structured thinking, not a production-ready design.
+Focus your energy where it is actually graded:
+
+- **Coding rounds (highest weight):** DSA fundamentals + clean code.
+- **Behavioral rounds:** teamwork, learning speed, feedback, ambiguity.
+- **If a design question appears:** draw boxes and arrows, name the data
+  flow, mention scaling in one sentence ("add a cache here, shard there"),
+  and ask clarifying questions before designing. That is usually enough.
+"""
+
+
+def new_grad_sections(profile: dict) -> tuple[list[dict], list[str], str]:
+    """Pure helper: (questions, deep-dives, system-design note) for new grads.
+
+    Pulls in project bullets as STAR story sources alongside resume bullets.
+    """
+    return select_new_grad_questions(), list(NEW_GRAD_DEEPDIVES), NEW_GRAD_SYSTEM_DESIGN_NOTE
+
+
 class PrepError(Exception):
     """Raised when a prep pack cannot be built."""
 
@@ -129,24 +288,39 @@ def _tailored_mock(profile: dict, role: str, company: str,
         qas.append(("How would you design an A/B test for a new feature here?",
                     "Cover: metric hierarchy, randomization unit, runtime, guardrails. "
                     "See the A/B testing deep-dive below."))
-    if "sql" in categories:
+    if "sql" in categories or "sql_basics" in categories:
         qas.append(("Write SQL to compute a core business metric from raw event tables.",
                     "Narrate as you go; window functions are the usual tool. "
                     "See the SQL deep-dive below."))
+    if "dsa_fundamentals" in categories:
+        qas.append(("Solve a classic array/hash-map problem (e.g. two sum) out loud.",
+                    "State the brute force and its Big-O first, then optimize. "
+                    "See the fundamentals deep-dive below."))
     for i, (q, tips) in enumerate(qas, 1):
         lines += [f"**Q{i}. {q}**", "", f"*Talking points:* {tips}", ""]
     lines.append(f"*Tip for {name}: answer out loud and time yourself — 2 minutes per question.*")
     return "\n".join(lines)
 
 
-def _top_bullets(profile: dict, limit: int = 5) -> list[tuple[str, str, str]]:
-    """Strongest resume bullets: most recent experience, numbers first."""
+def _top_bullets(profile: dict, limit: int = 5, include_projects: bool = False,
+               ) -> list[tuple[str, str, str]]:
+    """Strongest resume bullets: most recent experience, numbers first.
+
+    When include_projects is True (new-grad mode), project bullets are mixed
+    in so STAR stories can draw on school/side projects too.
+    """
     bullets: list[tuple[str, str, str]] = []
     for e in profile.get("experience", [])[:3]:
         for b in e.get("bullets", [])[:3]:
             text = str(b).strip()
             if text:
                 bullets.append((e.get("title", ""), e.get("company", ""), text))
+    if include_projects:
+        for p in profile.get("projects", [])[:3]:
+            for b in p.get("bullets", [])[:3]:
+                text = str(b).strip()
+                if text:
+                    bullets.append((p.get("name", ""), "project", text))
     bullets.sort(key=lambda t: (any(ch.isdigit() for ch in t[2]), len(t[2])),
                  reverse=True)
     return bullets[:limit]
@@ -161,8 +335,14 @@ _STAR_QUESTION_ROTATION = [
 ]
 
 
-def _star_prompts(profile: dict) -> str:
-    """Behavioral prompts, each mapped to one of the user's real bullets."""
+def _star_prompts(profile: dict, new_grad: bool = False) -> str:
+    """Behavioral prompts, each mapped to one of the user's real bullets.
+
+    In new-grad mode the question rotation is entry-level (teamwork on
+    school projects, learning fast, feedback, ambiguity, debugging) and
+    project bullets join the pool alongside resume bullets.
+    """
+    rotation = _NEW_GRAD_STAR_ROTATION if new_grad else _STAR_QUESTION_ROTATION
     lines = [
         "### STAR story prompts (from your resume)",
         "",
@@ -171,13 +351,13 @@ def _star_prompts(profile: dict) -> str:
         "150+ words, said out loud - never invent details that are not in the bullet._",
         "",
     ]
-    top = _top_bullets(profile)
+    top = _top_bullets(profile, include_projects=new_grad)
     if not top:
         lines += ["_No resume bullets found - write 3 STAR stories from your "
                   "proudest projects before interview day._", ""]
         return "\n".join(lines)
     for i, (title, company, bullet) in enumerate(top):
-        q = _STAR_QUESTION_ROTATION[i % len(_STAR_QUESTION_ROTATION)]
+        q = rotation[i % len(rotation)]
         at = f" ({title} @ {company})" if title or company else ""
         lines += [
             f"**{q}**",
@@ -241,12 +421,18 @@ def _comp_talking_points(company: str, role: str, location: str) -> str:
 
 def build_pack(profile: dict, company: str, role: str, jd: str = "",
                app_id: int | None = None, location: str = "",
-               gaps: list[str] | None = None) -> tuple[str, Path]:
+               gaps: list[str] | None = None, new_grad: bool = False
+               ) -> tuple[str, Path]:
     """Build the prep pack markdown. Returns (markdown, saved_path).
 
     gaps: optional list of match-gap strings (from
     ``match.score_match(jd)["gaps"]``). Gap-related concept deep-dives and
     mock questions are prioritized when provided.
+
+    new_grad: entry-level mode. Question selection is weighted toward
+    fundamentals (DSA, SQL, OOP, OS/networking) with a new-grad behavioral
+    set, concept deep-dives prioritize fundamentals over advanced system
+    design, and the pack notes the lighter system-design expectations.
     """
     gaps = [str(g) for g in (gaps or []) if str(g).strip()]
     gap_cats = _gap_categories(gaps)
@@ -255,9 +441,14 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
     company_qs = QUESTIONS_DB.get(slug, []) if slug else []
     family = _role_family(profile, role)
 
-    generic_qs: list[dict] = []
-    for bank in GENERIC_BANKS.values():
-        generic_qs.extend(bank[:4])
+    if new_grad:
+        generic_qs = select_new_grad_questions()
+        _, new_grad_dd, ng_sysdesign_note = new_grad_sections(profile)
+    else:
+        generic_qs = []
+        for bank in GENERIC_BANKS.values():
+            generic_qs.extend(bank[:4])
+        new_grad_dd, ng_sysdesign_note = [], ""
 
     categories: list[str] = []
     seen = set()
@@ -269,7 +460,8 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
             categories.append(q["category"])
             seen.add(q["category"])
     if not categories:
-        categories = ["ml", "stats", "behavioral"]
+        categories = (["dsa_fundamentals", "sql_basics", "new_grad_behavioral"]
+                      if new_grad else ["ml", "stats", "behavioral"])
 
     concept_tags: list[str] = []
     for cat in gap_cats:
@@ -287,6 +479,14 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
         f"*Generated {date.today().isoformat()} · role family: {family.replace('_', ' ')}*",
         "",
     ]
+    if new_grad:
+        lines += [
+            "_Entry-level mode: questions are weighted toward fundamentals "
+            "(data structures/algorithms, OOP, SQL, OS/networking) with a "
+            "new-grad behavioral set. System-design expectations are lighter "
+            "for new grads - see the note in the deep-dives section._",
+            "",
+        ]
     if gaps:
         lines += [
             "## Priority focus (from your match gaps)",
@@ -330,17 +530,21 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
         )
     else:
         lines.append(_NO_COMPANY_NOTE.format(family=family.replace("_", " ")))
-    lines += [
-        "",
-        "## 2. General preparation questions",
-        "",
-        "_General {family} prep — not verified as asked at this company._".format(
-            family=family.replace("_", " ")),
-        "",
-    ]
-    for i, q in enumerate(generic_qs[:12], 1):
+    lines += ["", "## 2. General preparation questions", "",
+              "_General {family} prep - not verified as asked at this company._".format(
+                  family=("entry-level fundamentals" if new_grad
+                          else family.replace("_", " "))), ""]
+    for i, q in enumerate(generic_qs if new_grad else generic_qs[:12], 1):
         lines.append(f"{i}. {q['q']}")
     lines += ["", "## 3. Concept deep-dives", ""]
+    if new_grad:
+        lines += ["### Entry-level concept deep-dives (fundamentals first)", "",
+                  "_For new-grad loops, fundamentals are graded more than advanced "
+                  "system design. Master these before touching distributed systems._", ""]
+        for dd in new_grad_dd:
+            lines += [dd, ""]
+        lines += [ng_sysdesign_note, ""]
+        lines += ["### Advanced deep-dives (only if you have time)", ""]
     if gap_cats:
         lines += [f"_Ordered for your gaps first ({', '.join(c.replace('_', ' ') for c in gap_cats)})._", ""]
     for tag in concept_tags[:8]:
@@ -348,7 +552,7 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
             lines += [PC.CONCEPTS[tag], ""]
     lines += ["## 4. " + _tailored_mock(profile, role, company, categories).lstrip("# ").rstrip(),
               ""]
-    lines += ["## 5. " + _star_prompts(profile).lstrip("# ").rstrip(), ""]
+    lines += ["## 5. " + _star_prompts(profile, new_grad=new_grad).lstrip("# ").rstrip(), ""]
     lines += ["## 6. Compensation benchmark", "", market_line, ""]
     if talking_points:
         lines += [talking_points]
