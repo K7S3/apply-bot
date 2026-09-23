@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "research",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "research": ["papers", "frame", "statement", "taste", "hardqa", "map",
+                 "rebuttal", "talk", "export-notes", "export-digest"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "ResearchError", "ResearchMapError",
     "ValueError",
 }
 
@@ -72,6 +75,8 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "ResearchError": "python -m candid research papers list",
+    "ResearchMapError": "python -m candid research --help",
 }
 
 
@@ -484,6 +489,209 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _cmd_research_papers(a):
+    from candid import research_papers as RP
+    act = a.action
+    if act == "add":
+        paper = RP.add_paper(
+            a.title, a.authors or None, venue=a.venue, year=a.year or None,
+            url=a.url, abstract=a.abstract, notes=a.notes,
+            status=a.status or "unread")
+        print(f"Added paper: {paper['id']}")
+        print(RP.render_paper(paper))
+    elif act == "list":
+        papers = RP.list_papers(status=a.status)
+        print(RP.render_list(papers) if papers else "No papers in the library yet.")
+    elif act == "get":
+        print(RP.render_paper(RP.get_paper(a.target)))
+    elif act == "search":
+        papers = RP.search_papers(a.target)
+        print(RP.render_list(papers) if papers else "No matches.")
+    elif act == "status":
+        paper = RP.update_status(a.target, a.to)
+        print(f"{paper['id']}: status -> {paper['status']}")
+    elif act == "notes":
+        paper = RP.append_notes(a.target, a.text)
+        print(f"Notes appended to {paper['id']}.")
+    elif act == "drill":
+        RP.drill_interactive(a.target)
+    elif act == "drill-stats":
+        paper = RP.get_paper(a.target)
+        print(RP.render_drill_stats(RP.drill_stats(a.target),
+                                    paper.get("title", "")))
+
+
+def _cmd_research_frame(a):
+    from candid import research_frame as RF
+    if a.file:
+        project = RF.intake_project(
+            text=__import__("pathlib").Path(a.file).read_text(encoding="utf-8"))
+    elif a.from_profile or not a.title:
+        project = RF.intake_project(project_index=a.index)
+    else:
+        project = {
+            "title": a.title, "description": a.description,
+            "techniques": a.techniques, "outcomes": a.outcomes,
+        }
+    framing = RF.frame_project(project)
+    if a.out:
+        path = RF.save_framing(framing, a.out)
+        print(f"Framing saved to {path}")
+    else:
+        print(RF.render_framing(framing))
+
+
+def _cmd_research_statement(a):
+    from candid import research_frame as RF
+    data = RF.load_statement_data(a.data)
+    if a.action == "check":
+        stmt = RF.build_statement(data)
+        print(stmt["length_note"])
+        print(f"Word count: {stmt['word_count']} (target ~{stmt['target_words']})")
+    else:
+        stmt = RF.build_statement(data)
+        if a.out:
+            path = RF.save_statement(stmt, a.out)
+            print(f"Research statement saved to {path}")
+        else:
+            print(RF.render_statement(stmt))
+
+
+def _cmd_research_taste(a):
+    from candid import research_prep as RPr
+    if a.action == "list":
+        for q in RPr.list_questions(category=a.category):
+            print(f"[{q['category']}] {q['q']}")
+            if q.get("hint"):
+                print(f"    hint: {q['hint']}")
+    elif a.action == "practice":
+        cats = [c.strip() for c in a.category.split(",")] if a.category else None
+        RPr.practice_session(n=a.n, categories=cats)
+    elif a.action == "stats":
+        stats = RPr.category_stats()
+        if not stats:
+            print("No practice sessions recorded yet.")
+            return
+        for cat, s in sorted(stats.items()):
+            print(f"{cat}: {s['n']} questions, avg {s['avg']:.1f}/5")
+        nxt = RPr.drill_next()
+        if nxt:
+            print("\nDrill next: " + ", ".join(nxt))
+
+
+def _cmd_research_hardqa(a):
+    from candid import research_prep as RPr
+    if a.action == "stats":
+        for row in RPr.qa_stats():
+            print(f"{row['avg']:.1f}/5 ({row['n']}x) {row['question']}")
+        return
+    if a.project_file:
+        text = __import__("pathlib").Path(a.project_file).read_text(encoding="utf-8")
+    else:
+        text = a.project
+    questions = RPr.generate_hard_questions(text)
+    if a.action == "generate":
+        for q in questions:
+            print(f"- {q['question']}")
+            for item in q.get("checklist", []):
+                print(f"    * {item}")
+            print()
+    elif a.action == "practice":
+        RPr.practice_hard_qa(questions)
+
+
+def _cmd_research_map(a):
+    from candid import research_map as RM
+    source = a.json_file if a.json_file else None
+    entries = RM.load_entries(source, profile_path=None) if (source or a.from_profile) else []
+    if not entries and not (source or a.from_profile):
+        raise RM.ResearchMapError(
+            "No entries: pass --json-file entries.json or --from-profile")
+    m = RM.build_map(entries)
+    print(RM.render_map_md(m) if a.md else RM.render_map(m))
+    gaps = RM.gap_observations(m)
+    if gaps:
+        print("\nGap observations (heuristic suggestions, not facts):")
+        for g in gaps:
+            print(f"- {g['observation']}")
+            print(f"  {g['suggestion']}")
+
+
+def _cmd_research_rebuttal(a):
+    from candid import research_map as RM
+    act = a.action
+    if act == "add":
+        c = RM.add_critique(a.text or a.target)
+        print(f"Added critique {c['id']} (type: {c['type']}).")
+    elif act == "list":
+        status = "pending" if a.pending else "addressed" if a.addressed else None
+        crits = RM.list_critiques(status=status)
+        for c in crits:
+            print(f"[{c['id']}] ({c['type']}, {c['status']}) {c['text'][:100]}")
+        if not crits:
+            print("No critiques recorded.")
+    elif act == "template":
+        print(RM.suggest_template(a.target))
+    elif act == "draft":
+        RM.draft_response(a.target, a.text)
+        print(f"Draft saved for {a.target}.")
+    elif act == "address":
+        RM.mark_addressed(a.target)
+        print(f"{a.target} marked addressed.")
+    elif act == "progress":
+        p = RM.rebuttal_progress()
+        print(f"{p['addressed']}/{p['total']} addressed "
+              f"({p['percent_addressed']:.0f}%)")
+
+
+def _cmd_research_talk(a):
+    from candid import research_talk as RT
+    if not all([a.title, a.problem, a.approach, a.results,
+                a.takeaways, a.future_work]):
+        raise ValueError("talk needs --title, --problem, --approach, "
+                         "--results, --takeaways, and --future-work")
+    outline = RT.build_outline({
+        "title": a.title, "problem": a.problem, "approach": a.approach,
+        "results": a.results, "takeaways": a.takeaways,
+        "future_work": a.future_work,
+    }, a.minutes)
+    if a.save:
+        path = RT.save_outline(outline, a.save)
+        print(f"Outline saved to {path}")
+    else:
+        print(RT.render_outline(outline))
+    if outline.get("note"):
+        print(f"\nNote: {outline['note']}")
+
+
+def cmd_research(a):
+    what = a.what
+    if what == "papers":
+        _cmd_research_papers(a)
+    elif what == "frame":
+        _cmd_research_frame(a)
+    elif what == "statement":
+        _cmd_research_statement(a)
+    elif what == "taste":
+        _cmd_research_taste(a)
+    elif what == "hardqa":
+        _cmd_research_hardqa(a)
+    elif what == "map":
+        _cmd_research_map(a)
+    elif what == "rebuttal":
+        _cmd_research_rebuttal(a)
+    elif what == "talk":
+        _cmd_research_talk(a)
+    elif what == "export-notes":
+        from candid import research_talk as RT
+        files = RT.export_notes(out_dir=a.out_dir)
+        print(f"Exported {len(files)} files." + (f" to {a.out_dir}" if a.out_dir else ""))
+    elif what == "export-digest":
+        from candid import research_talk as RT
+        path = RT.export_digest(out_path=a.out or None)
+        print(f"Digest written to {path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1126,114 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # research (AI research track)
+    s = _sub(sub, "research", "Research track: paper library, drills, framing, prep, talks.", [
+        "python -m candid research papers add --title \"Attention Is All You Need\" --authors \"Vaswani et al.\"",
+        "python -m candid research papers list",
+        "python -m candid research drill my-paper-slug",
+        "python -m candid research frame --title \"My project\" --description \"...\"",
+        "python -m candid research taste practice -n 5",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "papers", "Paper library and deep-dive drills.", [
+        "python -m candid research papers add --title \"Paper\" --authors \"A, B\" --venue \"Conf\" --year 2024",
+        "python -m candid research papers list --status reading",
+        "python -m candid research papers search transformer",
+        "python -m candid research drill my-paper",
+    ])
+    t.add_argument("action", choices=["add", "list", "get", "search", "status",
+                                     "notes", "drill", "drill-stats"])
+    t.add_argument("target", nargs="?", default="",
+                   help="Paper id (get/status/notes/drill/drill-stats) or query (search)")
+    t.add_argument("--title", default=""); t.add_argument("--authors", default="")
+    t.add_argument("--venue", default=""); t.add_argument("--year", default="")
+    t.add_argument("--url", default=""); t.add_argument("--abstract", default="")
+    t.add_argument("--notes", default="")
+    t.add_argument("--status", default=None,
+                   help="Filter for list, or initial status for add")
+    t.add_argument("--to", default=None, help="New status for the status action")
+    t.add_argument("--text", default="", help="Note text for the notes action")
+
+    t = _sub(rs, "frame", "Frame a project as a publication.", [
+        "python -m candid research frame --title \"X\" --description \"...\" --techniques \"a, b\"",
+        "python -m candid research frame --file project.txt -o framing.md",
+        "python -m candid research frame --from-profile",
+    ])
+    t.add_argument("--title", default=""); t.add_argument("--description", default="")
+    t.add_argument("--techniques", default=""); t.add_argument("--outcomes", default="")
+    t.add_argument("--from-profile", action="store_true")
+    t.add_argument("--index", type=int, default=0)
+    t.add_argument("--file", default=""); t.add_argument("-o", "--out", default="")
+
+    t = _sub(rs, "statement", "Build a research statement.", [
+        "python -m candid research statement build --data statement.json -o statement.md",
+        "python -m candid research statement check --data statement.json",
+    ])
+    t.add_argument("action", choices=["build", "check"])
+    t.add_argument("--data", required=True, help="JSON with past_projects, current_focus, future_agenda")
+    t.add_argument("-o", "--out", default="")
+
+    t = _sub(rs, "taste", "Research-taste interview practice.", [
+        "python -m candid research taste list",
+        "python -m candid research taste practice -n 5",
+        "python -m candid research taste stats",
+    ])
+    t.add_argument("action", choices=["list", "practice", "stats"])
+    t.add_argument("-n", type=int, default=5)
+    t.add_argument("--category", default=None)
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(rs, "hardqa", "Advisor/committee-style hard questions.", [
+        "python -m candid research hardqa generate --project \"...\"",
+        "python -m candid research hardqa practice --project-file notes.md",
+        "python -m candid research hardqa stats",
+    ])
+    t.add_argument("action", choices=["generate", "practice", "stats"])
+    t.add_argument("--project", default="")
+    t.add_argument("--project-file", default="")
+
+    t = _sub(rs, "map", "Prior-work timeline map with gap observations.", [
+        "python -m candid research map --json-file entries.json",
+        "python -m candid research map --from-profile --md",
+    ])
+    t.add_argument("--json-file", default=None)
+    t.add_argument("--from-profile", action="store_true")
+    t.add_argument("--md", action="store_true")
+
+    t = _sub(rs, "rebuttal", "Rebuttal trainer for reviewer critiques.", [
+        "python -m candid research rebuttal add \"critique text...\"",
+        "python -m candid research rebuttal list --pending",
+        "python -m candid research rebuttal template c1",
+        "python -m candid research rebuttal progress",
+    ])
+    t.add_argument("action", choices=["add", "list", "template", "draft",
+                                      "address", "progress"])
+    t.add_argument("target", nargs="?", default="",
+                   help="Critique id, or the critique text for add")
+    t.add_argument("--text", default="", help="Text for add/draft actions")
+    t.add_argument("--pending", action="store_true")
+    t.add_argument("--addressed", action="store_true")
+
+    t = _sub(rs, "talk", "Timed talk outline builder.", [
+        "python -m candid research talk --minutes 15 --title \"X\" --problem \"...\" --approach \"...\" --results \"...\" --takeaways \"...\" --future-work \"...\"",
+    ])
+    t.add_argument("--minutes", type=int, default=15)
+    t.add_argument("--title", default=""); t.add_argument("--problem", default="")
+    t.add_argument("--approach", default=""); t.add_argument("--results", default="")
+    t.add_argument("--takeaways", default=""); t.add_argument("--future-work", default="")
+    t.add_argument("--save", default="")
+
+    t = _sub(rs, "export-notes", "Export paper library + notes to Markdown.", [
+        "python -m candid research export-notes --out-dir notes/",
+    ])
+    t.add_argument("--out-dir", default=None)
+
+    t = _sub(rs, "export-digest", "Write a consolidated research digest.", [
+        "python -m candid research export-digest --out digest.md",
+    ])
+    t.add_argument("--out", default="")
+    s.set_defaults(func=cmd_research)
 
     return p
 
