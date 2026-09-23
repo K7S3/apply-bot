@@ -11,6 +11,8 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid migrate             # upgrade config.yaml schema
+    python -m candid doctor              # health-check the install
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -24,6 +26,7 @@ import re
 import sys
 
 from candid import __version__
+from candid import versioning as V
 
 # ---------------------------------------------------------------------------
 # command inventory (kept in sync with build_parser below)
@@ -32,7 +35,8 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "version",
+    "migrate", "doctor",
 ]
 
 SUBCOMMANDS = {
@@ -55,7 +59,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "ValueError", "ConfigError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +76,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "ConfigError": "python -m candid doctor",
 }
 
 
@@ -149,6 +154,10 @@ def cmd_onboard(a):
 def cmd_profile_show(a):
     from candid import profile as P
     print(P.profile_card(_profile()))
+
+
+def cmd_version(a):
+    print(V.version_banner())
 
 
 def _jd_text(a) -> str:
@@ -484,6 +493,28 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_migrate(a):
+    from candid import migrate as M
+    report = M.migrate_config()
+    for step in report["steps"]:
+        print(step)
+    if report["noop"]:
+        return
+    if report["created"]:
+        print(f"\nDone: fresh config v{report['to_version']} created.")
+    else:
+        print(f"\nDone: config migrated v{report['from_version']} "
+              f"-> v{report['to_version']}. Backup at {report['backup_path']}")
+
+
+def cmd_doctor(a):
+    from candid import doctor as D
+    results = D.check_health()
+    print(D.render_health(results))
+    if not D.all_ok(results):
+        sys.exit("candid doctor: some checks failed (see above).")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -919,6 +950,25 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
+    # version
+    s = _sub(sub, "version", "Show the candid version (plus Python and platform).", [
+        "python -m candid version",
+        "python -m candid --version",
+    ])
+    s.set_defaults(func=cmd_version)
+
+    # migrate
+    s = _sub(sub, "migrate", "Upgrade config.yaml to the current schema version.", [
+        "python -m candid migrate",
+    ])
+    s.set_defaults(func=cmd_migrate)
+
+    # doctor
+    s = _sub(sub, "doctor", "Health-check: config, data dir, Python version.", [
+        "python -m candid doctor",
+    ])
+    s.set_defaults(func=cmd_doctor)
+
     return p
 
 
@@ -933,8 +983,26 @@ def _next_command(args, etype: str) -> str:
     return "python -m candid --help"
 
 
+def _maybe_show_update_notice(args) -> None:
+    """Best-effort PyPI update notice on CLI startup.
+
+    Skipped for the `version` command itself (its output stays clean),
+    for --json output, and whenever stdout is not a TTY. Never raises:
+    any failure silently disables the notice for this run.
+    """
+    try:
+        if getattr(args, "cmd", None) == "version":
+            return
+        if getattr(args, "json", False):
+            return
+        V.maybe_print_update_notice(is_json=False)
+    except Exception:
+        pass
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    _maybe_show_update_notice(args)
     try:
         args.func(args)
     except SystemExit as e:

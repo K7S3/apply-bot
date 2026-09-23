@@ -16,6 +16,9 @@ Modules:
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
     jobs      curated job discovery → tracker pipeline
+    migrate   config.yaml schema upgrades (versioned migrations)
+    migrations  the (from_version, to_version, fn) migration registry
+    doctor    health checks: config, data dir, Python version
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.
@@ -26,4 +29,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

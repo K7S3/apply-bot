@@ -35,6 +35,7 @@ def _config_dir() -> Path:
 # --- user data (git-ignored) -------------------------------------------------
 DATA_DIR = _data_dir()
 CONFIG_DIR = _config_dir()
+CONFIG_PATH = CONFIG_DIR / "config.yaml"  # optional user config file
 PROFILE_PATH = DATA_DIR / "profile.json"
 TRACKER_PATH = DATA_DIR / "tracker.json"
 OFFERS_PATH = DATA_DIR / "offers.json"
@@ -42,6 +43,73 @@ SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
 GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
+
+# --- versioned CLI config ----------------------------------------------------
+#: Schema version of config.yaml. Bump this whenever the schema changes and
+#: add a matching (from_version, to_version, fn) entry in candid/migrations.py.
+CONFIG_VERSION = 1
+
+#: v1 schema. Every new/rewritten config gets ``config_version: 1`` stamped
+#: by save_config(); unknown keys are preserved untouched by migrations.
+DEFAULT_CONFIG: dict = {
+    "log_level": "WARNING",      # same knob as CANDID_LOG_LEVEL (env wins)
+    "dashboard_port": 8765,      # default port for `candid dashboard`
+}
+
+
+class ConfigError(Exception):
+    """Raised when the CLI config cannot be read, written, or migrated."""
+
+
+def _yaml():
+    """Lazy pyyaml import so candid stays stdlib-only without it."""
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ConfigError(
+            "Reading config.yaml needs the 'pyyaml' package. Install it with:\n"
+            "    pip install pyyaml"
+        ) from exc
+    return yaml
+
+
+def load_config(path: Path | None = None) -> dict:
+    """Load the versioned CLI config (defaults when the file is missing)."""
+    path = path or CONFIG_PATH
+    if not Path(path).exists():
+        cfg = dict(DEFAULT_CONFIG)
+        cfg["config_version"] = CONFIG_VERSION
+        return cfg
+    yaml = _yaml()
+    try:
+        cfg = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise ConfigError(f"Could not parse {path}: {exc}") from exc
+    if not isinstance(cfg, dict):
+        raise ConfigError(f"{path} must contain a YAML mapping, not "
+                          f"{type(cfg).__name__}.")
+    return cfg
+
+
+def save_config(cfg: dict, path: Path | None = None) -> Path:
+    """Write the CLI config, always stamping the current CONFIG_VERSION."""
+    path = path or CONFIG_PATH
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yaml = _yaml()
+    stamped = dict(cfg)
+    stamped["config_version"] = CONFIG_VERSION
+    path.write_text(yaml.safe_dump(stamped, sort_keys=True, default_flow_style=False),
+                    encoding="utf-8")
+    return path
+
+
+def config_version_of(cfg: dict) -> int:
+    """Version of a loaded config dict; 0 = written before versioning existed."""
+    try:
+        return int(cfg.get("config_version", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"
@@ -157,3 +225,41 @@ def get_logger(name: str) -> logging.Logger:
             format="%(levelname)s [candid.%(name)s] %(message)s",
         )
     return logger
+
+
+# --- user config file ---------------------------------------------------------
+# Optional per-user config at CONFIG_DIR / "config.yaml"
+# (e.g. ~/.config/candid/config.yaml). candid stays stdlib-only, so this is
+# a tiny top-level "key: value" reader rather than a full YAML parser.
+# Missing or malformed file -> empty config, never an error.
+
+_FALSEY = {"false", "0", "no", "off", "none", "~"}
+
+
+def user_config() -> dict:
+    """Read the optional user config file. Returns {} when absent/unreadable."""
+    cfg: dict[str, str] = {}
+    try:
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return cfg
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in stripped:
+            continue
+        key, _, val = stripped.partition(":")
+        key = key.strip()
+        val = val.strip().strip("'\"")
+        if key:
+            cfg[key] = val
+    return cfg
+
+
+def updates_enabled() -> bool:
+    """Whether the PyPI update check may run.
+
+    Defaults to True; set ``check_updates: false`` in the user config
+    file to opt out.
+    """
+    raw = str(user_config().get("check_updates", "true")).strip().lower()
+    return raw not in _FALSEY

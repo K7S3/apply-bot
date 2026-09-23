@@ -6,3 +6,4 @@
 # runs on the standard library alone.
 
 pypdf>=3.0.0  # optional: PDF resume parsing
+pyyaml>=6.0  # optional: config.yaml read/write (migrate, doctor)

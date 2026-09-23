@@ -14,6 +14,23 @@ runs on your machine; your data never leaves it.
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![No paid APIs](https://img.shields.io/badge/APIs-none%20required-brightgreen.svg)](https://github.com/K7S3/candid)
 
+## Install with Homebrew
+
+On macOS (or Linux with Homebrew):
+
+```bash
+brew tap K7S3/tap
+brew install candid
+```
+
+See [docs/homebrew.md](docs/homebrew.md) for upgrade/uninstall instructions
+and how maintainers bump the formula on release. Prefer pipx or pip
+instead? Run:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/K7S3/candid/main/scripts/install.sh | sh
+```
+
 ## Try it in 5 minutes
 
 ```bash
@@ -42,6 +59,26 @@ python -m candid prep --company "Capital One" --role "Senior Data Scientist" --a
 
 All commands are `python -m candid <command> --help`. No accounts, no keys.
 
+## Install from PyPI
+
+```bash
+pip install candid          # puts the `candid` command on your PATH
+# or, in its own isolated environment:
+pipx install candid
+```
+
+Then use the shorter form everywhere instead of `python -m candid`:
+
+```bash
+candid --version            # prints the installed version
+candid onboard --resume resume.pdf
+candid match --jd job_description.txt --company "X" --role "Y"
+```
+
+`pip install candid` is stdlib-only — no dependencies are pulled in. For
+PDF résumé parsing add the optional extra: `pip install "candid[pdf]"`.
+
+
 CLI niceties: `python -m candid --version`, typo-tolerant commands
 (`candid macth` suggests `match`), `--json` on `match`, `track list`,
 `jobs list`, and `salary lookup` for scripting, and `--jd -` reads the JD
@@ -65,6 +102,8 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `version` | Print the candid version plus Python and platform (`python -m candid version`; `python -m candid --version` also works). |
+| `migrate` / `doctor` | `doctor`: health-check (config loads, schema current, data dir writable, Python >= 3.9). `migrate`: upgrade `config.yaml` through versioned migrations with a timestamped backup; idempotent. See [Upgrading](#upgrading). |
 
 ## Job-source coverage (honest)
 
@@ -142,14 +181,42 @@ The only network calls candid makes:
 - `match --jd <url>` → fetches the JD page you pointed it at.
 - `mock ai` → Gemini, **only** for conversational interview dialogue, only
   when you run it.
+- update check → PyPI's JSON API, once per day at most (see below).
 
 No analytics, no telemetry, no accounts.
+
+## Version and update checks
+
+`python -m candid version` prints the installed version plus the Python
+version and platform. The version lives in one place: `candid/__init__.py`.
+
+On interactive startup (a TTY, never piped or `--json` output) candid asks
+PyPI once per day whether a newer release exists. If one does, you see a
+single one-line notice per release:
+
+```
+candid 0.4.0 is available, run pip install -U candid
+```
+
+The last check (timestamp + result) is cached in
+`candid_data/update_check.json`, so it never slows startup, and any
+network problem just means "no info" — the CLI keeps working offline.
+
+To opt out, create `~/.config/candid/config.yaml` with:
+
+```yaml
+check_updates: false
+```
+
+(`CANDID_CONFIG_DIR` overrides the config directory, same as the other
+candid paths.)
 
 ## Extending it
 
 - [docs/adding_problems.md](docs/adding_problems.md) — add coding problems to the mock judge
 - [docs/adding_questions.md](docs/adding_questions.md) — add reported interview questions (source + URL required)
 - [docs/adding_sources.md](docs/adding_sources.md) — add a public job feed
+- [docs/release.md](docs/release.md) — release process: version bump, changelog, tag, build, PyPI upload
 
 ## Tests
 
@@ -157,7 +224,7 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+262 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
@@ -167,10 +234,32 @@ STAR prompts), offers (sign-on amortization, markdown export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
-errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
+errors), the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
 `/api/import` multipart upload, import guides, and an HTML↔API
-cross-check). The mock judge is also verified by running every problem's
+cross-check), and the config migration framework (`migrate` idempotency
+and backups, `doctor` healthy/outdated checks). The mock judge is also verified by running every problem's
 reference solution through it (`python scripts/seed_problems.py --verify`).
+
+## Upgrading
+
+candid versions its CLI config (`~/.config/candid/config.yaml`,
+overridable via `CANDID_CONFIG_DIR`). Every new or rewritten config is
+stamped with the current schema version (`config_version: 1`), and schema
+changes ship as migrations in `candid/migrations.py` — a registry of
+`(from_version, to_version, function)` steps, e.g. the v0 → v1 step that
+stamps the version and backfills missing defaults while preserving any
+keys you added by hand.
+
+```bash
+python -m candid doctor    # health-check: config loads, schema current,
+                           # data dir writable, Python >= 3.9
+python -m candid migrate   # upgrade an old config to the current schema
+```
+
+`candid migrate` writes a timestamped backup (`config.yaml.bak.<ts>`)
+*before* changing anything, applies pending migrations in order while
+reporting each step, and is idempotent — running it twice is a no-op.
+If `doctor` reports an outdated schema, run `migrate` and re-check.
 
 ## Legacy automation
 
