@@ -38,6 +38,12 @@ python -m candid tailor cover-letter --jd samples/candid/sample_jd.txt \
 python -m candid track add --company "Acme Corp" --role "Senior Data Scientist"
 python -m candid track update 1 --status selected_for_interview
 python -m candid prep --company "Capital One" --role "Senior Data Scientist" --app-id 1
+
+# 5. Reach out to the hiring manager with a grounded, personalized draft
+python -m candid hm add --name "Priya Nair" --title "Eng Manager" --company "Acme Corp" \
+    --notes "Gave a talk on infra cost at DataConf 2025" --interest "infra cost"
+python -m candid outreach draft --to priya --role "Senior Data Scientist"
+python -m candid outreach score --to priya --file draft.txt
 ```
 
 All commands are `python -m candid <command> --help`. No accounts, no keys.
@@ -63,6 +69,8 @@ one ends with the exact next command to run.
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
+| `hm` | Hiring-manager dossiers: save public notes, interests, and sources per manager; get a grounded brief (talking points, openers, questions) and a research checklist of what to look up before reaching out. |
+| `outreach` | Personalized hiring-manager outreach: grounded drafts (email / LinkedIn / DM, 3 templates) that cite dossier specifics and your experience — never invents hooks; draft scoring with concrete fixes; a CRM-lite log with sent/replied/followed-up status, stale-outreach nudges, and JD hiring-manager clue extraction. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
 

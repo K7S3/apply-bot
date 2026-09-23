@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "hm", "outreach",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,9 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "hm": ["add", "list", "show", "update", "delete", "brief", "research"],
+    "outreach": ["draft", "variants", "score", "fix", "log", "sent", "status",
+                 "list", "touch", "nudge", "clues"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +59,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "ValueError", "HmError", "OutreachError", "OutreachTrackError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -292,6 +296,201 @@ def cmd_followup(a):
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def cmd_hm(a):
+    from candid import hm as H
+    if a.what == "add":
+        d = H.add_dossier(a.name, title=a.title or "", company=a.company or "",
+                          team=a.team or "", notes=a.notes or "",
+                          sources=a.source or [], interests=a.interest or [],
+                          contact_hint=a.contact_hint or "")
+        extra = f" — {d['title']}, {d['company']}" if d["title"] or d["company"] else ""
+        print(f"Saved dossier {d['id']}: {d['name']}{extra}")
+    elif a.what == "list":
+        ds = H.list_dossiers()
+        if not ds:
+            print("No hiring-manager dossiers yet. Add one with `hm add --name ...`.")
+            return
+        for d in ds:
+            bits = [d["id"], d["name"]]
+            if d.get("title"):
+                bits.append(d["title"])
+            if d.get("company"):
+                bits.append("@" + d["company"])
+            print("  ".join(bits))
+    elif a.what == "show":
+        print(json.dumps(H.get_dossier(a.ref), indent=2))
+    elif a.what == "update":
+        fields = {k: v for k, v in (
+            ("title", a.title), ("company", a.company), ("team", a.team),
+            ("notes", a.notes), ("contact_hint", a.contact_hint)) if v is not None}
+        if a.source:
+            fields["sources"] = a.source
+        if a.interest:
+            fields["interests"] = a.interest
+        if not fields:
+            sys.exit("Nothing to update: pass a field like --title, --notes, --source, --interest.")
+        d = H.update_dossier(a.ref, **fields)
+        print(f"Updated {d['name']} ({d['id']})")
+    elif a.what == "delete":
+        H.delete_dossier(a.ref)
+        print("Dossier deleted.")
+    elif a.what == "brief":
+        jd = _jd_text(a) if a.jd else ""
+        b = H.manager_brief(a.ref, jd_text=jd)
+        print(b["summary"])
+        print("\nTalking points:")
+        for tp in b["talking_points"]:
+            print(f"  - {tp}")
+        print("\nOpeners:")
+        for op in b["openers"]:
+            print(f"  - {op}")
+        print("\nQuestions to ask:")
+        for q in b["questions_to_ask"]:
+            print(f"  - {q}")
+    elif a.what == "research":
+        from candid import outreach_quality as Q
+        if a.mark:
+            if not a.ref or not a.check:
+                sys.exit("Updating needs --ref <dossier> and --check <item-key>.")
+            item = Q.checklist_update(a.ref, a.check, a.mark, note=a.note or "")
+            print(f"{item['key']}: {item['status']}" +
+                  (f" — {item['note']}" if item.get("note") else ""))
+        else:
+            items = Q.research_checklist(a.ref or None)
+            if a.ref:
+                st = Q.checklist_status(a.ref)
+                print(f"Research checklist: {st['done']}/{st['total']} done")
+            for it in items:
+                mark = {"todo": "[ ]", "done": "[x]", "skipped": "[-]"}.get(it["status"], "[ ]")
+                print(f"  {mark} {it['key']}: {it['label']}")
+                print(f"      hint: {it['hint']}")
+
+
+def _draft_text_arg(a) -> str:
+    """Read draft text from --text, --file, or stdin."""
+    if a.text:
+        return a.text
+    if a.file:
+        src = a.file
+        if src == "-":
+            return sys.stdin.read()
+        return Path(src).read_text()
+    if not sys.stdin.isatty():
+        return sys.stdin.read()
+    sys.exit("No text given: pass --text, --file, or pipe the draft on stdin.")
+
+
+def _render_draft(d: dict) -> str:
+    if d.get("subject"):
+        return f"Subject: {d['subject']}\n\n{d['body']}"
+    return d["body"]
+
+
+def cmd_outreach(a):
+    from candid import outreach as O
+    if a.what == "draft":
+        prof, dos = O.build_from_files(dossier_ref=a.to)
+        d = O.draft_outreach(prof, dos, role=a.role or "", channel=a.channel,
+                             tone=a.tone, template=a.template,
+                             mutual_connection=a.via or None)
+        out = _render_draft(d)
+        if a.json:
+            print(json.dumps(d, indent=2))
+        elif a.out:
+            Path(a.out).write_text(out + "\n")
+            print(f"Draft written to {a.out}")
+        else:
+            print(out)
+    elif a.what == "variants":
+        prof, dos = O.build_from_files(dossier_ref=a.to)
+        for v in O.outreach_variants(prof, dos, role=a.role or ""):
+            print(f"--- {v['label']} ({v['channel']}) ---")
+            print(f"When to use: {v['when_to_use']}")
+            print(_render_draft(v))
+            print()
+    elif a.what in ("score", "fix"):
+        from candid import outreach_quality as Q
+        text = _draft_text_arg(a)
+        dos = None
+        if a.to:
+            from candid import hm as H
+            dos = H.get_dossier(a.to)
+        if a.what == "score":
+            r = Q.score_draft(text, dos, channel=a.channel)
+            print(f"Score: {r['score']}/100 ({r['grade']})")
+            for f in r["findings"]:
+                mark = "PASS" if f["passed"] else "FAIL"
+                print(f"  [{mark}] {f['check']}: {f['detail']}")
+        else:
+            fixes = Q.suggest_fixes(text, dos, channel=a.channel)
+            if not fixes:
+                print("No issues found — draft looks strong.")
+            else:
+                print("Suggested fixes:")
+                for fx in fixes:
+                    print(f"  - {fx}")
+    elif a.what == "log":
+        from candid import outreach_track as T
+        e = T.log_outreach(a.to, a.channel, notes=a.notes or "")
+        print(f"Logged outreach {e['id']} (status: draft) for "
+              f"{e['manager_name'] or a.to}")
+    elif a.what == "sent":
+        from candid import outreach_track as T
+        e = T.mark_sent(a.entry, sent_date=a.date or None)
+        print(f"Marked {e['id']} as sent ({e['sent_at']}).")
+    elif a.what == "status":
+        from candid import outreach_track as T
+        e = T.update_status(a.entry, a.new_status)
+        print(f"{e['id']} is now {e['status']}.")
+    elif a.what == "list":
+        from candid import outreach_track as T
+        es = T.list_outreach(status=a.status or None, company=a.company or None)
+        if not es:
+            print("No outreach logged yet.")
+            return
+        for e in es:
+            who = e["manager_name"] or e["dossier_id"]
+            print(f"{e['id']}  {e['status']:12} {e['channel']:8} {who} "
+                  f"@ {e['company']}  (last touch {e['last_touch']})")
+    elif a.what == "touch":
+        from candid import outreach_track as T
+        e = T.touch(a.entry, note=a.note or "")
+        print(f"Touched {e['id']}: last touch {e['last_touch']}.")
+    elif a.what == "nudge":
+        from candid import outreach_track as T
+        cands = T.nudge_candidates(days=a.days)
+        if not cands:
+            print(f"No stale outreach (nothing quiet for {a.days}+ days).")
+            return
+        for c in cands:
+            e = c["entry"]
+            who = e["manager_name"] or e["dossier_id"]
+            print(f"{e['id']}  {who} @ {e['company']}: "
+                  f"{c['days_since_touch']} days quiet → {c['next_step']}")
+    elif a.what == "clues":
+        from candid import outreach_track as T
+        src = a.jd or ""
+        if src == "-":
+            src = sys.stdin.read()
+        elif src and Path(src).exists():
+            src = Path(src).read_text()
+        if not src:
+            sys.exit("No JD given: pass --jd <file | -> or literal text.")
+        clues = T.extract_manager_clues(src)
+        if a.json:
+            print(json.dumps(clues, indent=2))
+        else:
+            if clues.get("manager_name"):
+                print(f"Hiring manager: {clues['manager_name']}")
+            if clues.get("team"):
+                print(f"Team: {clues['team']}")
+            if clues.get("reporting_line"):
+                print(f"Reporting line: {clues['reporting_line']}")
+            if not any([clues.get("manager_name"), clues.get("team"),
+                        clues.get("reporting_line")]):
+                print("No hiring-manager clues found in this JD.")
 
 
 def cmd_offer(a):
@@ -918,6 +1117,138 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # hm — hiring-manager dossiers
+    s = _sub(sub, "hm", "Hiring-manager dossiers: save notes, get briefs, track research.", [
+        "python -m candid hm add --name \"Priya Nair\" --title \"Eng Manager\" --company Acme --team \"Ads Ranking\" --notes \"Gave a talk on infra...\"",
+        "python -m candid hm brief priya --jd jd.txt",
+        "python -m candid hm research --ref priya",
+    ])
+    hs = _nested(s)
+    t = _sub(hs, "add", "Save a hiring-manager dossier.", [
+        "python -m candid hm add --name \"Priya Nair\" --title \"Eng Manager\" --company Acme",
+    ])
+    t.add_argument("--name", required=True, help="Hiring manager's name")
+    t.add_argument("--title", default=""); t.add_argument("--company", default="")
+    t.add_argument("--team", default=""); t.add_argument("--notes", default="")
+    t.add_argument("--source", action="append", default=None,
+                   help="Public-work note (repeatable)")
+    t.add_argument("--interest", action="append", default=None,
+                   help="Known interest / focus area (repeatable)")
+    t.add_argument("--contact-hint", default="", help="How you found them (e.g. LinkedIn)")
+    t = _sub(hs, "list", "List saved dossiers.", [
+        "python -m candid hm list",
+    ])
+    t = _sub(hs, "show", "Show a dossier.", [
+        "python -m candid hm show priya",
+    ])
+    t.add_argument("ref", help="Dossier id or name")
+    t = _sub(hs, "update", "Update dossier fields.", [
+        "python -m candid hm update priya --notes \"New talk on...\"",
+    ])
+    t.add_argument("ref", help="Dossier id or name")
+    t.add_argument("--title", default=None); t.add_argument("--company", default=None)
+    t.add_argument("--team", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--contact-hint", default=None)
+    t.add_argument("--source", action="append", default=None)
+    t.add_argument("--interest", action="append", default=None)
+    t = _sub(hs, "delete", "Delete a dossier.", [
+        "python -m candid hm delete priya",
+    ])
+    t.add_argument("ref", help="Dossier id or name")
+    t = _sub(hs, "brief", "Talking points, openers, and questions for a manager.", [
+        "python -m candid hm brief priya",
+        "python -m candid hm brief priya --jd jd.txt",
+    ])
+    t.add_argument("ref", help="Dossier id or name")
+    t.add_argument("--jd", default="", help=JD_HELP)
+    t = _sub(hs, "research", "Research checklist: what to look up before reaching out.", [
+        "python -m candid hm research --ref priya",
+        "python -m candid hm research --ref priya --check recent_posts --mark done",
+    ])
+    t.add_argument("--ref", default="", help="Dossier id or name (omit for a blank checklist)")
+    t.add_argument("--check", default="", help="Checklist item key to update")
+    t.add_argument("--mark", default="", choices=["", "todo", "done", "skipped"],
+                   help="New status for --check")
+    t.add_argument("--note", default="", help="Note to attach to the update")
+    s.set_defaults(func=cmd_hm)
+
+    # outreach — personalized hiring-manager outreach
+    s = _sub(sub, "outreach", "Personalized hiring-manager outreach: drafts, scoring, tracking.", [
+        "python -m candid outreach draft --to priya --role \"ML Engineer\"",
+        "python -m candid outreach variants --to priya --role \"ML Engineer\"",
+        "python -m candid outreach score --to priya --file draft.txt",
+        "python -m candid outreach log --to priya --channel email",
+        "python -m candid outreach nudge --days 7",
+    ])
+    ons = _nested(s)
+    t = _sub(ons, "draft", "Draft a personalized outreach message (never sends).", [
+        "python -m candid outreach draft --to priya --role \"ML Engineer\"",
+        "python -m candid outreach draft --to priya --channel linkedin --tone concise",
+    ])
+    t.add_argument("--to", required=True, help="Dossier id or name")
+    t.add_argument("--role", default="")
+    t.add_argument("--channel", default="email", choices=["email", "linkedin"])
+    t.add_argument("--tone", default="warm", choices=["warm", "concise", "formal"])
+    t.add_argument("--template", default="specific-hook",
+                   choices=["specific-hook", "mutual-connection", "recent-news"])
+    t.add_argument("--via", default="", help="Mutual connection name (for mutual-connection template)")
+    t.add_argument("--out", default="", help="Write draft to file")
+    t.add_argument("--json", action="store_true", help="Print raw draft JSON")
+    t = _sub(ons, "variants", "Three outreach variants: LinkedIn request, DM, email.", [
+        "python -m candid outreach variants --to priya --role \"ML Engineer\"",
+    ])
+    t.add_argument("--to", required=True, help="Dossier id or name")
+    t.add_argument("--role", default="")
+    t = _sub(ons, "score", "Score a draft for personalization quality.", [
+        "python -m candid outreach score --to priya --file draft.txt",
+        "cat draft.txt | python -m candid outreach score --to priya",
+    ])
+    t.add_argument("--to", default="", help="Dossier id or name (for specificity checks)")
+    t.add_argument("--channel", default="email", choices=["email", "linkedin", "dm"])
+    t.add_argument("--text", default=""); t.add_argument("--file", default="")
+    t = _sub(ons, "fix", "Concrete fixes for a weak draft.", [
+        "python -m candid outreach fix --to priya --file draft.txt",
+    ])
+    t.add_argument("--to", default="", help="Dossier id or name")
+    t.add_argument("--channel", default="email", choices=["email", "linkedin", "dm"])
+    t.add_argument("--text", default=""); t.add_argument("--file", default="")
+    t = _sub(ons, "log", "Log an outreach attempt.", [
+        "python -m candid outreach log --to priya --channel email",
+    ])
+    t.add_argument("--to", required=True, help="Dossier id or name")
+    t.add_argument("--channel", default="email", choices=["email", "linkedin", "dm"])
+    t.add_argument("--notes", default="")
+    t = _sub(ons, "sent", "Mark a logged outreach as sent.", [
+        "python -m candid outreach sent <entry-id>",
+    ])
+    t.add_argument("entry", help="Outreach entry id")
+    t.add_argument("--date", default="", help="Sent date YYYY-MM-DD (default today)")
+    t = _sub(ons, "status", "Update an outreach entry's status.", [
+        "python -m candid outreach status <entry-id> replied",
+    ])
+    t.add_argument("entry", help="Outreach entry id")
+    t.add_argument("new_status", help="draft|sent|replied|no-reply|followed-up|archived")
+    t = _sub(ons, "list", "List logged outreach.", [
+        "python -m candid outreach list",
+        "python -m candid outreach list --status sent",
+    ])
+    t.add_argument("--status", default=""); t.add_argument("--company", default="")
+    t = _sub(ons, "touch", "Record a touch / follow-up on an entry.", [
+        "python -m candid outreach touch <entry-id> --note \"Sent follow-up\"",
+    ])
+    t.add_argument("entry", help="Outreach entry id")
+    t.add_argument("--note", default="")
+    t = _sub(ons, "nudge", "Outreach gone quiet: who needs a follow-up.", [
+        "python -m candid outreach nudge --days 7",
+    ])
+    t.add_argument("--days", type=int, default=7, help="Quiet threshold in days")
+    t = _sub(ons, "clues", "Extract hiring-manager clues from a JD.", [
+        "python -m candid outreach clues --jd jd.txt",
+    ])
+    t.add_argument("--jd", default="", help="JD file, - for stdin, or literal text")
+    t.add_argument("--json", action="store_true", help="Print raw clues JSON")
+    s.set_defaults(func=cmd_outreach)
 
     return p
 
