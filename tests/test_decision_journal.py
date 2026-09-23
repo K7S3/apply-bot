@@ -16,6 +16,30 @@ sys.path.insert(0, str(ROOT))
 
 TEST_DIR = Path(os.environ["CANDID_DATA_DIR"])
 
+# candid.config resolves CANDID_DATA_DIR at import time, so under a full-suite
+# run another test module may import config first and the setdefault above is
+# then a no-op. Pin the attributes directly so these tests stay hermetic in
+# any collection/run order (same approach as test_cli_ux / test_dashboard).
+_PATCHED_CONFIG = ("DATA_DIR", "OFFERS_PATH", "DECISIONS_PATH")
+_saved_config = {}
+
+
+def setUpModule():
+    from candid import config as C
+    for name in _PATCHED_CONFIG:
+        _saved_config[name] = getattr(C, name)
+    C.DATA_DIR = TEST_DIR
+    C.OFFERS_PATH = TEST_DIR / "offers.json"
+    C.DECISIONS_PATH = TEST_DIR / "decisions.json"
+    C.ensure_data_dirs()
+
+
+def tearDownModule():
+    from candid import config as C
+    for name, val in _saved_config.items():
+        setattr(C, name, val)
+    _saved_config.clear()
+
 
 def _clean():
     if TEST_DIR.exists():
