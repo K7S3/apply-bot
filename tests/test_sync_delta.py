@@ -33,6 +33,14 @@ from candid.sync.manifest import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True)
+def _restore_config():
+    """Save/restore config dirs around each test (other fixtures rebind)."""
+    old_data, old_cfg = candid.config.DATA_DIR, candid.config.CONFIG_DIR
+    yield
+    candid.config.DATA_DIR, candid.config.CONFIG_DIR = old_data, old_cfg
+
+
 @pytest.fixture()
 def src(tmp_path):
     """Exporter machine data dir, rebased to a snapshot of its content."""

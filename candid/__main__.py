@@ -11,6 +11,7 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid sync export ~/usb/  # file-based machine-to-machine sync
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "sync",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "sync": ["export", "import", "verify", "conflicts", "status", "log",
+             "pair", "rules"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +58,8 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "MilestonesError", "TodayError", "BriefingError",
+    "DefaultsError", "InsightsError", "SyncError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +76,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "SyncError": "python -m candid sync --help",
 }
 
 
@@ -484,6 +489,197 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _require_bundle(path_str):
+    """Return Path or raise a friendly SyncError when the bundle is missing."""
+    from pathlib import Path
+
+    p = Path(path_str)
+    if not p.is_file():
+        from candid.sync.errors import SyncError
+        raise SyncError(f"bundle not found: {path_str}")
+    return p
+
+
+def _csv_list(value):
+    """Comma-separated flag -> list of names."""
+    if not value:
+        return []
+    return [p.strip() for p in str(value).split(",") if p.strip()]
+
+
+def cmd_sync(a):
+    """File-based machine-to-machine sync (no cloud, no accounts)."""
+    from candid.sync import base as SB
+    from candid.sync import bundle as SBun
+    from candid.sync import conflicts as SCon
+    from candid.sync import delta as SD
+    from candid.sync import history as SH
+    from candid.sync import importer as SImp
+    from candid.sync import manifest as SM
+    from candid.sync import pairing as SP
+    from candid.sync import rules as SR
+    from candid.sync.errors import SyncError
+
+    what = a.what
+    if what == "export":
+        include = _csv_list(a.include) or None
+        exclude = _csv_list(a.exclude) or None
+        if a.dry_run:
+            if a.since_last:
+                cur = SB.snapshot_current()
+                try:
+                    old = SB.load_base("last")
+                except SyncError:
+                    old = {}
+                changed = sorted(p for p, h in cur.items() if old.get(p) != h)
+                deleted = sorted(p for p in old if p not in cur)
+                print(f"Delta preview vs last sync: {len(changed)} changed/new, "
+                      f"{len(deleted)} deleted")
+                for p in changed:
+                    print(f"  ~ {p}")
+                for p in deleted:
+                    print(f"  - {p} (deleted)")
+            else:
+                summary = SBun.summarize_selection(include, exclude)
+                print(f"Export preview: {summary['file_count']} file(s), "
+                      f"{summary['total_bytes']} bytes, categories: "
+                      f"{', '.join(summary['categories'])}")
+            return
+        if a.since_last:
+            path = SD.export_delta(a.dest, include=include, exclude=exclude,
+                                   peer_id=a.peer)
+            result = {"delta": path.name, "incremental": True}
+        else:
+            path = SBun.export_bundle(a.dest, include=include, exclude=exclude,
+                                      peer_id=a.peer)
+            result = {"bundle": path.name}
+        SH.log_sync("export", a.peer, path.name, result)
+        print(f"Exported sync bundle to {path}")
+        if a.peer:
+            print(f"Addressed to machine {a.peer}.")
+        print("Move the file to your other machine over a channel you trust, "
+              "then run: python -m candid sync import <file>")
+    elif what == "import":
+        bundle_path = _require_bundle(a.file)
+        man = SM.read_manifest(bundle_path)
+        SP.check_incoming_manifest(man)
+        if a.dry_run:
+            preview = SImp.preview_import(bundle_path)
+            counts = {}
+            for f in preview["files"]:
+                counts[f["status"]] = counts.get(f["status"], 0) + 1
+            print(f"Bundle from {preview['machine_id']} ({preview['created_at']}): "
+                  + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+            for f in preview["files"]:
+                if f["status"] != "unchanged":
+                    print(f"  [{f['status']}] {f['path']}")
+            return
+        if man.get("incremental"):
+            result = SD.apply_delta(bundle_path)
+            print(f"Applied delta: {len(result['applied'])} file(s) updated, "
+                  f"{len(result['deleted'])} deleted.")
+        else:
+            result = SImp.import_bundle(bundle_path, mode=a.mode)
+            if a.mode == "merge":
+                print(f"Merge: {len(result['applied'])} applied, "
+                      f"{len(result['conflicts'])} conflict(s).")
+                if result["conflicts"]:
+                    print("Resolve with: python -m candid sync conflicts list")
+            else:
+                print(f"Imported {len(result['applied'])} file(s); "
+                      f"overwritten files were backed up under "
+                      f"candid_data/sync/backups/.")
+        SH.log_sync("import", man.get("machine_id"), bundle_path.name, result)
+    elif what == "verify":
+        info = SImp.verify_bundle_file(_require_bundle(a.file))
+        print(f"OK: {info['files']} file(s), checksums valid, "
+              f"from {info['machine_id']}.")
+    elif what == "conflicts":
+        if a.sub == "list":
+            items = SCon.list_conflicts()
+            if a.json:
+                print(json.dumps(items, indent=2, default=str))
+                return
+            if not items:
+                print("No pending sync conflicts.")
+                return
+            for i, c in enumerate(items):
+                rid = f" record {c['record_id']}" if c.get("record_id") else ""
+                print(f"[{i}] {c['kind']} {c['path']}{rid} "
+                      f"(from {c.get('bundle', '?')})")
+        elif a.sub == "resolve":
+            ref = int(a.ref) if str(a.ref).isdigit() else a.ref
+            done = SCon.resolve_conflict(ref, a.choice)
+            print(f"Resolved {done.get('kind', 'conflict')} "
+                  f"{done.get('path', '')}: kept {done['winner']}.")
+    elif what == "status":
+        st = SH.get_status()
+        if a.json:
+            print(json.dumps(st, indent=2, default=str))
+            return
+        print(f"Machine id: {st['machine_id']}")
+        for key in ("last_export", "last_import"):
+            e = st.get(key)
+            if e:
+                print(f"  {key}: {e.get('timestamp')} {e.get('direction', '')} "
+                      f"{e.get('bundle_name', '')}")
+            else:
+                print(f"  {key}: none yet")
+        print(f"  pending conflicts: {st.get('pending_conflicts', 0)}")
+        print(f"  base snapshots: {len(st.get('bases', []))}")
+        peers = st.get("peers") or {}
+        print(f"  paired machines: {len(peers)}")
+    elif what == "log":
+        entries = SH.get_log(limit=a.limit)
+        if a.json:
+            print(json.dumps(entries, indent=2, default=str))
+            return
+        if not entries:
+            print("No sync history yet.")
+            return
+        for e in entries:
+            print(f"{e.get('timestamp')} {e.get('direction', ''):6} "
+                  f"{e.get('bundle_name', '')} (peer {e.get('peer_id', '-')})")
+    elif what == "pair":
+        if a.sub == "init":
+            path = SP.init_pairing(a.name, a.out)
+            print(f"Pairing file written to {path}")
+            print("Carry it to your other machine over a channel you trust, "
+                  "run `python -m candid sync pair accept <file>` there, "
+                  "then delete the file.")
+        elif a.sub == "accept":
+            pid = SP.accept_pairing(a.file)
+            print(f"Paired with machine {pid}.")
+        elif a.sub == "list":
+            peers = SP.list_peers()
+            if a.json:
+                print(json.dumps(peers, indent=2, default=str))
+                return
+            if not peers:
+                print("No paired machines.")
+                return
+            for pid, info in peers.items():
+                print(f"{pid}  {info.get('name', '')} "
+                      f"(paired {info.get('paired_at', '')})")
+        elif a.sub == "remove":
+            SP.remove_peer(a.peer_id)
+            print(f"Removed pairing for {a.peer_id}.")
+    elif what == "rules":
+        if a.sub == "show":
+            rules = SR.get_rules()
+            if a.json:
+                print(json.dumps(rules, indent=2))
+                return
+            for cat in sorted(rules):
+                print(f"{cat:10} {rules[cat]}")
+        elif a.sub == "set":
+            SR.set_rule(a.category, a.strategy)
+            print(f"Rule: {a.category} -> {a.strategy}")
+        elif a.sub == "clear":
+            SR.clear_rule(a.category)
+            print(f"Rule cleared for {a.category} (back to auto).")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1114,115 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # sync
+    s = _sub(sub, "sync", "File-based machine-to-machine sync (no cloud).", [
+        "python -m candid sync export ~/usb/",
+        "python -m candid sync export --since-last ~/usb/",
+        "python -m candid sync import ~/usb/candid-sync-....zip",
+        "python -m candid sync status",
+    ])
+    ys = _nested(s)
+    t = _sub(ys, "export", "Export a portable sync bundle (zip) of your data.", [
+        "python -m candid sync export ~/usb/",
+        "python -m candid sync export bundle.zip --include tracker,prep",
+        "python -m candid sync export --since-last --dry-run",
+    ])
+    t.add_argument("dest", nargs="?", default=".",
+                   help="Output file or an existing directory (default: .)")
+    t.add_argument("--include", default="",
+                   help="Comma-separated categories to include (default: all)")
+    t.add_argument("--exclude", default="",
+                   help="Comma-separated categories to skip")
+    t.add_argument("--peer", default=None,
+                   help="Address the bundle to a paired machine id")
+    t.add_argument("--since-last", action="store_true",
+                   help="Delta bundle: only changes since the last sync")
+    t.add_argument("--dry-run", action="store_true",
+                   help="Preview what would be exported")
+    t = _sub(ys, "import", "Import a sync bundle into this machine.", [
+        "python -m candid sync import ~/usb/candid-sync-....zip",
+        "python -m candid sync import bundle.zip --dry-run",
+        "python -m candid sync import bundle.zip --mode merge",
+    ])
+    t.add_argument("file", help="Bundle file to import")
+    t.add_argument("--dry-run", action="store_true",
+                   help="Preview changes without writing anything")
+    t.add_argument("--mode", default="replace", choices=["replace", "merge"],
+                   help="replace: overwrite local files (default); "
+                        "merge: three-way merge with conflict tracking")
+    t = _sub(ys, "verify", "Verify a bundle's checksums and manifest.", [
+        "python -m candid sync verify bundle.zip",
+    ])
+    t.add_argument("file", help="Bundle file to verify")
+    t = _sub(ys, "conflicts", "List and resolve pending sync conflicts.", [
+        "python -m candid sync conflicts list",
+        "python -m candid sync conflicts resolve --ref 0 --choice remote",
+    ])
+    cs = _nested(t, dest="sub")
+    u = _sub(cs, "list", "List pending sync conflicts.", [
+        "python -m candid sync conflicts list",
+    ])
+    u.add_argument("--json", action="store_true")
+    u = _sub(cs, "resolve", "Resolve one pending conflict.", [
+        "python -m candid sync conflicts resolve --ref 0 --choice remote",
+    ])
+    u.add_argument("--ref", required=True,
+                   help="Conflict index, id, or tracker record id")
+    u.add_argument("--choice", required=True,
+                   choices=["local", "remote", "newer", "older"])
+    t = _sub(ys, "status", "Show sync status for this machine.", [
+        "python -m candid sync status",
+    ])
+    t.add_argument("--json", action="store_true")
+    t = _sub(ys, "log", "Show recent sync history.", [
+        "python -m candid sync log",
+        "python -m candid sync log --limit 5",
+    ])
+    t.add_argument("--limit", type=int, default=20)
+    t.add_argument("--json", action="store_true")
+    t = _sub(ys, "pair", "Pair with another machine for sync.", [
+        "python -m candid sync pair init --name laptop --out /tmp/pair.json",
+        "python -m candid sync pair accept /tmp/pair.json",
+    ])
+    ps = _nested(t, dest="sub")
+    u = _sub(ps, "init", "Create a one-time pairing file for another machine.", [
+        "python -m candid sync pair init --name laptop --out /tmp/pair.json",
+    ])
+    u.add_argument("--name", required=True, help="Name for this machine")
+    u.add_argument("--out", required=True, help="Where to write the pairing file")
+    u = _sub(ps, "accept", "Accept a pairing file from another machine.", [
+        "python -m candid sync pair accept /tmp/pair.json",
+    ])
+    u.add_argument("file", help="Pairing file to accept")
+    u = _sub(ps, "list", "List paired machines.", [
+        "python -m candid sync pair list",
+    ])
+    u.add_argument("--json", action="store_true")
+    u = _sub(ps, "remove", "Remove a machine pairing.", [
+        "python -m candid sync pair remove m-abc123",
+    ])
+    u.add_argument("peer_id", help="Paired machine id to remove")
+    t = _sub(ys, "rules", "Per-category auto-resolve rules for merges.", [
+        "python -m candid sync rules show",
+        "python -m candid sync rules set tracker newer-wins",
+    ])
+    rs = _nested(t, dest="sub")
+    u = _sub(rs, "show", "Show merge rules per category.", [
+        "python -m candid sync rules show",
+    ])
+    u.add_argument("--json", action="store_true")
+    u = _sub(rs, "set", "Set a merge rule for a category.", [
+        "python -m candid sync rules set tracker newer-wins",
+    ])
+    u.add_argument("category", help="Sync category (e.g. tracker, offers)")
+    u.add_argument("strategy", choices=["auto", "local-wins", "remote-wins",
+                                        "newer-wins", "manual"])
+    u = _sub(rs, "clear", "Clear a category rule (back to auto).", [
+        "python -m candid sync rules clear tracker",
+    ])
+    u.add_argument("category", help="Sync category")
+    s.set_defaults(func=cmd_sync)
 
     return p
 

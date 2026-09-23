@@ -25,6 +25,14 @@ from candid.sync import base, history  # noqa: E402
 from candid.sync.errors import SyncError  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _restore_config():
+    """Save/restore config dirs around each test (other fixtures rebind)."""
+    old_data, old_cfg = candid.config.DATA_DIR, candid.config.CONFIG_DIR
+    yield
+    candid.config.DATA_DIR, candid.config.CONFIG_DIR = old_data, old_cfg
+
+
 @pytest.fixture()
 def data_dir(tmp_path):
     """Fresh per-test data dir."""
