@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `switch` | **Career-switcher track** (10 subcommands): transferable-skills mapping with alias-aware scoring (`skills`), 0-100 readiness score with gaps and quick wins (`readiness`), grounded bullet reframing through the target role's lens (`reframe`), competency-led pivot résumé (`pivot-resume`), week-by-week gap-closing study plan from free resources (`plan`), switcher-friendly company signals from job text (`signals`), classic switcher Q&A prep with answer drafting (`interview`), STAR story re-framing toward the new domain (`stories`), an honest "why the switch" cover-letter paragraph (`letter`), and a 30-60-90 ramp plan (`ramp`). Never invents experience — missing facts become explicit `[PLACEHOLDER]`s. |
 
 ## Job-source coverage (honest)
 
@@ -157,7 +158,7 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+249+ tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
@@ -166,11 +167,14 @@ infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
 STAR prompts), offers (sign-on amortization, markdown export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
-LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
-errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
-`/api/import` multipart upload, import guides, and an HTML↔API
-cross-check). The mock judge is also verified by running every problem's
-reference solution through it (`python scripts/seed_problems.py --verify`).
+LinkedIn export import, career-switcher track (skill mapping, readiness
+scoring, grounded reframing, pivot résumé, study plans, company signals,
+interview Q&A, story re-framing, switch letter, 30-60-90 ramp),
+CLI UX (typo suggestions, `--json`, friendly errors), and the dashboard HTTP
+endpoints (curate, dismiss, tailor-diff, `/api/import` multipart upload,
+import guides, and an HTML↔API cross-check). The mock judge is also
+verified by running every problem's reference solution through it
+(`python scripts/seed_problems.py --verify`).
 
 ## Legacy automation
 

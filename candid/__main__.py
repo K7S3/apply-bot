@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "switch",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "switch": ["skills", "readiness", "reframe", "pivot-resume", "plan",
+               "signals", "interview", "stories", "letter", "ramp"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,10 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "SwitchSkillsError", "ReadinessError", "SwitchNarrativeError",
+    "PivotResumeError", "SwitchPlanError", "SwitchSignalsError",
+    "SwitcherQuestionError", "StoryError", "SwitchLetterError",
+    "SwitchRampError",
     "ValueError",
 }
 
@@ -484,6 +490,141 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _switch_json_file(path):
+    import json as _json
+    try:
+        with open(path, encoding="utf-8") as f:
+            return _json.load(f)
+    except (OSError, ValueError) as e:
+        sys.exit(f"Could not read JSON file {path}: {e}")
+
+
+def _switch_profile_skills(skills_file):
+    """Skills from a JSON file, or fallback to the stored profile."""
+    if skills_file:
+        return _switch_json_file(skills_file)
+    prof = _profile()
+    return [{"skill": s, "context": ""} for s in prof.get("skills", [])]
+
+
+def cmd_switch(a):
+    """Career-switcher track dispatcher."""
+    what = a.what
+    if what == "skills":
+        from candid import switch_skills as S
+        skills = _switch_profile_skills(a.skills_file)
+        reqs = _switch_json_file(a.requirements_file)
+        mappings = S.map_transferable(skills, reqs)
+        if a.json:
+            import json as _json
+            print(_json.dumps(mappings, indent=2))
+        else:
+            for m in mappings:
+                print(f"[{m['strength']}] {m['skill']} -> {m['matched_as']}")
+                if m.get("evidence"):
+                    print(f"    evidence: {m['evidence']}")
+    elif what == "readiness":
+        from candid import switch_readiness as R
+        skills = _switch_profile_skills(a.skills_file)
+        reqs = _switch_json_file(a.requirements_file)
+        rep = R.readiness_score(skills, reqs,
+                               years_experience=a.years_adjacent,
+                               target_role=a.target_role or "")
+        if a.json:
+            import json as _json
+            print(_json.dumps(rep, indent=2))
+        else:
+            print(f"Readiness: {rep['score']}/100 ({rep['grade']})")
+            for k, v in rep.get("breakdown", {}).items():
+                print(f"  {k}: {v}")
+            if rep.get("top_gaps"):
+                print("Top gaps:")
+                for g in rep["top_gaps"]:
+                    print(f"  - {g}")
+            if rep.get("quick_wins"):
+                print("Quick wins:")
+                for w in rep["quick_wins"]:
+                    print(f"  - {w}")
+    elif what == "reframe":
+        from candid import switch_narrative as N
+        bullets = _switch_json_file(a.bullets_file)
+        reframed = N.reframe_bullets(bullets, a.target_role)
+        for r in reframed:
+            print(f"- {r}")
+    elif what == "pivot-resume":
+        from candid import switch_pivot as P
+        md = P.build_pivot_resume(_profile(), a.target_role)
+        if a.out:
+            with open(a.out, "w", encoding="utf-8") as f:
+                f.write(md)
+            print(f"Pivot resume written to {a.out}")
+        else:
+            print(md)
+    elif what == "plan":
+        from candid import switch_plan as SP
+        gaps = _switch_json_file(a.gaps_file)
+        plan = SP.build_plan(gaps, a.target_role, weeks=a.weeks)
+        print(SP.plan_markdown(plan))
+    elif what == "signals":
+        from candid import switch_signals as SS
+        data = _switch_json_file(a.jobs_file)
+        data = {c: ([t] if isinstance(t, str) else t) for c, t in data.items()}
+        ranked = SS.rank_companies(data)
+        if a.json:
+            import json as _json
+            print(_json.dumps(ranked, indent=2))
+        else:
+            for r in ranked:
+                flag = "FRIENDLY" if r.get("friendly") else "         "
+                print(f"[{flag}] {r['company']} (score {r['score']}): "
+                      f"{', '.join(r.get('signals_found', [])) or 'no signals'}")
+    elif what == "interview":
+        from candid import switch_interview as SI
+        if a.list or not a.answer:
+            qs = SI.switcher_questions(a.target_role or "the target role")
+            for q in qs:
+                print(f"- {q['question']}")
+                print(f"  framework: {q['framework']}")
+        else:
+            facts = _switch_json_file(a.facts_file) if a.facts_file else {}
+            ans = SI.build_answer(a.answer, facts)
+            print(ans["draft"])
+            if ans.get("missing_facts"):
+                print("\nMissing facts to strengthen this answer:")
+                for m in ans["missing_facts"]:
+                    print(f"  [PLACEHOLDER: {m}]")
+    elif what == "stories":
+        from candid import switch_stories as ST
+        story = _switch_json_file(a.story_file)
+        res = ST.reframe_story(story, a.target_role)
+        if a.json:
+            import json as _json
+            print(_json.dumps(res, indent=2))
+        else:
+            print(res["reframed"])
+            print("\nCompetencies highlighted: "
+                  + ", ".join(res.get("competencies_highlighted", [])))
+            if res.get("suggested_followups"):
+                print("Suggested follow-ups:")
+                for f in res["suggested_followups"]:
+                    print(f"  - {f}")
+    elif what == "letter":
+        from candid import switch_letter as SL
+        prof = _profile()
+        summary = {"summary": prof.get("summary", ""),
+                   "skills": prof.get("skills", [])}
+        if a.motivation:
+            summary["motivation"] = a.motivation
+        print(SL.switch_paragraph(summary, a.target_role, a.company))
+    elif what == "ramp":
+        from candid import switch_ramp as SR
+        gaps = [g.strip() for g in a.gaps.split(",") if g.strip()] if a.gaps else []
+        plan = SR.build_ramp_plan(a.target_role, a.company, gaps)
+        print(SR.ramp_markdown(plan))
+    else:  # pragma: no cover - argparse enforces choices
+        sys.exit(f"Unknown switch subcommand: {what}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1059,87 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # switch (career-switcher track)
+    s = _sub(sub, "switch", "Career-switcher track: transferable skills, reframing, ramp plans.", [
+        "python -m candid switch skills --skills-file skills.json --requirements-file reqs.json",
+        "python -m candid switch readiness --requirements-file reqs.json --years-adjacent 3",
+        "python -m candid switch reframe --bullets-file bullets.json --target-role 'Product Manager'",
+        "python -m candid switch pivot-resume --target-role 'Product Manager'",
+        "python -m candid switch plan --gaps-file gaps.json --weeks 8",
+        "python -m candid switch signals --jobs-file jobs.json",
+        "python -m candid switch interview --list",
+        "python -m candid switch stories --story-file story.json --target-role 'Product Manager'",
+        "python -m candid switch letter --company Acme --target-role 'Product Manager'",
+        "python -m candid switch ramp --target-role 'Product Manager' --company Acme",
+    ])
+    ws = _nested(s)
+    t = _sub(ws, "skills", "Map profile skills to target-role requirements.", [
+        "python -m candid switch skills --skills-file skills.json --requirements-file reqs.json",
+    ])
+    t.add_argument("--skills-file", help="JSON list of {skill, context} from your profile")
+    t.add_argument("--requirements-file", required=True, help="JSON list of requirement strings")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ws, "readiness", "Score your readiness for a target role (0-100).", [
+        "python -m candid switch readiness --requirements-file reqs.json --years-adjacent 3",
+    ])
+    t.add_argument("--requirements-file", required=True, help="JSON list of requirement strings")
+    t.add_argument("--skills-file", help="JSON list of {skill, context} from your profile")
+    t.add_argument("--years-adjacent", type=float, default=0.0,
+                   help="Years of adjacent/transferable experience")
+    t.add_argument("--target-role", default="", help="Target role, e.g. 'Product Manager'")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ws, "reframe", "Reframe resume bullets through the target role's lens.", [
+        "python -m candid switch reframe --bullets-file bullets.json --target-role 'Product Manager'",
+    ])
+    t.add_argument("--bullets-file", required=True, help="JSON list of bullet strings")
+    t.add_argument("--target-role", required=True, help="Target role, e.g. 'Product Manager'")
+    t = _sub(ws, "pivot-resume", "Build a competency-led pivot resume for the target role.", [
+        "python -m candid switch pivot-resume --target-role 'Product Manager'",
+    ])
+    t.add_argument("--target-role", required=True, help="Target role, e.g. 'Product Manager'")
+    t.add_argument("--out", help="Write the markdown resume to this file")
+    t = _sub(ws, "plan", "Build a week-by-week gap-closing study plan.", [
+        "python -m candid switch plan --gaps-file gaps.json --weeks 8",
+    ])
+    t.add_argument("--gaps-file", required=True,
+                   help="JSON list of {skill, severity} gaps (critical|high|medium|low)")
+    t.add_argument("--target-role", required=True, help="Target role, e.g. 'Product Manager'")
+    t.add_argument("--weeks", type=int, default=8, help="Plan length in weeks")
+    t = _sub(ws, "signals", "Score companies for switcher-friendliness from job text.", [
+        "python -m candid switch signals --jobs-file jobs.json",
+    ])
+    t.add_argument("--jobs-file", required=True,
+                   help="JSON object mapping company name to job text or list of texts")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ws, "interview", "Switcher interview Q&A prep.", [
+        "python -m candid switch interview --list",
+        "python -m candid switch interview --answer why_switching --facts-file facts.json",
+    ])
+    t.add_argument("--list", action="store_true", help="List the classic switcher questions")
+    t.add_argument("--answer", help="Question id to draft an answer for")
+    t.add_argument("--facts-file", help="JSON object of facts to ground the answer")
+    t.add_argument("--target-role", default="", help="Target role")
+    t = _sub(ws, "stories", "Re-angle a STAR story toward the target role.", [
+        "python -m candid switch stories --story-file story.json --target-role 'Product Manager'",
+    ])
+    t.add_argument("--story-file", required=True,
+                   help="JSON object with situation/task/action/result")
+    t.add_argument("--target-role", required=True, help="Target role, e.g. 'Product Manager'")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ws, "letter", "Generate a 'why the switch' cover-letter paragraph (draft only).", [
+        "python -m candid switch letter --company Acme --target-role 'Product Manager'",
+    ])
+    t.add_argument("--company", required=True, help="Target company")
+    t.add_argument("--target-role", required=True, help="Target role")
+    t.add_argument("--motivation", default="", help="Your motivation, in your own words")
+    t = _sub(ws, "ramp", "Build a 30-60-90 ramp plan for the new role.", [
+        "python -m candid switch ramp --target-role 'Product Manager' --company Acme",
+    ])
+    t.add_argument("--target-role", required=True, help="Target role")
+    t.add_argument("--company", required=True, help="Target company")
+    t.add_argument("--gaps", default="", help="Comma-separated known skill gaps")
+    s.set_defaults(func=cmd_switch)
 
     return p
 
