@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "pm",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "pm": ["questions", "concepts", "drill", "mock", "story", "score",
+           "prep", "teardown"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "PMError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "PMError": "python -m candid pm --help",
 }
 
 
@@ -798,6 +801,25 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
+
+    # pm (product manager interview track)
+    s = _sub(sub, "pm", "Product manager interview track: questions, concepts, drills, mock interviews, stories, prep.", [
+        "python -m candid pm questions --category product_sense",
+        "python -m candid pm drill estimate --qid 0 --answer 50000",
+        "python -m candid pm mock --script",
+        "python -m candid pm prep --company Google --role \"Product Manager\"",
+    ])
+    pms = _nested(s)
+    from candid import (pm_questions, pm_concepts, pm_drills, pm_mock,
+                        pm_stories, pm_scores, pm_prep, pm_teardown)
+    pm_questions.register_pm(pms)
+    pm_concepts.register_pm(pms)
+    pm_drills.register_pm(pms)
+    pm_mock.register_pm(pms)
+    pm_stories.register_pm(pms)
+    pm_scores.register_pm(pms)
+    pm_prep.register_pm(pms)
+    pm_teardown.register_pm(pms)
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
