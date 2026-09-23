@@ -32,7 +32,9 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "deadlines", "import", "gmail", "linkedin", "bulk",
+    "refreq", "schedule", "thanks", "note", "attach", "packet",
+    "references", "reapproach",
 ]
 
 SUBCOMMANDS = {
@@ -40,7 +42,14 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
-    "offer": ["add", "list", "compare", "export"],
+    "offer": ["add", "list", "compare", "export", "deadline"],
+    "refreq": ["add", "list", "update", "remind"],
+    "schedule": ["parse", "reply"],
+    "thanks": ["plan", "list", "mark-sent"],
+    "note": ["add", "list"],
+    "attach": ["add", "list"],
+    "references": ["add", "list"],
+    "reapproach": ["add", "list", "due", "mark", "remove"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -56,6 +65,8 @@ _EXPECTED_ERRORS = {
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
+    "BulkError", "RefRequestError", "SchedulingError", "ThankYouError",
+    "OfferDeadlineError", "ReapproachError", "AppNotesError", "PacketError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +83,14 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "BulkError": "python -m candid bulk --help",
+    "RefRequestError": "python -m candid refreq --help",
+    "SchedulingError": "python -m candid schedule --help",
+    "ThankYouError": "python -m candid thanks --help",
+    "OfferDeadlineError": "python -m candid offer deadline --help",
+    "ReapproachError": "python -m candid reapproach --help",
+    "AppNotesError": "python -m candid track list",
+    "PacketError": "python -m candid tailor --help",
 }
 
 
@@ -204,6 +223,21 @@ def cmd_match(a):
         print(M.render_report(result, company=company, title=role))
 
 
+def cmd_bulk(a):
+    from candid import bulk as B
+    prof = _profile()  # raises OnboardError with next step if missing
+    out = B.score_all(prof, jd_dir=a.jd_dir or None,
+                      jd_files=a.jd_files or None,
+                      manifest=a.manifest or None,
+                      min_score=a.min_score)
+    if a.json:
+        print(json.dumps(out, indent=2, default=str))
+    else:
+        print(B.render_table(out["results"], top=a.top))
+        for w in out["warnings"]:
+            print(f"warning: {w}", file=sys.stderr)
+
+
 def cmd_tailor(a):
     from candid import tailor as T
     jd = _jd_text(a)
@@ -247,8 +281,10 @@ def cmd_track(a):
                  if len(apps) > limit else ""))
         print(T.render_list(shown))
     elif a.what == "update":
-        rec = T.update(a.id, status=a.status, notes=a.notes)
+        rec = T.update(a.id, status=a.status, notes=a.notes, deadline=a.deadline)
         print(f"Updated #{rec['id']}: status={rec['status']}")
+        if rec.get("deadline"):
+            print(f"  deadline: {rec['deadline']}")
         if rec["status"] == "selected_for_interview":
             print("\n🎯 Interview! Generate a prep pack with:")
             print(f"   python -m candid prep --company \"{rec['company']}\" "
@@ -308,6 +344,63 @@ def cmd_offer(a):
         path = O.export_comparison(O.list_offers(),
                                    path=a.out or None)
         print(f"Offer comparison exported to {path}")
+    elif a.what == "deadline":
+        cmd_offer_deadline(a)
+
+
+def _parse_weight_list(text):
+    """Parse 'comp=5,growth=4,team=3' into {criterion: float}."""
+    out = {}
+    for part in (text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        k, v = part.split("=", 1)
+        out[k.strip()] = float(v)
+    return out
+
+
+def cmd_offer_deadline(a):
+    from candid import offer_deadlines as OD
+    if a.deadline_what == "set":
+        if a.clear:
+            removed = OD.remove_deadline(a.id)
+            print(f"Deadline removed for offer #{a.id}." if removed
+                  else f"No deadline was set for offer #{a.id}.")
+        else:
+            rec = OD.set_deadline(a.id, a.date)
+            print(f"Deadline set: offer #{a.id} ({rec['company']}) — "
+                  f"decide by {rec['decision_deadline']}")
+    elif a.deadline_what == "list":
+        print(OD.render_countdown())
+    elif a.deadline_what == "remove":
+        removed = OD.remove_deadline(a.id)
+        print(f"Deadline removed for offer #{a.id}." if removed
+              else f"No deadline was set for offer #{a.id}.")
+    elif a.deadline_what == "decide":
+        import json as _json
+        weights = _parse_weight_list(a.weights)
+        scores = _json.loads(a.scores) if a.scores else {}
+        scores = {int(k): v for k, v in scores.items()}
+        print(OD.render_decision(weights, scores=scores))
+
+
+def cmd_reapproach(a):
+    from candid import reapproach as R
+    if a.what == "add":
+        rec = R.add(a.company, a.last_contact, reason=a.reason)
+        print(f"Watching #{rec['id']} {rec['company']} — retry "
+              f"{rec['retry_6mo']} (6mo) / {rec['retry_12mo']} (12mo)")
+    elif a.what == "list":
+        print(R.render_list())
+    elif a.what == "due":
+        print(R.render_due())
+    elif a.what == "mark":
+        rec = R.mark(a.company_or_id, a.status)
+        print(f"#{rec['id']} {rec['company']} marked {rec['status']}.")
+    elif a.what == "remove":
+        print("Removed." if R.remove(a.company_or_id)
+              else f"No watchlist entry for '{a.company_or_id}'.")
 
 
 def cmd_negotiate(a):
@@ -432,6 +525,160 @@ def cmd_dashboard(a):
     D.serve(port=a.port, open_browser=not a.no_browser)
 
 
+# ---------------------------------------------------------------------------
+# batch-4 dispatchers: deadlines, refreq, schedule, thanks,
+#                     note, attach, packet, references
+# ---------------------------------------------------------------------------
+
+def cmd_deadlines(a):
+    """List upcoming application deadlines, most urgent first."""
+    from candid import dashboard as D
+    rows = D.deadline_alerts()
+    days = getattr(a, "days", None)
+    if days is not None:
+        rows = [r for r in rows if r["days_remaining"] <= days]
+    if not rows:
+        print("No application deadlines on the books.")
+        print("Set one with: python -m candid track update ID --deadline YYYY-MM-DD")
+        return
+    print(f"{len(rows)} deadline(s):")
+    for r in rows:
+        dr = r["days_remaining"]
+        when = f"{-dr}d OVERDUE" if dr < 0 else "due TODAY" if dr == 0 else f"{dr}d left"
+        print(f"  [{r['bucket']}] {r['company']} — {r['role']} "
+              f"({r['deadline']}, {when}) [{r['status']}]")
+
+
+def cmd_refreq(a):
+    from candid import refrequests as R
+    prof = _profile()
+    name = prof.get("name") or "Your Name"
+    if a.what == "add":
+        rec = R.add(a.contact, a.company, a.role,
+                    connection=a.connection or "", status=a.status,
+                    notes=a.notes or "")
+        if rec.get("duplicate"):
+            print(f"Already tracked as request #{rec['id']} - not duplicated.")
+        else:
+            print(f"Added referral request #{rec['id']}: {rec['contact']} - "
+                  f"{rec['role']} @ {rec['company']} [{rec['status']}]")
+        print()
+        print("Draft the ask (copy, edit, send yourself):")
+        print(R.draft(rec["id"], name=name))
+        print(f"\nAfter sending: python -m candid refreq update {rec['id']} --status sent")
+    elif a.what == "list":
+        print(R.render_list(R.list_requests(status=a.status or None)))
+    elif a.what == "update":
+        rec = R.update(a.id, status=a.status or None, note=a.note or "")
+        print(f"Updated request #{rec['id']} -> {rec['status']}.")
+    elif a.what == "remind":
+        rems = R.remind(days=a.days, name=name)
+        print(R.render_reminders(rems))
+
+
+def cmd_schedule(a):
+    from candid import scheduling as S
+    if a.what == "parse":
+        text = S.read_source(a.source, file=a.file,
+                             stdin_text=None if sys.stdin.isatty() else sys.stdin.read())
+        print(S.render_parse(S.parse_invite(text)))
+    elif a.what == "reply":
+        prof = _profile()
+        name = prof.get("name") or "Your Name"
+        raw = a.source or a.file
+        parsed = None
+        if raw or not sys.stdin.isatty():
+            text = S.read_source(a.source, file=a.file,
+                                 stdin_text=None if sys.stdin.isatty() else sys.stdin.read())
+            parsed = S.parse_invite(text)
+            unconfirmed = parsed["needs_confirm"]
+            if unconfirmed:
+                print("The invite has ambiguities - confirm these before "
+                      "sending your reply:")
+                for f in unconfirmed:
+                    print(f"  - {f}")
+                print()
+        print(S.reply_draft(name, interviewer=a.person or "", role=a.role or "",
+                            company=a.company or "", slots=a.slots, parsed=parsed))
+
+
+def cmd_thanks(a):
+    from candid import thankyou as TK
+    prof = _profile()
+    name = prof.get("name") or "Your Name"
+    if a.what == "plan":
+        people = []
+        for spec in (a.person or []):
+            parts = [p.strip() for p in spec.split(":", 1)]
+            iv = {"name": parts[0], "round": parts[1] if len(parts) > 1 else ""}
+            if not people:  # --topics/--standout feed the first step's draft
+                iv["topics"] = a.topics or ""
+                iv["standout"] = a.standout or ""
+            people.append(iv)
+        seq = TK.plan(a.app_id, role=a.role, company=a.company, interviewers=people)
+        print(TK.render_sequence(seq))
+        print()
+        for st in seq["steps"]:
+            print(f"--- step {st['step']}: {st['interviewer']} ---")
+            print(TK.draft(a.app_id, st["step"], name=name))
+            print()
+    elif a.what == "list":
+        seqs = TK.list_sequences(status=a.status or None)
+        if a.app_id is not None:
+            seqs = [s for s in seqs if s["app_id"] == a.app_id]
+        if not seqs:
+            print("No thank-you sequences yet. "
+                  "Plan one with `python -m candid thanks plan`.")
+        else:
+            print("\n\n".join(TK.render_sequence(s) for s in seqs))
+            print()
+            print(TK.render_pending(TK.pending_steps()))
+    elif a.what == "mark-sent":
+        seq = TK.mark_sent(a.app_id, a.step)
+        print(TK.render_sequence(seq))
+
+
+def cmd_note(a):
+    from candid import appnotes as A
+    if a.what == "add":
+        entry = A.add_note(a.app_id, a.text)
+        print(f"Note added to application #{a.app_id} [{entry['timestamp']}].")
+    elif a.what == "list":
+        print(A.render_notes(a.app_id, A.list_notes(a.app_id)))
+
+
+def cmd_attach(a):
+    from candid import appnotes as A
+    if a.what == "add":
+        rec = A.attach(a.app_id, a.src)
+        mb = rec["size_bytes"] / 1024 / 1024
+        print(f"Attached {rec['filename']} ({mb:.1f} MiB) "
+              f"to application #{a.app_id}.")
+    elif a.what == "list":
+        print(A.render_attachments(a.app_id, A.list_attachments(a.app_id)))
+
+
+def cmd_packet(a):
+    from candid import packet as P
+    from candid import match as M
+    jd = M.fetch_jd(a.jd) if a.jd else ""
+    out = a.out or f"packet-{a.app_id}.pdf"
+    dest = P.save_packet(a.app_id, out, jd=jd,
+                         company=a.company or "", role=a.role or "",
+                         tone=a.tone, length=a.length, hook=a.hook or "",
+                         include_references=a.include_references)
+    print(f"Packet saved to {dest}")
+
+
+def cmd_references(a):
+    from candid import packet as P
+    if a.what == "add":
+        rec = P.add_reference(a.name, a.relationship, contact=a.contact or "")
+        print(f"Added reference: {rec['name']} ({rec['relationship']}).")
+    elif a.what == "list":
+        print(P.render_references(P.list_references()))
+
+
 def cmd_import(a):
     """General entry point: import user-supplied exports.
 
@@ -539,6 +786,28 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Print the raw match result as JSON (for scripting)")
     s.set_defaults(func=cmd_match)
 
+    # bulk
+    s = _sub(sub, "bulk", "Score many JDs at once and rank them by fit.", [
+        "python -m candid bulk --jd-dir ./jds/",
+        "python -m candid bulk --jd-files a.txt b.txt --top 10",
+        "python -m candid bulk --jd-dir ./jds/ --manifest meta.csv --min-score 60 --json",
+        "python -m candid bulk --jd-dir ./jds/ --json > ranked.json   # scripting",
+    ])
+    s.add_argument("--jd-dir", default="",
+                   help="Directory of JD text files (.txt/.md, non-recursive)")
+    s.add_argument("--jd-files", nargs="+", default=[],
+                   help="Explicit JD file paths (combined with --jd-dir)")
+    s.add_argument("--manifest", default="",
+                   help="CSV with file,company,role columns to override "
+                        "filename metadata (e.g. AcmeCorp__Data-Scientist.txt)")
+    s.add_argument("--top", type=int, default=None,
+                   help="Show only the top N results")
+    s.add_argument("--min-score", type=float, default=0.0,
+                   help="Only show results scoring at least this (0-100)")
+    s.add_argument("--json", action="store_true",
+                   help="Print {results, warnings} as JSON (for scripting)")
+    s.set_defaults(func=cmd_bulk)
+
     # tailor
     s = _sub(sub, "tailor", "Tailored resume / cover letter.", [
         "python -m candid tailor resume --jd jd.txt --company Acme --role \"Data Scientist\"",
@@ -587,9 +856,12 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track update 3 --status applied",
         "python -m candid track update 3 --status selected_for_interview",
         "python -m candid track update 3 --notes \"met hiring manager at meetup\"",
+        "python -m candid track update 3 --deadline 2026-10-01",
     ])
     t.add_argument("id", type=int)
     t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--deadline", default=None,
+                   help="Application deadline (YYYY-MM-DD; empty string clears it)")
     t = _sub(ts, "remove", "Remove an application.", [
         "python -m candid track remove 3",
     ])
@@ -689,6 +961,49 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid offer export --out offers.md",
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
+    # offer decision deadlines
+    od = _sub(os_, "deadline", "Manage decision deadlines on offers.", [
+        "python -m candid offer deadline set --id 1 --date 2026-10-15",
+        "python -m candid offer deadline list",
+    ])
+    # distinct dest so it does not clobber the outer "what"
+    ods = od.add_subparsers(dest="deadline_what", required=True,
+                            title="subcommands", metavar="<subcommand>",
+                            parser_class=CandidParser)
+
+    t = _sub(ods, "set", "Set or clear a decision deadline on an offer.", [
+        "python -m candid offer deadline set --id 1 --date 2026-10-15",
+        "python -m candid offer deadline set --id 1 --clear",
+    ])
+    t.add_argument("--id", type=int, required=True,
+                   help="Offer id (see: python -m candid offer list)")
+    t.add_argument("--date", default="",
+                   help="Decision deadline, YYYY-MM-DD")
+    t.add_argument("--clear", action="store_true",
+                   help="Remove the deadline instead of setting it")
+
+    _sub(ods, "list", "Deadline countdown, most urgent first.", [
+        "python -m candid offer deadline list",
+    ])
+
+    t = _sub(ods, "remove", "Remove a decision deadline.", [
+        "python -m candid offer deadline remove --id 1",
+    ])
+    t.add_argument("--id", type=int, required=True,
+                   help="Offer id (see: python -m candid offer list)")
+
+    t = _sub(ods, "decide",
+             "Ranked weighted comparison of offers.", [
+                 "python -m candid offer deadline decide "
+                 "--weights comp=5,growth=4,team=3,location=2,stability=3 "
+                 "--scores '{\"1\": {\"growth\": 8, \"team\": 7}}'",
+             ])
+    t.add_argument("--weights", default="",
+                   help="Comma list k=v, e.g. "
+                        "comp=5,growth=4,team=3,location=2,stability=3")
+    t.add_argument("--scores", default="",
+                   help="JSON {\"offer_id\": {\"growth\": 8, \"team\": 7, ...}}; "
+                        "comp is derived from the offers, not scored")
     s.set_defaults(func=cmd_offer)
 
     # negotiate
@@ -853,6 +1168,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-browser", action="store_true", help="Don't auto-open the browser")
     s.set_defaults(func=cmd_dashboard)
 
+    # deadlines
+    s = _sub(sub, "deadlines", "Upcoming application deadlines, most urgent first.", [
+        "python -m candid deadlines",
+        "python -m candid deadlines --days 7",
+    ])
+    s.add_argument("--days", type=int, default=None,
+                   help="Only show deadlines within N days (e.g. --days 7)")
+    s.set_defaults(func=cmd_deadlines)
+
     # import (general entry point for user-supplied exports)
     s = _sub(sub, "import", "Import your own data exports (mbox, LinkedIn ZIP, ...).", [
         "python -m candid import --gmail-takeout mail.mbox",
@@ -918,6 +1242,227 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # refreq
+    s = _sub(sub, "refreq", "Track referral requests: draft, status, reminders.", [
+        "python -m candid refreq add --contact \"Priya Nair\" --company Acme --role \"ML Engineer\"",
+        "python -m candid refreq list",
+        "python -m candid refreq update 1 --status sent",
+        "python -m candid refreq remind",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "add", "Add a referral request and print the ask draft.", [
+        "python -m candid refreq add --contact \"Priya Nair\" --company Acme --role \"ML Engineer\" --connection \"your ranking stack work\"",
+    ])
+    t.add_argument("--contact", required=True, help="Contact name")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--connection", default="", help="Your connection to them / why you're excited")
+    t.add_argument("--status", default="drafted",
+                   choices=["drafted", "sent", "reminded", "connected", "declined"])
+    t.add_argument("--notes", default="")
+    t = _sub(rs, "list", "List tracked referral requests.", [
+        "python -m candid refreq list",
+        "python -m candid refreq list --status sent",
+    ])
+    t.add_argument("--status", default=None,
+                   choices=["drafted", "sent", "reminded", "connected", "declined"])
+    t = _sub(rs, "update", "Update a request's status and/or append a note.", [
+        "python -m candid refreq update 1 --status sent",
+        "python -m candid refreq update 1 --status connected --note \"referred 2026-09-22\"",
+    ])
+    t.add_argument("id", type=int, help="Request id from `refreq list`")
+    t.add_argument("--status", default=None,
+                   choices=["drafted", "sent", "reminded", "connected", "declined"])
+    t.add_argument("--note", default="")
+    t = _sub(rs, "remind", "Nudge list: sent requests quiet longer than --days.", [
+        "python -m candid refreq remind",
+        "python -m candid refreq remind --days 10",
+    ])
+    t.add_argument("--days", type=int, default=7,
+                   help="Quiet-day threshold (default 7)")
+    s.set_defaults(func=cmd_refreq)
+
+    # schedule
+    s = _sub(sub, "schedule", "Parse an interview invite; draft a scheduling reply.", [
+        "python -m candid schedule parse --file invite.txt",
+        "python -m candid schedule reply --company Acme --role \"ML Engineer\" --slots \"Tue 2-4pm ET\" \"Wed 10am-12pm ET\"",
+    ])
+    ss = _nested(s)
+    t = _sub(ss, "parse", "Parse pasted invite text into dates/times/timezone/interviewers/links.", [
+        "python -m candid schedule parse --file invite.txt",
+        "cat invite.txt | python -m candid schedule parse",
+    ])
+    t.add_argument("source", nargs="?", default=None,
+                   help="Invite text or a file path; omit to read stdin")
+    t.add_argument("--file", default=None, help="Read the invite from this file")
+    t = _sub(ss, "reply", "Draft a reply proposing 2-3 time slots.", [
+        "python -m candid schedule reply --company Acme --role \"ML Engineer\" --slots \"Tue 2-4pm ET\" \"Wed 10am-12pm ET\"",
+        "python -m candid schedule reply --file invite.txt --slots \"Tue 2-4pm ET\" \"Wed 10am-12pm ET\"",
+    ])
+    t.add_argument("source", nargs="?", default=None,
+                   help="Invite text or a file path; omit to read stdin (optional context)")
+    t.add_argument("--file", default=None, help="Read the invite from this file")
+    t.add_argument("--slots", nargs="+", required=True,
+                   help="2-3 proposed slots, e.g. \"Tue 2-4pm ET\"")
+    t.add_argument("--person", default="", help="Interviewer / recruiter name")
+    t.add_argument("--role", default=""); t.add_argument("--company", default="")
+    s.set_defaults(func=cmd_schedule)
+
+    # thanks
+    s = _sub(sub, "thanks", "Per-application thank-you sequences, one step per interviewer.", [
+        "python -m candid thanks plan --app-id 3 --company Acme --role \"ML Engineer\" --person \"Jane Doe: phone screen\"",
+        "python -m candid thanks list",
+        "python -m candid thanks mark-sent --app-id 3 --step 1",
+    ])
+    ts = _nested(s)
+    t = _sub(ts, "plan", "Plan a thank-you sequence for an application and print the drafts.", [
+        "python -m candid thanks plan --app-id 3 --company Acme --role \"ML Engineer\" --person \"Jane Doe: phone screen\" --person \"Sam Reed: onsite\"",
+    ])
+    t.add_argument("--app-id", type=int, required=True, help="Application id from `track list`")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--person", action="append", default=[],
+                   help='Interviewer as "Name" or "Name: round" (repeatable)')
+    t.add_argument("--topics", default="", help="Topics for the first step's draft")
+    t.add_argument("--standout", default="", help="Standout moment for the first step's draft")
+    t = _sub(ts, "list", "List thank-you sequences and pending steps.", [
+        "python -m candid thanks list",
+        "python -m candid thanks list --status pending",
+        "python -m candid thanks list --app-id 3",
+    ])
+    t.add_argument("--app-id", type=int, default=None)
+    t.add_argument("--status", default=None, choices=["pending", "sent"])
+    t = _sub(ts, "mark-sent", "Mark one thank-you step as sent.", [
+        "python -m candid thanks mark-sent --app-id 3 --step 1",
+    ])
+    t.add_argument("--app-id", type=int, required=True)
+    t.add_argument("--step", type=int, required=True, help="Step number from `thanks list`")
+    s.set_defaults(func=cmd_thanks)
+
+    # note
+    s = _sub(sub, "note", "Per-application timestamped notes.", [
+        'python -m candid note add --app-id 3 "met hiring manager at meetup"',
+        "python -m candid note list --app-id 3",
+    ])
+    ns = _nested(s)
+    n = _sub(ns, "add", "Add a timestamped note to a tracked application.", [
+        'python -m candid note add --app-id 3 "referral from Sam"',
+    ])
+    n.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    n.add_argument("text", help="Note text")
+    n = _sub(ns, "list", "List notes for a tracked application.", [
+        "python -m candid note list --app-id 3",
+    ])
+    n.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    s.set_defaults(func=cmd_note)
+
+    # attach
+    s = _sub(sub, "attach", "File attachments per application.", [
+        "python -m candid attach add --app-id 3 resume_tailored.pdf",
+        "python -m candid attach list --app-id 3",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "add", "Attach a file (copied into the git-ignored data dir).", [
+        "python -m candid attach add --app-id 3 offer_letter.pdf",
+    ])
+    t.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    t.add_argument("src", help="File to attach")
+    t = _sub(ns, "list", "List attachments for a tracked application.", [
+        "python -m candid attach list --app-id 3",
+    ])
+    t.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    s.set_defaults(func=cmd_attach)
+
+    # packet
+    s = _sub(sub, "packet",
+             "Export one PDF: tailored resume + cover letter (+ references).", [
+                 "python -m candid packet --app-id 3",
+                 "python -m candid packet --app-id 3 --include-references --out packet-acme.pdf",
+                 "python -m candid packet --app-id 3 --jd jd.txt --tone formal",
+             ])
+    s.add_argument("--app-id", type=int, required=True,
+                   help="Tracked application id")
+    s.add_argument("--jd", default="",
+                   help="JD text/file/URL/- (falls back to the curated JD for the app)")
+    s.add_argument("--company", default=""); s.add_argument("--role", default="")
+    s.add_argument("--tone", default="confident",
+                   choices=["concise", "confident", "formal", "warm"])
+    s.add_argument("--length", default="one-page",
+                   choices=["one-page", "detailed"])
+    s.add_argument("--hook", default="",
+                   help="One-line 'why this company' for the cover letter")
+    s.add_argument("--include-references", action="store_true",
+                   help="Append the references page (requires saved references)")
+    s.add_argument("--out", default="",
+                   help="Write to file (default: packet-<app-id>.pdf in cwd)")
+    s.set_defaults(func=cmd_packet)
+
+    # references
+    s = _sub(sub, "references", "Manage your reference list.", [
+        'python -m candid references add --name "Sam Rivera" '
+        '--relationship "former manager" --contact sam@example.com',
+        "python -m candid references list",
+    ])
+    ns = _nested(s)
+    r = _sub(ns, "add", "Add a reference.", [
+        'python -m candid references add --name "Sam Rivera" '
+        '--relationship "former manager"',
+    ])
+    r.add_argument("--name", required=True)
+    r.add_argument("--relationship", required=True,
+                   help="e.g. former manager, colleague, professor")
+    r.add_argument("--contact", default="", help="Email or phone")
+    r = _sub(ns, "list", "List saved references.", [
+        "python -m candid references list",
+    ])
+    s.set_defaults(func=cmd_references)
+
+    # reapproach
+    s = _sub(sub, "reapproach",
+             "Track companies worth re-approaching after 6-12 months.", [
+                 "python -m candid reapproach add --company Acme "
+                 "--last-contact 2026-09-01 --reason \"hiring freeze\"",
+                 "python -m candid reapproach list",
+                 "python -m candid reapproach due",
+                 "python -m candid reapproach mark Acme "
+                 "--status re-approached",
+             ])
+    rs = _nested(s)
+
+    t = _sub(rs, "add", "Add a company to the re-approach watchlist.", [
+        "python -m candid reapproach add --company Acme "
+        "--last-contact 2026-09-01 --reason \"hiring freeze\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--last-contact", dest="last_contact", required=True,
+                   help="Last contact date, YYYY-MM-DD")
+    t.add_argument("--reason", default="",
+                   help="Why it is worth retrying later")
+
+    _sub(rs, "list", "List the watchlist, soonest retry date first.", [
+        "python -m candid reapproach list",
+    ])
+
+    _sub(rs, "due", "Show companies whose retry date has arrived.", [
+        "python -m candid reapproach due",
+    ])
+
+    t = _sub(rs, "mark", "Change a watchlist entry's status.", [
+        "python -m candid reapproach mark Acme --status re-approached",
+    ])
+    t.add_argument("company_or_id", help="Company name or numeric id")
+    t.add_argument("--status", required=True,
+                   choices=["watching", "due", "re-approached"])
+
+    t = _sub(rs, "remove", "Remove a watchlist entry.", [
+        "python -m candid reapproach remove Acme",
+    ])
+    t.add_argument("company_or_id", help="Company name or numeric id")
+
+    s.set_defaults(func=cmd_reapproach)
 
     return p
 
