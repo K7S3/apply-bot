@@ -164,6 +164,70 @@ def stats(path: str | Path | None = None) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# warm-intro integration (read-only display + explicit link, no auto-writes)
+#
+# Recording warm.set_status(company, "applied") never creates or modifies
+# tracker entries: outreach state and the application tracker are separate
+# stores. The link is made explicitly with
+#   python -m candid warm link <company> --app APP_ID
+# which stores the tracker application id in warm.json for that company.
+# `track list` then shows an "intro" column with the warm outreach status
+# for each application's company (read-only display).
+# ---------------------------------------------------------------------------
+
+def link_warm_app(company: str, app_id: int) -> dict:
+    """Link a company to a tracker application id in warm.json.
+
+    Merges ``app_id`` into the existing warm record for the company (matched
+    the same way warm.set_status matches it), preserving contact / status /
+    asked_on. A record with status "none" is created when the company has
+    no warm state yet. Raises TrackerError when no application has app_id.
+    Nothing in the tracker itself is written.
+    """
+    from candid import warm as W
+    apps = _load()
+    if not any(a.get("id") == app_id for a in apps):
+        raise TrackerError(
+            f"No application with id {app_id}. Use `track list` to see ids.")
+    key = W._norm_company(company)  # shared normalization with warm.set_status
+    if not key:
+        raise TrackerError("A company name is required to link a warm intro.")
+    state = W.load_warm()
+    rec = state.get(key, {})
+    rec = {
+        "contact": rec.get("contact"),
+        "status": rec.get("status") or "none",
+        "asked_on": rec.get("asked_on"),
+        "app_id": app_id,
+    }
+    state[key] = rec
+    W.save_warm(state)
+    return rec
+
+
+def warm_statuses_for(companies: list[str]) -> dict[str, str]:
+    """Map company name -> warm outreach status ("" when none tracked).
+
+    Read-only helper behind the "intro" column of `track list`. Returns {}
+    when the warm module or warm.json is unavailable, so tracker display
+    never breaks because of outreach state.
+    """
+    try:
+        from candid import warm as W
+        state = W.load_warm()
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for c in companies:
+        try:
+            rec = state.get(W._norm_company(c or ""), {})
+            out[c] = rec.get("status") or ""
+        except Exception:
+            out[c] = ""
+    return out
+
+
 # per-status next-action hints shown under each row of render_list
 NEXT_ACTIONS = {
     "saved": "tailor resume + apply",
@@ -178,11 +242,14 @@ NEXT_ACTIONS = {
 def render_list(apps: list[dict]) -> str:
     if not apps:
         return "No applications tracked yet. Add one with: python -m candid track add --company X --role Y"
-    lines = [f"{'ID':<4}{'Company':<22}{'Role':<34}{'Status':<22}Updated"]
+    intros = warm_statuses_for([a.get("company", "") for a in apps])
+    lines = [f"{'ID':<4}{'Company':<22}{'Role':<34}{'Status':<22}{'Intro':<11}Updated"]
     for a in apps:
+        intro = intros.get(a.get("company", ""), "")
+        intro = intro if intro and intro != "none" else ""
         lines.append(
             f"{a['id']:<4}{a['company'][:21]:<22}{a['role'][:33]:<34}"
-            f"{a['status']:<22}{a.get('date_updated', '')}"
+            f"{a['status']:<22}{intro[:10]:<11}{a.get('date_updated', '')}"
         )
         hint = NEXT_ACTIONS.get(a.get("status", ""), "")
         if hint and hint != "—":

@@ -135,6 +135,15 @@
   <pre class="report hidden" id="curateOut"></pre>
   <div class="cards" id="jobsCards" style="margin-top:12px"></div></section>
 
+<!-- 3b. warm intros -->
+<section id="sec-warm"><h2>Warm intros <span style="color:var(--muted);font-weight:400;font-size:13px">(read-only: your LinkedIn network per company + outreach status)</span></h2>
+  <p style="color:var(--muted);font-size:14px;margin-top:0">Top companies by connection strength. Record outreach from the CLI:
+    <code>python -m candid warm status "Acme" asked --contact "Jane Doe"</code> ·
+    link a tracker app: <code>python -m candid warm link "Acme" --app 3</code></p>
+  <div class="tablewrap"><table><thead><tr><th>Company</th><th>Strength</th><th>Top connection</th><th>Status</th><th>Contact</th><th>Asked on</th><th>App</th></tr></thead>
+  <tbody id="warmBody"></tbody></table></div>
+  <div id="warmHint" style="color:var(--muted);font-size:13px;margin-top:8px"></div></section>
+
 <!-- 4. prep -->
 <section id="sec-prep"><h2>Interview prep</h2><div id="prepList"></div></section>
 
@@ -188,7 +197,7 @@
 <script>
 "use strict";
 /* candid dashboard UI — vanilla JS, no dependencies, works offline.
-   Sections: overview, nudges, apps, jobs, prep, import, lab, salary. */
+   Sections: overview, nudges, apps, jobs, warm, prep, import, lab, salary. */
 const $=id=>document.getElementById(id);
 const api={
   get:p=>fetch(p).then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;}),
@@ -355,6 +364,28 @@ $("btnCurate").onclick=async()=>{
 };
 
 /* ---------- 4. prep cards ---------- */
+/* ---------- 3b. warm intros: top companies by connection strength ---------- */
+async function loadWarm(){
+  const rows=await api.get("/api/warm"); const tb=$("warmBody"); tb.innerHTML="";
+  const hint=$("warmHint");
+  if(!rows.length){
+    tb.innerHTML='<tr><td colspan="7" style="color:var(--muted)">No outreach tracked yet. Record one from the CLI: <code>python -m candid warm status "Acme" asked --contact "Jane Doe"</code></td></tr>';
+    hint.textContent=""; return;
+  }
+  for(const r of rows){
+    const tr=document.createElement("tr");
+    const top=r.top_connection?`${esc(r.top_connection)}${r.top_role?` - ${esc(r.top_role)}`:""}`:"<span style='color:var(--muted)'>-</span>";
+    tr.innerHTML=`<td>${esc(r.company)}</td><td>${r.strength}</td><td>${top}</td>
+      <td><span class="pill ${r.status}">${pretty(r.status)}</span></td>
+      <td>${esc(r.contact||"")}</td><td>${esc(r.asked_on||"")}</td>
+      <td>${r.app_id?("#"+r.app_id):"<span style='color:var(--muted)'>-</span>"}</td>`;
+    tb.appendChild(tr);
+  }
+  hint.textContent=rows.some(r=>!r.strength&&!r.n_connections)
+    ? "Strength 0 rows: no LinkedIn connections snapshot found (see docs/warm_intros.md). Outreach status still shows."
+    : "";
+}
+
 async function loadPrep(){
   const rows=await api.get("/api/prep-status"); const w=$("prepList"); w.innerHTML="";
   const need=rows.filter(r=>r.status==="selected_for_interview");
@@ -491,7 +522,7 @@ $("btnSalary").onclick=async()=>{
 
 /* ---------- boot ---------- */
 renderChips();
-loadOverview(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
+loadOverview(); loadApps(); loadJobs(); loadWarm(); loadPrep(); loadImportGuides();
 </script>
 </body>
 </html>

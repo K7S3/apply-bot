@@ -404,6 +404,7 @@ class NewEndpointTest(CLIBase):
 ROUTES = [
     "/api/overview", "/api/apps", "/api/jobs", "/api/prep-status",
     "/api/nudges", "/api/salary", "/api/proposals", "/api/import-guides",
+    "/api/warm",
     "/api/apps/<id>", "/api/prep", "/api/match", "/api/tailor",
     "/api/proposals/<id>/confirm", "/api/proposals/<id>/reject",
     "/api/import", "/api/curate", "/api/jobs/dismiss", "/api/tailor-diff",

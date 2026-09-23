@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "warm",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "warm": ["rank", "queue", "map", "draft", "status", "link"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "WarmError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "WarmError": "python -m candid warm --help",
 }
 
 
@@ -484,6 +487,268 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+# ---------------------------------------------------------------------------
+# warm: warm-intro job ranking
+# ---------------------------------------------------------------------------
+
+_WARM_NEXT_ACTION = {
+    "none": "Ask {name} for an intro",
+    "asked": "Follow up with {name} on the intro request",
+    "introduced": "Apply, then thank {name} for the intro",
+    "applied": "Keep {name} posted on your application",
+}
+
+
+def _warm_connections(a) -> list:
+    """Load connections from --export, or [] when not given."""
+    from candid import warm as W
+    if not getattr(a, "export", ""):
+        return []
+    return W.load_connections(a.export)
+
+
+def _warm_jobs() -> tuple[list, dict]:
+    """Curated saved jobs from the tracker + stashed match scores (by index)."""
+    from candid import tracker as T
+    from candid import jobs as J
+    apps = T.list_apps(status="saved")
+    jobs, scores = [], {}
+    for i, app in enumerate(apps):
+        meta = J.get_job_meta(app["id"])
+        jobs.append({
+            "title": app.get("role", ""),
+            "company": app.get("company", ""),
+            "url": meta.get("source_url") or app.get("jd_link") or "",
+            "source": meta.get("source") or "",
+        })
+        if meta.get("match_score") is not None:
+            scores[i] = meta["match_score"]
+    return jobs, scores
+
+
+def _warm_user_name() -> str:
+    try:
+        return _profile().get("name") or ""
+    except Exception:
+        return ""
+
+
+def _fmt_score(v) -> str:
+    return f"{v:.0f}" if v is not None else "-"
+
+
+def cmd_warm(a):
+    if a.what == "rank":
+        _warm_rank(a)
+    elif a.what == "queue":
+        _warm_queue(a)
+    elif a.what == "map":
+        _warm_map(a)
+    elif a.what == "draft":
+        _warm_draft(a)
+    elif a.what == "status":
+        _warm_status(a)
+    elif a.what == "link":
+        _warm_link(a)
+
+
+def _warm_rank(a):
+    from candid import warm as W
+    jobs, scores = _warm_jobs()
+    if not jobs:
+        sys.exit("No saved jobs to rank. Curate some first:\n"
+                 "  python -m candid jobs curate --role \"...\" --location \"...\"")
+    conns = _warm_connections(a)
+    ranked = W.rank_jobs(jobs, conns, match_scores=scores or None)
+    limit = a.limit if a.limit and a.limit > 0 else len(ranked)
+    ranked = ranked[:limit]
+
+    if a.json:
+        print(json.dumps(ranked, indent=2, default=str))
+        return
+
+    if a.export and not conns:
+        print("(no connections loaded from that export: ranking by match only)")
+
+    header = (f"{'#':<4}{'Company':<24}{'Title':<32}{'Warm':<7}"
+              f"{'Strength':<10}{'Match':<7}Top connection")
+    print(header)
+    print("-" * len(header))
+    for i, r in enumerate(ranked, 1):
+        top = r["connections"][0]["full_name"] if r["connections"] else "-"
+        print(f"{i:<4}{r['company'][:23]:<24}{r['job'].get('title', '')[:31]:<32}"
+              f"{r['warm_score']:<7.1f}{r['strength']:<10.0f}"
+              f"{_fmt_score(r['match']):<7}{top[:30]}")
+
+    if a.csv:
+        import csv as _csv
+        with open(a.csv, "w", newline="", encoding="utf-8") as fh:
+            w = _csv.writer(fh)
+            w.writerow(["rank", "company", "title", "warm_score", "strength",
+                        "match", "top_connection", "n_connections", "url"])
+            for i, r in enumerate(ranked, 1):
+                top = r["connections"][0]["full_name"] if r["connections"] else ""
+                w.writerow([i, r["company"], r["job"].get("title", ""),
+                            f"{r['warm_score']:.1f}", f"{r['strength']:.1f}",
+                            r["match"] if r["match"] is not None else "",
+                            top, len(r["connections"]), r["job"].get("url", "")])
+        print(f"\nWrote {len(ranked)} ranked jobs to {a.csv}")
+    if a.md:
+        lines = ["# Warm-intro job ranking", "",
+                 "| Rank | Company | Title | Warm | Strength | Match | Top connection |",
+                 "| --- | --- | --- | --- | --- | --- | --- |"]
+        for i, r in enumerate(ranked, 1):
+            top = r["connections"][0]["full_name"] if r["connections"] else "-"
+            lines.append(
+                f"| {i} | {r['company']} | {r['job'].get('title', '')} | "
+                f"{r['warm_score']:.1f} | {r['strength']:.0f} | "
+                f"{_fmt_score(r['match'])} | {top} |")
+        Path(a.md).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"\nWrote {len(ranked)} ranked jobs to {a.md}")
+
+
+def _warm_queue(a):
+    from candid import warm as W
+    conns = _warm_connections(a)
+    if not a.export:
+        sys.exit("Pass --export <LinkedIn-export.zip> to build the outreach queue.\n"
+                 "Get the zip from LinkedIn: Settings & Privacy -> Data Privacy -> "
+                 "Get a copy of your data.")
+    by_company: dict[str, list] = {}
+    for c in conns:
+        key = W._norm_company(c.get("company"))
+        if key:
+            by_company.setdefault(key, []).append(c)
+    if not by_company:
+        sys.exit("No connections with a company on file in that export.")
+
+    jobs, _ = _warm_jobs()
+    job_counts: dict[str, int] = {}
+    for j in jobs:
+        key = W._norm_company(j.get("company"))
+        if key:
+            job_counts[key] = job_counts.get(key, 0) + 1
+
+    rows = []
+    for key, group in by_company.items():
+        best = max(group, key=W.warmth_score)
+        company = best.get("company") or key
+        st = W.get_status(company)
+        status = st.get("status") or "none"
+        contact = st.get("contact") or best.get("full_name") or "-"
+        action = _WARM_NEXT_ACTION[status].format(name=best.get("first_name")
+                                                 or best.get("full_name") or "them")
+        co = best.get("connected_on")
+        rows.append({
+            "company": company, "contact": contact,
+            "role": best.get("position") or "-",
+            "connected": co.isoformat() if hasattr(co, "isoformat") else "-",
+            "jobs": job_counts.get(key, 0),
+            "strength": W.connection_strength(group),
+            "status": status, "action": action,
+        })
+    rows.sort(key=lambda r: r["strength"], reverse=True)
+
+    header = (f"{'Company':<24}{'Contact':<22}{'Role':<28}{'Connected':<12}"
+              f"{'Jobs':<6}{'Status':<11}Next action")
+    print(header)
+    print("-" * len(header))
+    for r in rows:
+        print(f"{r['company'][:23]:<24}{r['contact'][:21]:<22}"
+              f"{r['role'][:27]:<28}{r['connected']:<12}"
+              f"{r['jobs']:<6}{r['status']:<11}{r['action']}")
+
+
+def _warm_map(a):
+    from candid import warm as W
+    conns = _warm_connections(a)
+    if not a.export:
+        sys.exit("Pass --export <LinkedIn-export.zip> to map insiders.\n"
+                 "Get the zip from LinkedIn: Settings & Privacy -> Data Privacy -> "
+                 "Get a copy of your data.")
+    m = W.insider_map(a.company, conns)
+    total = sum(len(v) for v in m.values())
+    if not total:
+        raise W.WarmError(
+            f"No connections found at {a.company!r}. Check the company name "
+            "or export a fresh LinkedIn archive.")
+    print(f"Insider map: {a.company} ({total} connection(s))")
+    for bucket in ("hiring", "recruiting", "engineering", "other"):
+        group = m[bucket]
+        print(f"\n{bucket.title()} ({len(group)}):")
+        for c in group:
+            print(f"  - {W.intro_path(c)}")
+    st = W.get_status(a.company)
+    print(f"\nOutreach status: {st.get('status') or 'none'}")
+
+
+def _warm_draft(a):
+    from candid import warm as W
+    conns = _warm_connections(a)
+    if not a.export:
+        sys.exit("Pass --export <LinkedIn-export.zip> to draft an intro request.\n"
+                 "Get the zip from LinkedIn: Settings & Privacy -> Data Privacy -> "
+                 "Get a copy of your data.")
+    key = W._norm_company(a.company)
+    at_co = [c for c in conns if W._norm_company(c.get("company")) == key]
+    if not at_co:
+        raise W.WarmError(
+            f"No connections found at {a.company!r}. Check the company name "
+            "or export a fresh LinkedIn archive.")
+    if a.connection:
+        want = a.connection.strip().lower()
+        conn = next((c for c in at_co
+                     if want in (c.get("full_name") or "").lower()), None)
+        if conn is None:
+            raise W.WarmError(
+                f"No connection named {a.connection!r} at {a.company}. "
+                f"Run `python -m candid warm map \"{a.company}\"` to see who is there.")
+    else:
+        conn = max(at_co, key=W.warmth_score)
+
+    jobs, _ = _warm_jobs()
+    job = {"title": "", "company": a.company, "url": ""}
+    if a.job:
+        want = a.job.strip().lower()
+        hit = next((j for j in jobs
+                    if want in j.get("title", "").lower()
+                    and W._norm_company(j.get("company")) == key), None)
+        if hit is None:
+            hit = next((j for j in jobs
+                        if want in j.get("title", "").lower()), None)
+        if hit is not None:
+            job = hit
+    else:
+        co_jobs = [j for j in jobs if W._norm_company(j.get("company")) == key]
+        if co_jobs:
+            ranked = W.rank_jobs(co_jobs, at_co)
+            job = ranked[0]["job"]
+
+    user_name = _warm_user_name()
+    if not user_name:
+        sys.exit("No name on your profile yet. Run onboarding first:\n"
+                 "  python -m candid onboard --resume your_resume.pdf")
+    print(W.draft_intro(conn, job, user_name))
+
+
+def _warm_link(a):
+    from candid import tracker as T
+    rec = T.link_warm_app(a.company, a.app_id)
+    print(f"Linked {a.company} to application #{a.app_id} "
+          f"(warm status: {rec['status']}).")
+
+
+def _warm_status(a):
+    from candid import warm as W
+    rec = W.set_status(a.company, a.status, contact=a.contact or None)
+    bits = [f"Status for {a.company}: {rec['status']}"]
+    if rec.get("contact"):
+        bits.append(f"contact: {rec['contact']}")
+    if rec.get("asked_on"):
+        bits.append(f"asked on {rec['asked_on']}")
+    print(", ".join(bits) + ".")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1183,71 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # warm
+    s = _sub(sub, "warm", "Rank jobs by warm-intro strength from your network.", [
+        "python -m candid warm rank --export LinkedIn-export.zip",
+        "python -m candid warm queue --export LinkedIn-export.zip",
+        "python -m candid warm map \"Acme\" --export LinkedIn-export.zip",
+        "python -m candid warm draft \"Acme\" --export LinkedIn-export.zip",
+        "python -m candid warm status \"Acme\" asked --contact \"Jane Doe\"",
+        "python -m candid warm link \"Acme\" --app 3",
+    ])
+    ws = _nested(s)
+    t = _sub(ws, "rank", "Rank curated jobs by warm-intro score.", [
+        "python -m candid warm rank --export LinkedIn-export.zip",
+        "python -m candid warm rank --export LinkedIn-export.zip --limit 10 --json",
+        "python -m candid warm rank --csv ranking.csv --md ranking.md",
+    ])
+    t.add_argument("--export", default="",
+                   help="LinkedIn data-export .zip (Connections.csv)")
+    t.add_argument("--limit", type=int, default=15,
+                   help="Max jobs to show (default 15)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the full ranking as JSON")
+    t.add_argument("--csv", default="",
+                   help="Write the full ranking to a CSV file")
+    t.add_argument("--md", default="",
+                   help="Write the full ranking to a Markdown file")
+    t = _sub(ws, "queue", "Prioritized outreach queue, one row per company.", [
+        "python -m candid warm queue --export LinkedIn-export.zip",
+    ])
+    t.add_argument("--export", default="",
+                   help="LinkedIn data-export .zip (Connections.csv)")
+    t = _sub(ws, "map", "Show insiders at a company, grouped by role.", [
+        "python -m candid warm map \"Acme\" --export LinkedIn-export.zip",
+    ])
+    t.add_argument("company", help="Company name to map")
+    t.add_argument("--export", default="",
+                   help="LinkedIn data-export .zip (Connections.csv)")
+    t = _sub(ws, "draft", "Draft an intro-request message for a company.", [
+        "python -m candid warm draft \"Acme\" --export LinkedIn-export.zip",
+        "python -m candid warm draft \"Acme\" --connection \"Jane Doe\" "
+        "--job \"Data Scientist\"",
+    ])
+    t.add_argument("company", help="Company name")
+    t.add_argument("--connection", default="",
+                   help="Connection name (default: warmest at the company)")
+    t.add_argument("--job", default="",
+                   help="Job title to reference (default: best curated job there)")
+    t.add_argument("--export", default="",
+                   help="LinkedIn data-export .zip (Connections.csv)")
+    t = _sub(ws, "status", "Record outreach status for a company.", [
+        "python -m candid warm status \"Acme\" asked --contact \"Jane Doe\"",
+        "python -m candid warm status \"Acme\" applied",
+    ])
+    t.add_argument("company", help="Company name")
+    t.add_argument("status", choices=["none", "asked", "introduced", "applied"],
+                   help="Outreach status")
+    t.add_argument("--contact", default="",
+                   help="Contact name for the outreach")
+    t = _sub(ws, "link", "Link a company to a tracker application id (stored in warm.json).", [
+        "python -m candid warm link \"Acme\" --app 3",
+    ])
+    t.add_argument("company", help="Company name")
+    t.add_argument("--app", type=int, required=True, dest="app_id",
+                   help="Tracker application id (see `python -m candid track list`)")
+    s.set_defaults(func=cmd_warm)
 
     return p
 

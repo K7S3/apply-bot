@@ -172,6 +172,101 @@ def curated_jobs() -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# warm intros (read-only section)
+# ---------------------------------------------------------------------------
+
+def _connections_snapshot_path() -> Path:
+    """Where the dashboard looks for cached LinkedIn connections.
+
+    A JSON list of connection dicts as produced by
+    ``candid.warm.load_connections`` (dates as ISO strings). Write one with:
+
+        python - <<'EOF'
+        import json
+        from candid import config as C, warm as W
+        snap = [{k: (v.isoformat() if hasattr(v, "isoformat") else v)
+                 for k, v in c.items()}
+                for c in W.load_connections("LinkedIn-export.zip")]
+        (C.DATA_DIR / "connections.json").write_text(json.dumps(snap, indent=2))
+        EOF
+    """
+    from candid import config as C
+    return C.DATA_DIR / "connections.json"
+
+
+def _load_connections_snapshot() -> list[dict]:
+    """Load the connections snapshot; [] when absent or unreadable."""
+    from datetime import date
+    p = _connections_snapshot_path()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for c in data:
+        if not isinstance(c, dict):
+            continue
+        raw = c.get("connected_on")
+        if isinstance(raw, str):
+            try:
+                c = {**c, "connected_on": date.fromisoformat(raw)}
+            except ValueError:
+                c = {**c, "connected_on": None}
+        out.append(c)
+    return out
+
+
+#: Outreach-progress order used to break strength ties in the warm section.
+_WARM_STATUS_ORDER = {"none": 0, "asked": 1, "introduced": 2, "applied": 3}
+
+
+def warm_intros(limit: int = 10) -> list[dict]:
+    """Top companies by warm-intro connection strength, read-only.
+
+    Merges warm.json outreach state (status, contact, asked_on, linked
+    tracker app id) with the optional connections snapshot: each company
+    gets ``strength`` (candid.warm.connection_strength), its ``top``
+    connection (highest candid.warm.warmth_score), and the intro status.
+    Without a snapshot, strengths are 0 and rows order by outreach
+    progress. Never raises for missing data: returns [] instead.
+    """
+    from candid import warm as W
+    try:
+        state = W.load_warm()
+    except Exception:
+        return []
+    by_company: dict[str, list[dict]] = {}
+    for conn in _load_connections_snapshot():
+        key = W._norm_company(conn.get("company"))
+        if key:
+            by_company.setdefault(key, []).append(conn)
+    rows = []
+    for key, rec in state.items():
+        group = by_company.get(key, [])
+        top = max(group, key=W.warmth_score) if group else None
+        rows.append({
+            "company": (top.get("company") if top else None) or key,
+            "strength": W.connection_strength(group),
+            "n_connections": len(group),
+            "top_connection": top.get("full_name") if top else None,
+            "top_role": top.get("position") if top else None,
+            "top_warmth": W.warmth_score(top) if top else None,
+            "status": rec.get("status") or "none",
+            "contact": rec.get("contact"),
+            "asked_on": rec.get("asked_on"),
+            "app_id": rec.get("app_id"),
+        })
+    rows.sort(key=lambda r: (-r["strength"],
+                             -_WARM_STATUS_ORDER.get(r["status"], 0),
+                             r["company"]))
+    return rows[: max(0, limit)]
+
+
 def run_curate(role: str, location: str = "", remote: bool = False,
                level: str | None = None, limit: int = 15,
                sources: list | None = None) -> dict:
@@ -521,6 +616,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 _send_json(self, salary_lookup(
                     qs.get("company", [""])[0], qs.get("title", [""])[0],
                     qs.get("location", [""])[0]))
+            elif path == "/api/warm":
+                _send_json(self, warm_intros())
             elif path == "/api/proposals":
                 _send_json(self, proposal_list(
                     status=qs.get("status", [None])[0]))
