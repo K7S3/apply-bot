@@ -16,6 +16,21 @@ Modules:
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
     jobs      curated job discovery → tracker pipeline
+    dashboard local web UI (127.0.0.1 only)
+    gmail     Gmail Takeout mbox import (proposals, never auto-applied)
+    linkedin  official LinkedIn data-export import
+    nudges    follow-up reminder engine
+    prep_questions  verified interview-question bank with source links
+    release_checklist  pre-release check aggregator (tests, docs, version, secrets)
+    release_report  release readiness report renderer (markdown/json)
+    release_tests  test-suite gate and coverage threshold
+    release_docs  CLI/docs coverage checks
+    release_version  version consistency checks and version bumping
+    release_notes  changelog generation from git history
+    release_secrets  pre-release secret, PII, and forbidden-file scan
+    release_tag  annotated release tag flow (dry run by default)
+    release_verify  read-only local-vs-remote release verification
+    release_migrate  migration-notes detection between refs
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.

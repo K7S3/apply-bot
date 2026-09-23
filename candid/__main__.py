@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -486,6 +487,81 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def _repo_root():
+    from candid import release_checklist as RC
+    return Path(RC.__file__).resolve().parent.parent
+
+
+def _print_check_results(results):
+    for r in results:
+        status = "PASS" if r["ok"] is True else ("FAIL" if r["ok"] is False else "SKIP")
+        print(f"[{status}] {r['name']}: {r['detail']}")
+
+
+def cmd_release(a):
+    root = _repo_root()
+    what = a.what
+    if what == "checklist":
+        from candid import release_checklist as RC
+        res = RC.run_all_checks(root)
+        print(RC.format_console(res))
+    elif what == "report":
+        from candid import release_checklist as RC
+        from candid import release_report as RR
+        res = RC.run_all_checks(root)
+        path = RR.write_report(res, fmt=a.format)
+        RR.prune_reports(path.parent)
+        print(f"Release readiness report written: {path}")
+    elif what == "tests":
+        from candid import release_tests as RT
+        py = RT.run_pytest(root)
+        print(f"pytest: {'PASS' if py['ok'] else 'FAIL'} — "
+              f"{py.get('passed', 0)} passed, {py.get('failed', 0)} failed, "
+              f"{py.get('errors', 0)} errors ({py.get('seconds', 0):.1f}s)")
+        cov = RT.coverage_gate(root, minimum=a.coverage_min)
+        status = "SKIP" if cov["ok"] is None else ("PASS" if cov["ok"] else "FAIL")
+        print(f"coverage >= {a.coverage_min}%: {status} — {cov['detail']}")
+    elif what == "docs":
+        from candid import release_docs as RD
+        _print_check_results(RD.run_checks(root))
+    elif what == "version":
+        from candid import release_version as RV
+        print(f"candid version: {RV.get_version(root)}")
+        _print_check_results(RV.run_checks(root))
+    elif what == "bump":
+        from candid import release_version as RV
+        old, new = RV.bump_version(root, a.part)
+        print(f"Bumped version: {old} -> {new}")
+    elif what == "notes":
+        from candid import release_notes as RN
+        from candid import release_version as RV
+        notes = RN.generate_notes(root, since_ref=a.since)
+        print(notes)
+        if a.write:
+            path = RN.write_changelog_entry(root, RV.get_version(root), notes)
+            print(f"\nChangelog entry written: {path}")
+    elif what == "secrets":
+        from candid import release_secrets as RS
+        _print_check_results(RS.run_checks(root))
+    elif what == "tag":
+        from candid import release_tag as RG
+        from candid import release_checklist as RC
+        from candid import release_version as RV
+        version = RV.get_version(root)
+        res = RG.create_tag(root, version, notes=a.notes, dry_run=not a.go,
+                            require_checks_fn=lambda: RC.run_all_checks(root)["results"])
+        print(res["detail"])
+        if not res.get("ok"):
+            sys.exit(1)
+    elif what == "verify":
+        from candid import release_verify as RVF
+        _print_check_results(RVF.run_checks(root))
+    elif what == "migrate":
+        from candid import release_migrate as RM
+        hits = RM.detect_migrations(root, a.from_ref, a.to_ref)
+        print(RM.render_migration_notes(hits, a.from_ref, a.to_ref))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -918,6 +994,67 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # release: pre-release checklist automation
+    s = _sub(sub, "release", "Release checklist automation (checks, notes, tags).", [
+        "python -m candid release checklist",
+        "python -m candid release notes --write",
+        "python -m candid release tag",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "checklist", "Run all pre-release checks and report.", [
+        "python -m candid release checklist",
+    ])
+    t = _sub(rs, "report", "Write a release readiness report (markdown/json).", [
+        "python -m candid release report",
+        "python -m candid release report --format json",
+    ])
+    t.add_argument("--format", default="markdown", choices=["markdown", "json"])
+    t = _sub(rs, "tests", "Gate: full test suite plus coverage threshold.", [
+        "python -m candid release tests",
+        "python -m candid release tests --coverage-min 90",
+    ])
+    t.add_argument("--coverage-min", type=float, default=80.0)
+    t = _sub(rs, "docs", "Check CLI commands and modules are documented.", [
+        "python -m candid release docs",
+    ])
+    t = _sub(rs, "version", "Show version and run version-consistency checks.", [
+        "python -m candid release version",
+    ])
+    t = _sub(rs, "bump", "Bump the version (major/minor/patch).", [
+        "python -m candid release bump patch",
+    ])
+    t.add_argument("part", choices=["major", "minor", "patch"])
+    t = _sub(rs, "notes", "Generate release notes from git history.", [
+        "python -m candid release notes",
+        "python -m candid release notes --write",
+        "python -m candid release notes --since v0.1.0",
+    ])
+    t.add_argument("--since", default=None, help="Git ref to diff from (default: last tag)")
+    t.add_argument("--write", action="store_true",
+                   help="Write the notes into CHANGELOG.md for the current version")
+    t = _sub(rs, "secrets", "Scan for secrets, PII, and forbidden files.", [
+        "python -m candid release secrets",
+    ])
+    t = _sub(rs, "tag", "Create an annotated release tag (dry run by default).", [
+        "python -m candid release tag",
+        "python -m candid release tag --go",
+    ])
+    t.add_argument("--go", action="store_true",
+                   help="Actually create the tag (default is dry run). Never pushes.")
+    t.add_argument("--notes", default="", help="Notes to include in the tag message")
+    t = _sub(rs, "verify", "Verify local release state vs remote (read-only).", [
+        "python -m candid release verify",
+    ])
+    t = _sub(rs, "migrate", "Detect migration-relevant changes between refs.", [
+        "python -m candid release migrate",
+        "python -m candid release migrate --from v0.1.0 --to HEAD",
+    ])
+    t.add_argument("--from-ref", dest="from_ref", default=None,
+                   help="Older ref (default: last tag)")
+    t.add_argument("--to-ref", dest="to_ref", default="HEAD",
+                   help="Newer ref (default: HEAD)")
+    s.set_defaults(func=cmd_release)
 
     return p
 
