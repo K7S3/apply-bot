@@ -17,6 +17,23 @@ class TrackerError(Exception):
     """Raised for invalid tracker operations."""
 
 
+def _iso_date(name: str, value: str | None) -> str:
+    """Normalize an optional YYYY-MM-DD date to an ISO string ("" if empty).
+
+    Raises TrackerError on unparseable input so bad dates never get stored.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        raise TrackerError(
+            f"Invalid {name} {value!r}: expected YYYY-MM-DD (e.g. 2026-09-20).")
+
+
 def _load(path: str | Path | None = None) -> list[dict]:
     p = Path(path) if path else C.TRACKER_PATH
     if not p.exists():
@@ -43,12 +60,18 @@ def _next_id(apps: list[dict]) -> int:
 
 
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
-        notes: str = "", path: str | Path | None = None) -> dict:
+        notes: str = "", posted_date: str = "", applied_date: str = "",
+        deadline: str = "", path: str | Path | None = None) -> dict:
     """Add an application. Returns the new record.
 
     If the same company+role is already tracked, returns the EXISTING
     record (a copy) with ``"duplicate": True`` instead of duplicating —
     no write happens. Check ``rec.get("duplicate")`` to tell the user.
+
+    Timing fields are purely additive: ``posted_date`` (when the job was
+    posted), ``applied_date`` (when you applied; falls back to date_added
+    when timing helpers read it), and ``deadline``. Stored as ISO strings.
+    Old records without these fields keep working.
     """
     if not company or not role:
         raise TrackerError("Both --company and --role are required to add an application.")
@@ -68,6 +91,10 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         "date_added": date.today().isoformat(),
         "date_updated": date.today().isoformat(),
         "prep_pack": "",
+        "posted_date": _iso_date("posted_date", posted_date),
+        "applied_date": _iso_date("applied_date", applied_date),
+        "deadline": _iso_date("deadline", deadline),
+        "first_response_date": "",
     }
     apps.append(rec)
     _save(apps, path)
@@ -75,8 +102,16 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
 
 
 def update(app_id: int, *, status: str | None = None, notes: str | None = None,
-           prep_pack: str | None = None, path: str | Path | None = None) -> dict:
-    """Update an application's status/notes/prep_pack. Returns the record."""
+           prep_pack: str | None = None, posted_date: str | None = None,
+           applied_date: str | None = None, deadline: str | None = None,
+           first_response_date: str | None = None,
+           path: str | Path | None = None) -> dict:
+    """Update an application's status/notes/prep_pack/timing fields.
+
+    Timing fields (posted_date, applied_date, deadline, first_response_date)
+    are additive: pass None (the default) to leave a field unchanged;
+    an ISO date string sets it; "" clears it.
+    """
     apps = _load(path)
     rec = next((a for a in apps if a.get("id") == app_id), None)
     if rec is None:
@@ -89,6 +124,12 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
         rec["notes"] = notes
     if prep_pack is not None:
         rec["prep_pack"] = prep_pack
+    for name, value in (("posted_date", posted_date),
+                       ("applied_date", applied_date),
+                       ("deadline", deadline),
+                       ("first_response_date", first_response_date)):
+        if value is not None:
+            rec[name] = _iso_date(name, value)
     rec["date_updated"] = date.today().isoformat()
     _save(apps, path)
     return rec
@@ -136,7 +177,8 @@ def export_csv(dest: str | Path, path: str | Path | None = None) -> Path:
     p = Path(dest)
     p.parent.mkdir(parents=True, exist_ok=True)
     fields = ["id", "company", "role", "status", "jd_link", "notes",
-              "date_added", "date_updated", "prep_pack"]
+              "date_added", "date_updated", "prep_pack",
+              "posted_date", "applied_date", "deadline", "first_response_date"]
     with p.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()

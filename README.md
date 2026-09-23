@@ -56,6 +56,7 @@ one ends with the exact next command to run.
 | `match` | Score any JD 0–100 (skills / seniority / domain / title fit) with a GO / CONDITIONAL / NO-GO verdict. Section-weighted skill extraction, explicit "N+ years" handling, per-skill JD evidence, and "how to close it" pointers for missing must-haves. Accepts text, a file, a URL, or stdin. `--json` for scripting. |
 | `tailor` | Grounded résumé + cover letter in 4 tones and 2 lengths. Reorders *your* bullets; never invents experience. Now ends with an **ATS keyword check** (covered vs missing JD keywords) and a **what-changed** summary. |
 | `track` | Application tracker: add / list / update / stats / search / export-csv, with funnel + response/interview/offer rates and per-status next-action hints. Re-adding an existing company+role returns the existing record instead of duplicating. |
+| `timing` | Best-time-to-apply analysis from your tracker history: response rate by posting age (`curve`), a data-grounded timing report with best/worst windows (`analyze`), per-posting apply advice, weekday/deadline patterns, a deadline calendar, and seasonal/follow-up trends. New additive tracker fields: `posted_date`, `applied_date`, `deadline`, `first_response_date`. Small samples are labeled honestly  -  see [Timing analysis](#timing-analysis). |
 | `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
@@ -84,6 +85,40 @@ see [docs/adding_sources.md](docs/adding_sources.md).
 - Limits: LCA data covers H-1B filings only — it's a real signal, not the
   whole market. Small samples are labeled as such; no data is ever
   fabricated to fill a gap.
+
+## Timing analysis
+
+`timing` mines your tracker history for when to apply. It's descriptive of
+*your* past, not a prediction about any single posting:
+
+- `timing curve`  -  response rate by how fresh the posting was when you
+  applied (0-3 / 4-7 / 8-14 / 15-30 / 31+ days), with ASCII bars.
+- `timing analyze`  -  the full report: best and worst windows with sample
+  sizes, overall response rate, and 2-4 guidance lines derived only from
+  your data.
+- `timing advise` / `reposts`  -  when to apply to a specific posting, and
+  whether it was reposted.
+- `timing weekday` / `deadline`  -  patterns by day of week and deadline
+  pressure.
+- `timing calendar`  -  upcoming deadlines and best apply windows
+  (`--days N`, default 14).
+- `timing seasons` / `followups`  -  seasonal trends and follow-up timing.
+
+Feed it data with the additive tracker fields:
+
+    python -m candid track add --company Acme --role "Data Scientist" \
+        --status applied --posted-date 2026-09-18
+    python -m candid track update 3 --first-response-date 2026-09-24
+
+`applied_date` falls back to `date_added` when not set. Old records without
+these fields keep working.
+
+**Honesty policy:** nothing is shown until you have 5+ applications with
+timing info (`MIN_SAMPLE`). Below that you get counts and a note saying
+what's missing  -  never a rate presented as a finding. Guidance lines are
+hedged when samples are small ("treat this as a hint, not a rule").
+`--json` is available on every subcommand for scripting. See
+[docs/timing.md](docs/timing.md).
 
 ## Privacy: you export, candid imports
 

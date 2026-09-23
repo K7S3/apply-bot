@@ -7,6 +7,7 @@
     python -m candid prep --company X --role Y
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
+    python -m candid timing curve           # best-time-to-apply analysis
     python -m candid dashboard            # local web UI (127.0.0.1 only)
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "timing",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "timing": ["curve", "analyze", "advise", "reposts", "weekday",
+               "deadline", "calendar", "seasons", "followups"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -229,7 +232,10 @@ def cmd_track(a):
     from candid import tracker as T
     if a.what == "add":
         rec = T.add(a.company, a.role, jd_link=a.jd_link or "", status=a.status,
-                    notes=a.notes or "")
+                    notes=a.notes or "",
+                    posted_date=a.posted_date or "",
+                    applied_date=a.applied_date or "",
+                    deadline=a.deadline or "")
         if rec.get("duplicate"):
             print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
                   f"[{rec['status']}] — not duplicated.")
@@ -247,7 +253,11 @@ def cmd_track(a):
                  if len(apps) > limit else ""))
         print(T.render_list(shown))
     elif a.what == "update":
-        rec = T.update(a.id, status=a.status, notes=a.notes)
+        rec = T.update(a.id, status=a.status, notes=a.notes,
+                       posted_date=a.posted_date,
+                       applied_date=a.applied_date,
+                       deadline=a.deadline,
+                       first_response_date=a.first_response_date)
         print(f"Updated #{rec['id']}: status={rec['status']}")
         if rec["status"] == "selected_for_interview":
             print("\n🎯 Interview! Generate a prep pack with:")
@@ -267,6 +277,13 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+
+
+def cmd_timing(a):
+    from candid import timing
+    rc = timing.dispatch(a)
+    if rc is not None:
+        sys.exit(rc)
 
 
 def cmd_prep(a):
@@ -407,6 +424,12 @@ def cmd_jobs(a):
                     days=getattr(a, "days", None),
                     min_score=getattr(a, "min_score", 0) or 0)
         print(J.render_curated(result))
+        if getattr(a, "timing", False) and result.get("added"):
+            from candid import timing_calendar as TC
+            print("\nTiming scores (freshness):")
+            for j in TC.annotate_timing(result["added"]):
+                print(f"  [#{j['app_id']}] {j['title']} @ {j['company']}: "
+                      f"{j['timing_score']:.0f}/100 - {j['timing_note']}")
     elif a.what == "list":
         if a.json:
             saved = []
@@ -573,6 +596,12 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd-link", default=""); t.add_argument("--status", default="saved")
     t.add_argument("--notes", default="")
+    t.add_argument("--posted-date", default="",
+                   help="When the job was posted (YYYY-MM-DD)")
+    t.add_argument("--applied-date", default="",
+                   help="When you applied (YYYY-MM-DD; defaults to today)")
+    t.add_argument("--deadline", default="",
+                   help="Application deadline (YYYY-MM-DD)")
     t = _sub(ts, "list", "List tracked applications (default view: newest first, up to --limit).", [
         "python -m candid track list",
         "python -m candid track list --status applied",
@@ -590,6 +619,14 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("id", type=int)
     t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--posted-date", default=None,
+                   help="Set the posting date (YYYY-MM-DD)")
+    t.add_argument("--applied-date", default=None,
+                   help="Set the applied date (YYYY-MM-DD)")
+    t.add_argument("--deadline", default=None,
+                   help="Set the application deadline (YYYY-MM-DD)")
+    t.add_argument("--first-response-date", default=None,
+                   help="Set the first company response date (YYYY-MM-DD)")
     t = _sub(ts, "remove", "Remove an application.", [
         "python -m candid track remove 3",
     ])
@@ -821,6 +858,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--timing", action="store_true",
+                   help="Show timing freshness scores for the new jobs")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
@@ -835,6 +874,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--timing", action="store_true",
+                   help="Show timing freshness scores for the new jobs")
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",
         "python -m candid jobs list --json   # machine-readable output",
@@ -918,6 +959,78 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # timing
+    s = _sub(sub, "timing", "Best-time-to-apply analysis from your tracker history.", [
+        "python -m candid timing curve",
+        "python -m candid timing analyze",
+        "python -m candid timing analyze --json",
+        "python -m candid timing advise --posted-date 2026-09-20 --deadline 2026-10-15",
+        "python -m candid timing calendar --days 14",
+    ])
+    tms = _nested(s, dest="timing_cmd")
+    t = _sub(tms, "curve", "Response rate by posting age at apply time.", [
+        "python -m candid timing curve",
+        "python -m candid timing curve --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the curve data as JSON (for scripting)")
+    t = _sub(tms, "analyze", "Full timing report: best/worst windows, data-only guidance.", [
+        "python -m candid timing analyze",
+        "python -m candid timing analyze --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the timing report as JSON (for scripting)")
+    t = _sub(tms, "advise", "When to apply to a specific posting (advise).", [
+        "python -m candid timing advise --posted-date 2026-09-20 --deadline 2026-10-15",
+        "python -m candid timing advise --company Acme --role \"Data Scientist\" --posted-date 2026-09-20",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--role", default="")
+    t.add_argument("--posted-date", default="",
+                   help="When the job was posted (YYYY-MM-DD)")
+    t.add_argument("--deadline", default="",
+                   help="Application deadline (YYYY-MM-DD)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the advice as JSON (for scripting)")
+    t = _sub(tms, "reposts", "Flag postings that were reposted (advise).", [
+        "python -m candid timing reposts",
+        "python -m candid timing reposts --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print repost findings as JSON (for scripting)")
+    t = _sub(tms, "weekday", "Response rate by day of week applied (patterns).", [
+        "python -m candid timing weekday",
+        "python -m candid timing weekday --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the weekday data as JSON (for scripting)")
+    t = _sub(tms, "deadline", "Deadline-pressure analysis (patterns).", [
+        "python -m candid timing deadline",
+        "python -m candid timing deadline --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the deadline data as JSON (for scripting)")
+    t = _sub(tms, "calendar", "Upcoming deadlines + best apply windows (calendar).", [
+        "python -m candid timing calendar",
+        "python -m candid timing calendar --days 30",
+    ])
+    t.add_argument("--days", type=int, default=14,
+                   help="Lookahead window in days (default: 14)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the calendar as JSON (for scripting)")
+    t = _sub(tms, "seasons", "Seasonal response-rate trends (trends).", [
+        "python -m candid timing seasons",
+        "python -m candid timing seasons --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the seasonal data as JSON (for scripting)")
+    t = _sub(tms, "followups", "Follow-up timing analysis (trends).", [
+        "python -m candid timing followups",
+        "python -m candid timing followups --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the follow-up data as JSON (for scripting)")
+    s.set_defaults(func=cmd_timing)
 
     return p
 

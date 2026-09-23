@@ -6,6 +6,8 @@ Modules:
     match     job-description fit scoring
     tailor    tailored resume + cover letter generation
     tracker   application tracker with funnel stats
+    timing    best-time-to-apply core (helpers + dispatch, MIN_SAMPLE policy)
+    timing_curve  posting-age response-rate curve + full timing report
     salary    salary intelligence (pay ranges + DOL LCA data)
     prep      interview prep packs (questions, deep-dives, mock, checklist)
     prep_concepts  concept explainer library used by prep
@@ -26,4 +28,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
