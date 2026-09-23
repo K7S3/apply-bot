@@ -241,12 +241,19 @@ def _comp_talking_points(company: str, role: str, location: str) -> str:
 
 def build_pack(profile: dict, company: str, role: str, jd: str = "",
                app_id: int | None = None, location: str = "",
-               gaps: list[str] | None = None) -> tuple[str, Path]:
+               gaps: list[str] | None = None,
+               brief_section: str | None = None) -> tuple[str, Path]:
     """Build the prep pack markdown. Returns (markdown, saved_path).
 
     gaps: optional list of match-gap strings (from
     ``match.score_match(jd)["gaps"]``). Gap-related concept deep-dives and
     mock questions are prioritized when provided.
+
+    brief_section: pre-rendered company-brief markdown (from
+    ``candid.briefs.render_brief``). Inserted as a "Company brief" section
+    right after the header. Pass None (default) to omit the section -
+    keeps build_pack offline and deterministic for library use; the CLI
+    fetches the brief unless --no-brief is given.
     """
     gaps = [str(g) for g in (gaps or []) if str(g).strip()]
     gap_cats = _gap_categories(gaps)
@@ -283,10 +290,12 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
     talking_points = _comp_talking_points(company, role, location)
 
     lines = [
-        f"# Interview Prep — {role} @ {company}",
+        f"# Interview Prep - {role} @ {company}",
         f"*Generated {date.today().isoformat()} · role family: {family.replace('_', ' ')}*",
         "",
     ]
+    if brief_section:
+        lines += [brief_section.strip(), ""]
     if gaps:
         lines += [
             "## Priority focus (from your match gaps)",

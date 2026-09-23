@@ -5,6 +5,7 @@
     python -m candid tailor resume --jd jd.txt --company X --role Y
     python -m candid track add --company X --role Y
     python -m candid prep --company X --role Y
+    python -m candid prep brief --company X
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
     python -m candid dashboard            # local web UI (127.0.0.1 only)
@@ -37,6 +38,7 @@ COMMANDS = [
 
 SUBCOMMANDS = {
     "profile": ["show"],
+    "prep": ["brief"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
@@ -52,7 +54,7 @@ SUBCOMMANDS = {
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
-    "OnboardError", "MatchError", "TrackerError", "PrepError",
+    "OnboardError", "MatchError", "TrackerError", "PrepError", "BriefError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
@@ -64,6 +66,7 @@ _NEXT_COMMAND = {
     "MatchError": "python -m candid match --help",
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
+    "BriefError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
@@ -270,10 +273,28 @@ def cmd_track(a):
 
 
 def cmd_prep(a):
-    from candid import prep as P
+    from candid import prep as P, briefs as B
+    what = getattr(a, "what", None)
+    if what == "brief":
+        if not a.company:
+            sys.exit('`prep brief` needs --company "Name" '
+                     '(e.g. --company "Acme Corp").')
+        brief = B.get_brief(a.company, refresh=a.refresh)
+        print(B.render_brief(brief))
+        return
+    if not a.company or not a.role:
+        sys.exit('`prep` needs --company "Name" and --role "Title".')
     jd = _jd_text(a) if a.jd else ""
+    brief_section = None
+    if not a.no_brief:
+        try:
+            brief_section = B.render_brief(
+                B.get_brief(a.company, refresh=a.refresh))
+        except B.BriefError:
+            brief_section = None
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
-                                  app_id=a.app_id, location=a.location or "")
+                                  app_id=a.app_id, location=a.location or "",
+                                  brief_section=brief_section)
     print(f"Prep pack saved to {path}\n")
     print(markdown[:3000])
     if len(markdown) > 3000:
@@ -609,16 +630,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_track)
 
     # prep
-    s = _sub(sub, "prep", "Build an interview prep pack.", [
+    s = _sub(sub, "prep", "Build an interview prep pack, or print a company brief.", [
         "python -m candid prep --company Acme --role \"Data Scientist\"",
         "python -m candid prep --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid prep --company Acme --role \"Data Scientist\" --app-id 3",
+        "python -m candid prep --company Acme --role \"Data Scientist\" --no-brief",
+        "python -m candid prep brief --company Acme",
+        "python -m candid prep brief --company Acme --refresh",
     ])
-    s.add_argument("--company", required=True)
-    s.add_argument("--role", required=True)
+    s.add_argument("what", nargs="?", default=None, choices=["brief"],
+                   help='brief: print just the company brief (Wikipedia + SEC EDGAR)')
+    s.add_argument("--company", default="")
+    s.add_argument("--role", default="")
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--no-brief", action="store_true",
+                   help="Skip the company-brief section in the prep pack")
+    s.add_argument("--refresh", action="store_true",
+                   help="Re-fetch the company brief instead of using the local cache")
     s.set_defaults(func=cmd_prep)
 
     # followup
