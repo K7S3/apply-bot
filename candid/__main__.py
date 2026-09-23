@@ -42,10 +42,10 @@ SUBCOMMANDS = {
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
-    "salary": ["lookup", "import-lca", "parse-range"],
+    "salary": ["lookup", "import-lca", "parse-range", "sponsor"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
-    "jobs": ["curate", "refresh", "list"],
+    "jobs": ["curate", "refresh", "list", "rank-remote"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
 }
@@ -55,7 +55,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "SponsorError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +72,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "SponsorError": "python -m candid salary sponsor --help",
 }
 
 
@@ -202,6 +203,11 @@ def cmd_match(a):
         print(json.dumps(result, indent=2, default=str))
     else:
         print(M.render_report(result, company=company, title=role))
+    if company:
+        from candid import sponsor as SP
+        line = SP.sponsor_line(company)
+        if line:
+            print("\n" + line)
 
 
 def cmd_tailor(a):
@@ -338,8 +344,15 @@ def cmd_salary(a):
                                   title=a.title or "", location=a.location or ""))
     elif a.what == "import-lca":
         print(f"Importing {a.file} ...")
-        res = S.import_lca(a.file, limit=a.limit)
+        res = S.import_lca(a.file, limit=a.limit, fiscal_year=a.fiscal_year)
         print(f"Imported {res['imported']} rows, skipped {res['skipped']}.")
+    elif a.what == "sponsor":
+        from candid import sponsor as SP
+        res = SP.score_company(a.company)
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+        else:
+            print(SP.render_score(res, a.company))
     elif a.what == "parse-range":
         if a.text:
             text = a.text
@@ -405,7 +418,8 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    min_sponsor=getattr(a, "min_sponsor", 0) or 0)
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -425,6 +439,31 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+    elif a.what == "rank-remote":
+        from candid import geo as GEO
+        from candid import jobs as JJ
+        table = GEO.load_col_index()
+        found = GEO.find_metro(a.location, table)
+        if not found:
+            raise J.JobsError(
+                f"Unknown location {a.location!r}. Available metros: "
+                + ", ".join(GEO.list_metros(table)))
+        key, entry = found
+        raw = JJ._adapt_remoteok()
+        if a.role:
+            raw = J.filter_jobs(raw, a.role, "", remote=True,
+                                limit=max(a.limit * 4, 50))
+        ranked = GEO.rank_remote_jobs(raw, key, entry["index"])
+        compare = None
+        if a.compare:
+            cfound = GEO.find_metro(a.compare, table)
+            if not cfound:
+                raise J.JobsError(
+                    f"Unknown --compare location {a.compare!r}. Available: "
+                    + ", ".join(GEO.list_metros(table)))
+            compare = cfound
+        print(GEO.render_ranking(ranked, entry["label"], entry["index"],
+                                 limit=a.limit, compare=compare))
 
 
 def cmd_dashboard(a):
@@ -738,8 +777,18 @@ def build_parser() -> argparse.ArgumentParser:
     t = _sub(ss, "import-lca", "Import DOL H-1B LCA disclosure data.", [
         "python -m candid salary import-lca dol_h1b.csv",
         "python -m candid salary import-lca dol_h1b.csv --limit 5000",
+        "python -m candid salary import-lca H-1B_Disclosure_Data_FY2024.csv --fiscal-year 2024",
     ])
     t.add_argument("file"); t.add_argument("--limit", type=int, default=None)
+    t.add_argument("--fiscal-year", type=int, default=None,
+                   help="DOL disclosure fiscal year (auto-detected from FY#### in the file name)")
+    t = _sub(ss, "sponsor", "H-1B sponsorship likelihood for a company, from your imported LCA rows.", [
+        "python -m candid salary sponsor --company Acme",
+        "python -m candid salary sponsor --company Acme --json",
+    ])
+    t.add_argument("--company", required=True, help="Company name (fuzzy-matched against employer names)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw score breakdown as JSON (for scripting)")
     t = _sub(ss, "parse-range", "Extract and store a pay range from JD text.", [
         "python -m candid salary parse-range --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid salary parse-range --company Acme --role DS --text \"Pay range $120k-$150k\"",
@@ -810,6 +859,7 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid jobs curate --role \"Data Scientist\" --remote",
         "python -m candid jobs curate --role \"Data Scientist\" --location \"New York\" --level senior --limit 10",
         "python -m candid jobs curate --role \"Data Scientist\" --sources arbeitnow",
+        "python -m candid jobs curate --role \"Data Scientist\" --remote --min-sponsor 60",
     ])
     t.add_argument("--role", required=True, help="Wanted title, e.g. \"Data Scientist\"")
     t.add_argument("--location", default="")
@@ -821,9 +871,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--min-sponsor", type=float, default=0,
+                   help="Only keep jobs from companies with H-1B sponsorship score >= N "
+                        "(needs imported LCA data; default 0 = off)")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
+        "python -m candid jobs refresh --role \"Data Scientist\" --min-sponsor 60",
     ])
     t.add_argument("--role", required=True)
     t.add_argument("--location", default="")
@@ -835,12 +889,26 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--min-sponsor", type=float, default=0,
+                   help="Only keep jobs from companies with H-1B sponsorship score >= N "
+                        "(needs imported LCA data; default 0 = off)")
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",
         "python -m candid jobs list --json   # machine-readable output",
     ])
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
+    t = _sub(js, "rank-remote", "Rank remote roles by effective pay vs cost of living (all figures are estimates).", [
+        "python -m candid jobs rank-remote --location \"New York, NY\"",
+        "python -m candid jobs rank-remote --location \"Austin, TX\" --role \"Data Scientist\"",
+        "python -m candid jobs rank-remote --location \"New York, NY\" --compare \"Austin, TX\"",
+    ])
+    t.add_argument("--location", required=True,
+                   help="Your location, e.g. \"New York, NY\" (see bundled COL metros)")
+    t.add_argument("--role", default="", help="Optional role filter, e.g. \"Data Scientist\"")
+    t.add_argument("--limit", type=int, default=15, help="Roles to show (default: 15)")
+    t.add_argument("--compare", default="",
+                   help="Extra metro for a side-by-side effective-pay column, e.g. \"Austin, TX\"")
     s.set_defaults(func=cmd_jobs)
 
     # dashboard

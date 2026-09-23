@@ -352,22 +352,34 @@ def _tracked_keys() -> set[tuple[str, str]]:
 def curate(profile: dict, role: str, location: str = "", remote: bool = False,
            level: str | None = None, limit: int = DEFAULT_LIMIT,
            sources: list[str] | None = None, days: int | None = None,
-           min_score: float = 0) -> dict:
+           min_score: float = 0, min_sponsor: float = 0) -> dict:
     """Run one curation pass.
 
-    Returns {fetched, candidates, added, skipped, skipped_low_score, errors}.
+    Returns {fetched, candidates, added, skipped, skipped_low_score,
+    skipped_no_sponsor, errors}.
     ``days`` filters to postings from the last N days (unparseable dates are
     kept). ``min_score`` gates tracker writes: jobs scoring below it are NOT
     added — they are stashed in jobs.json under ``skipped_low_score`` so a
-    lower threshold can pick them up later.
+    lower threshold can pick them up later. ``min_sponsor`` keeps only jobs
+    from companies whose H-1B sponsorship score is >= N (needs imported LCA
+    data; jobs from companies with no sponsorship data are excluded and
+    counted in ``skipped_no_sponsor``).
     """
     from candid import tracker as T
     from candid import salary as S
+    from candid import sponsor as SP
 
     wanted = sources or list(ADAPTERS)
     unknown = [s for s in wanted if s not in ADAPTERS]
     if unknown:
         raise JobsError(f"Unknown source(s): {', '.join(unknown)}. Available: {', '.join(ADAPTERS)}")
+
+    if min_sponsor > 0 and not SP.lca_loaded():
+        raise JobsError(
+            "No H-1B sponsorship data loaded, so --min-sponsor has nothing "
+            "to score against.\n"
+            "Next: run `python -m candid salary import-lca <dol_h1b_csv>` "
+            "first, or drop --min-sponsor.")
 
     raw: list[dict] = []
     errors: list[str] = []
@@ -383,6 +395,7 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
     tracked = _tracked_keys()
 
     added, skipped, low_score = [], [], []
+    skipped_no_sponsor = 0
     for job in candidates:
         if job["source_id"] in seen or _already_tracked(job["company"], job["title"]):
             skipped.append(job)
@@ -390,6 +403,11 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
         if _norm_key(job["title"], job["company"]) in tracked:
             skipped.append(job)  # near-dupe of something already tracked
             continue
+        if min_sponsor > 0:
+            sp = SP.score_company(job["company"] or "")
+            if sp["insufficient"] or (sp["score"] or 0) < min_sponsor:
+                skipped_no_sponsor += 1
+                continue
         scored = score_job(profile, job)
         if scored["score"] < min_score:
             low_score.append({
@@ -435,7 +453,8 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
     _save_state(state)
     return {"fetched": len(raw), "candidates": len(candidates),
             "added": added, "skipped": len(skipped),
-            "skipped_low_score": len(low_score), "errors": errors}
+            "skipped_low_score": len(low_score),
+            "skipped_no_sponsor": skipped_no_sponsor, "errors": errors}
 
 
 def _stash_job_meta(app_id: int, meta: dict) -> None:
@@ -470,10 +489,10 @@ def get_job_meta(app_id: int) -> dict:
 def refresh(profile: dict, role: str, location: str = "", remote: bool = False,
             level: str | None = None, limit: int = DEFAULT_LIMIT,
             sources: Optional[List[str]] = None, days: int | None = None,
-            min_score: float = 0) -> dict:
+            min_score: float = 0, min_sponsor: float = 0) -> dict:
     """Re-run curation; the result's ``added`` holds only genuinely new jobs."""
     return curate(profile, role, location, remote, level, limit, sources=sources,
-                  days=days, min_score=min_score)
+                  days=days, min_score=min_score, min_sponsor=min_sponsor)
 
 
 def render_curated(result: dict) -> str:
@@ -494,6 +513,9 @@ def render_curated(result: dict) -> str:
     if result.get("skipped_low_score"):
         lines.append(f"({result['skipped_low_score']} below the match-score gate — "
                      "stashed, not added)")
+    if result.get("skipped_no_sponsor"):
+        lines.append(f"({result['skipped_no_sponsor']} below the sponsorship gate — "
+                     "no score or no LCA data)")
     if result["skipped"]:
         lines.append(f"({result['skipped']} already tracked — skipped)")
     lines.append("\nNext: tailor → python -m candid tailor resume --app-id <id> --company X --role Y")

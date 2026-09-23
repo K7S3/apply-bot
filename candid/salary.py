@@ -209,15 +209,26 @@ _UNIT_MULT = {"year": 1, "yr": 1, "annual": 1, "hour": 2080, "hr": 2080,
 
 def import_lca(csv_path: str | Path, *, path: str | Path | None = None,
                only_certified: bool = True, limit: int | None = None,
-               progress_every: int = 50000) -> dict:
+               progress_every: int = 50000,
+               fiscal_year: int | None = None,
+               record_sponsorship: bool = True) -> dict:
     """Import a DOL H-1B disclosure CSV. Returns {imported, skipped} counts.
 
     Never executes anything from the file — pure CSV parsing.
+
+    ``fiscal_year``: the DOL disclosure year of the file (auto-detected from
+    names like H-1B_Disclosure_Data_FY2024.csv when omitted). When
+    ``record_sponsorship`` is true (default), every scanned row — certified,
+    denied, and withdrawn — is recorded in the ``lca_sponsor`` table so
+    `salary sponsor` can score approval consistency.
     """
+    from candid import sponsor as SP
     p = Path(csv_path)
     if not p.exists():
         raise SalaryError(f"LCA file not found: {p}")
     conn = connect(path)
+    fy = fiscal_year if fiscal_year is not None else SP.fiscal_year_from_name(p)
+    sponsor_batch: list[dict] = []
     imported = skipped = 0
     now = datetime.now().isoformat(timespec="seconds")
     with p.open(newline="", encoding="utf-8-sig", errors="replace") as f:
@@ -238,6 +249,15 @@ def import_lca(csv_path: str | Path, *, path: str | Path | None = None,
             if not any((v or "").strip() for v in row.values()):
                 skipped += 1  # blank row
                 continue
+            if record_sponsorship:
+                # recorded BEFORE the only_certified filter: denied/withdrawn
+                # rows are needed for sponsorship approval-consistency scoring
+                sponsor_batch.append({
+                    "company": _pick(row, picker, "company"),
+                    "case_no": _pick(row, picker, "case_no"),
+                    "status": _pick(row, picker, "status"),
+                    "fiscal_year": fy,
+                })
             try:
                 if only_certified:
                     status = _pick(row, picker, "status").upper()
@@ -278,6 +298,8 @@ def import_lca(csv_path: str | Path, *, path: str | Path | None = None,
                 imported += 1
             except Exception:
                 skipped += 1
+    if record_sponsorship and sponsor_batch:
+        SP.record_rows(conn, sponsor_batch, fiscal_year=fy)
     conn.commit()
     conn.close()
     return {"imported": imported, "skipped": skipped}
