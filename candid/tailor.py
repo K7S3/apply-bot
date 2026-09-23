@@ -18,6 +18,7 @@ import re
 from datetime import date
 
 from candid import config as C
+from candid.contexts import ctx_value
 from candid.match import _jd_skills, _extract_jd  # internal reuse
 
 TONES = ["concise", "confident", "formal", "warm"]
@@ -113,8 +114,18 @@ def _what_changed(original: list[dict], tailored: list[dict]) -> list[str]:
 
 
 def build_resume(profile: dict, jd: str, company: str = "", role: str = "",
-                 tone: str = "confident", length: str = "one-page") -> str:
-    """Build a tailored plain-text resume. Never invents experience."""
+                 tone: str | None = None, length: str | None = None) -> str:
+    """Build a tailored plain-text resume. Never invents experience.
+
+    ``tone``/``length`` default to the active context (tailor.tone /
+    tailor.length), honoring per-company overrides for the target company;
+    with no active context they fall back to "confident" / "one-page".
+    Explicitly passed values always win.
+    """
+    if tone is None:
+        tone = ctx_value("tailor.tone", "confident", company=company or None)
+    if length is None:
+        length = ctx_value("tailor.length", "one-page", company=company or None)
     if tone not in TONES:
         raise ValueError(f"Unknown tone '{tone}'. Choose from {TONES}.")
     if length not in LENGTHS:
@@ -237,8 +248,15 @@ def _proof_sentence(profile: dict, jd: str) -> str:
 
 
 def build_cover_letter(profile: dict, jd: str, company: str, role: str,
-                       tone: str = "confident", hook: str = "") -> str:
-    """Build a cover letter. `hook` = why this company/role (one line, optional)."""
+                       tone: str | None = None, hook: str = "") -> str:
+    """Build a cover letter. `hook` = why this company/role (one line, optional).
+
+    ``tone`` defaults to the active context (tailor.tone), honoring a
+    per-company override for the target company; with no active context it
+    falls back to "confident". An explicitly passed tone wins.
+    """
+    if tone is None:
+        tone = ctx_value("tailor.tone", "confident", company=company or None)
     if tone not in TONES:
         raise ValueError(f"Unknown tone '{tone}'. Choose from {TONES}.")
     if not company or not role:

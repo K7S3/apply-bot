@@ -330,12 +330,12 @@ def cmd_salary(a):
     from candid import salary as S
     if a.what == "lookup":
         result = S.lookup(company=a.company or "", title=a.title or "",
-                          location=a.location or "")
+                          location=a.location)
         if a.json:
             print(json.dumps(result, indent=2, default=str))
         else:
             print(S.render_lookup(result, company=a.company or "",
-                                  title=a.title or "", location=a.location or ""))
+                                  title=a.title or "", location=a.location))
     elif a.what == "import-lca":
         print(f"Importing {a.file} ...")
         res = S.import_lca(a.file, limit=a.limit)
@@ -405,7 +405,7 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=a.min_score)
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -522,6 +522,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("what", nargs="?", default="show", choices=["show"])
     s.set_defaults(func=cmd_profile_show)
 
+    # ctx — config profiles (contexts)
+    from candid.contexts_cli import register_ctx
+    register_ctx(sub)
+
     # match
     s = _sub(sub, "match", "Score a job description against your profile.", [
         "python -m candid match --jd jd.txt --company Acme --role \"Data Scientist\"",
@@ -552,8 +556,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Tracked job id — pulls company/role/JD from the tracker")
     s.add_argument("--company", default="")
     s.add_argument("--role", default="")
-    s.add_argument("--tone", default="confident", choices=["concise", "confident", "formal", "warm"])
-    s.add_argument("--length", default="one-page", choices=["one-page", "detailed"])
+    s.add_argument("--tone", default=None, choices=["concise", "confident", "formal", "warm"])
+    s.add_argument("--length", default=None, choices=["one-page", "detailed"])
     s.add_argument("--hook", default="", help="One-line 'why this company' for cover letters")
     s.add_argument("--out", help="Write to file instead of stdout")
     s.set_defaults(func=cmd_tailor)
@@ -813,13 +817,13 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--role", required=True, help="Wanted title, e.g. \"Data Scientist\"")
     t.add_argument("--location", default="")
-    t.add_argument("--remote", action="store_true")
+    t.add_argument("--remote", action="store_true", default=None)
     t.add_argument("--level", default=None, help="entry|junior|mid|senior|lead|staff|principal")
     t.add_argument("--limit", type=int, default=15)
     t.add_argument("--sources", nargs="*", default=None, help="subset of: arbeitnow remoteok")
     t.add_argument("--days", type=int, default=None,
                    help="Only postings from the last N days (unparseable dates are kept)")
-    t.add_argument("--min-score", type=float, default=0,
+    t.add_argument("--min-score", type=float, default=None,
                    help="Only save to tracker when match score >= N (default 0 = off)")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
@@ -827,13 +831,13 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--role", required=True)
     t.add_argument("--location", default="")
-    t.add_argument("--remote", action="store_true")
+    t.add_argument("--remote", action="store_true", default=None)
     t.add_argument("--level", default=None)
     t.add_argument("--limit", type=int, default=15)
     t.add_argument("--sources", nargs="*", default=None)
     t.add_argument("--days", type=int, default=None,
                    help="Only postings from the last N days (unparseable dates are kept)")
-    t.add_argument("--min-score", type=float, default=0,
+    t.add_argument("--min-score", type=float, default=None,
                    help="Only save to tracker when match score >= N (default 0 = off)")
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",

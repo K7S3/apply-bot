@@ -29,6 +29,23 @@ from datetime import datetime
 from pathlib import Path
 
 from candid import config as C
+from candid.contexts import ctx_value, get_store
+
+
+def _ctx_default(key: str, fallback):
+    """Context-aware default that stays byte-identical with no active context.
+
+    Only consults the context layer when a context is actually active; with
+    no active context it returns today's hardcoded ``fallback``. (Plain
+    ``ctx_value`` would fall back to the engine's builtin default, which
+    differs from the current default for keys like jobs.days.)
+    """
+    try:
+        if get_store().active_name() is None:
+            return fallback
+    except Exception:
+        return fallback
+    return ctx_value(key, fallback)
 
 def _state_path() -> Path:
     return C.DATA_DIR / "jobs.json"
@@ -349,10 +366,10 @@ def _tracked_keys() -> set[tuple[str, str]]:
     return {_norm_key(a.get("role", ""), a.get("company", "")) for a in T.list_apps()}
 
 
-def curate(profile: dict, role: str, location: str = "", remote: bool = False,
+def curate(profile: dict, role: str, location: str = "", remote: bool | None = None,
            level: str | None = None, limit: int = DEFAULT_LIMIT,
            sources: list[str] | None = None, days: int | None = None,
-           min_score: float = 0) -> dict:
+           min_score: float | None = None) -> dict:
     """Run one curation pass.
 
     Returns {fetched, candidates, added, skipped, skipped_low_score, errors}.
@@ -360,7 +377,21 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
     kept). ``min_score`` gates tracker writes: jobs scoring below it are NOT
     added — they are stashed in jobs.json under ``skipped_low_score`` so a
     lower threshold can pick them up later.
+
+    ``remote`` / ``sources`` / ``days`` / ``min_score`` fall back to the
+    active context (jobs.remote_only / jobs.sources / jobs.days /
+    jobs.min_score) when not passed; with no active context the previous
+    defaults apply (False / all sources / no date filter / 0).
+    Explicitly passed values always win.
     """
+    if remote is None:
+        remote = ctx_value("jobs.remote_only", False)
+    if sources is None:
+        sources = ctx_value("jobs.sources", None)
+    if days is None:
+        days = _ctx_default("jobs.days", None)
+    if min_score is None:
+        min_score = ctx_value("jobs.min_score", 0)
     from candid import tracker as T
     from candid import salary as S
 
@@ -467,11 +498,15 @@ def get_job_meta(app_id: int) -> dict:
         return {}
 
 
-def refresh(profile: dict, role: str, location: str = "", remote: bool = False,
+def refresh(profile: dict, role: str, location: str = "", remote: bool | None = None,
             level: str | None = None, limit: int = DEFAULT_LIMIT,
             sources: Optional[List[str]] = None, days: int | None = None,
-            min_score: float = 0) -> dict:
-    """Re-run curation; the result's ``added`` holds only genuinely new jobs."""
+            min_score: float | None = None) -> dict:
+    """Re-run curation; the result's ``added`` holds only genuinely new jobs.
+
+    ``remote`` / ``sources`` / ``days`` / ``min_score`` are passed through to
+    :func:`curate`, which resolves them from the active context when unset.
+    """
     return curate(profile, role, location, remote, level, limit, sources=sources,
                   days=days, min_score=min_score)
 

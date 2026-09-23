@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `ctx` | Named config profiles ("contexts"): per-hunt defaults for tone, thresholds, prep depth and more, with inheritance, per-company overrides, built-in presets, and export/import. See [Config profiles (contexts)](#config-profiles-contexts). |
 
 ## Job-source coverage (honest)
 
@@ -144,6 +145,27 @@ The only network calls candid makes:
   when you run it.
 
 No analytics, no telemetry, no accounts.
+
+## Config profiles (contexts)
+
+A context is a named bundle of settings (tone and length for tailored
+output, match thresholds, prep depth, and more) so each hunt can carry its
+own defaults without repeating flags. Start from a preset, switch, tweak:
+
+```bash
+python -m candid ctx init faang-mle --as faang   # built-in presets: faang-mle, startup-fullstack, data-scientist, backend-generalist, new-grad
+python -m candid ctx use faang
+python -m candid ctx set tailor.tone warm
+```
+
+Contexts can extend each other (child wins), carry per-company overrides
+("Acme Corp" gets a formal tone and a lower threshold), and are selected
+via `ctx use`, `ctx use -` (toggle back), or the `CANDID_CTX` /
+`CANDID_CTX_COMPANY` / `CANDID_CTX_FILE` environment variables. Precedence
+is explicit CLI flags, then per-company overrides, then context settings,
+then inherited parents, then built-in defaults. Everything lives in
+`candid_data/contexts.json` (git-ignored), never in the repo. Full guide:
+[docs/contexts.md](docs/contexts.md).
 
 ## Extending it
 

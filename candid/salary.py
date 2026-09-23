@@ -24,6 +24,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from candid import config as C
+from candid.contexts import ctx_value
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ranges (
@@ -303,14 +304,21 @@ def _percentile(sorted_vals: list[float], p: float) -> float | None:
     return round(sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f), 2)
 
 
-def lookup(company: str = "", title: str = "", location: str = "",
+def lookup(company: str = "", title: str = "", location: str | None = None,
            path: str | Path | None = None) -> dict:
     """Fuzzy lookup. Returns {p25, median, p75, n, sources, matches}.
 
     Strategy: score rows by company token overlap, title token overlap, and
     location match; use the best-scoring bucket with >= 5 rows, else fall
     back to any posted job_post range for the company/title.
+
+    ``location`` defaults to the active context (salary.location), honoring a
+    per-company override for the lookup company; with no active context it
+    falls back to "" (no location filter). An explicitly passed location
+    always wins.
     """
+    if location is None:
+        location = ctx_value("salary.location", "", company=company or None) or ""
     conn = connect(path)
     rows = conn.execute(
         "SELECT company, title, location, low, high, source, source_detail FROM ranges"

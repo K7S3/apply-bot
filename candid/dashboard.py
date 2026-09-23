@@ -21,6 +21,7 @@ import webbrowser
 from pathlib import Path
 
 from candid import config as C
+from candid.contexts import ctx_value
 
 
 log = C.get_logger("dashboard")
@@ -172,16 +173,25 @@ def curated_jobs() -> list[dict]:
     return out
 
 
-def run_curate(role: str, location: str = "", remote: bool = False,
+def run_curate(role: str, location: str = "", remote: bool | None = None,
                level: str | None = None, limit: int = 15,
                sources: list | None = None) -> dict:
     """Run a job-curation pass from the dashboard.
 
     Returns the human-readable summary plus the structured result.
+
+    ``remote`` / ``sources`` fall back to the active context (jobs.remote_only /
+    jobs.sources); with no active context the previous defaults apply (False /
+    all sources). ``days`` / ``min_score`` are resolved from the context inside
+    :func:`candid.jobs.curate`. Explicitly passed values always win.
     """
     from candid import jobs as J, profile as Prof
     if not (role or "").strip():
         raise DashboardError("role is required (e.g. 'Data Scientist').")
+    if remote is None:
+        remote = ctx_value("jobs.remote_only", False)
+    if sources is None:
+        sources = ctx_value("jobs.sources", None) or None
     profile = Prof.load_profile()
     try:
         result = J.curate(profile, role=role, location=location or "",
@@ -283,8 +293,12 @@ def dismiss_job(source_id: str | None = None,
 
 
 def run_tailor_diff(kind: str, company: str, role: str, jd: str,
-                    tone: str = "confident", length: str = "one-page") -> dict:
+                    tone: str | None = None, length: str | None = None) -> dict:
     """Tailored text + keyword coverage vs the JD.
+
+    ``tone``/``length`` are passed through to the tailor functions, which
+    resolve them from the active context (tailor.tone / tailor.length) when
+    unset; with no active context they fall back to "confident" / "one-page".
 
     Returns {text, coverage: {covered: [...], missing: [...]}, changes: []}.
     Coverage is computed from the same skill lexicon ``match`` uses, so the
@@ -396,12 +410,19 @@ def reject_proposal(proposal_id: int) -> None:
 
 
 def run_tailor(kind: str, company: str, role: str, jd: str,
-               tone: str = "confident", length: str = "one-page") -> dict:
+               tone: str | None = None, length: str | None = None) -> dict:
+    """Tone/length default to the active context (tailor.tone / tailor.length),
+    honoring per-company overrides; with no active context they fall back to
+    "confident" / "one-page". Explicitly passed values always win."""
     from candid import tailor as T, profile as Prof
     if kind not in ("resume", "cover-letter"):
         raise DashboardError("kind must be 'resume' or 'cover-letter'.")
     if not jd.strip():
         raise DashboardError("Paste a job description first.")
+    if tone is None:
+        tone = ctx_value("tailor.tone", "confident", company=company or None)
+    if length is None:
+        length = ctx_value("tailor.length", "one-page", company=company or None)
     profile = Prof.load_profile()
     if kind == "resume":
         text = T.build_resume(profile, jd, company=company, role=role,
@@ -416,7 +437,10 @@ def run_tailor(kind: str, company: str, role: str, jd: str,
     return {"path": str(out), "text": text}
 
 
-def salary_lookup(company: str, title: str, location: str = "") -> dict:
+def salary_lookup(company: str, title: str, location: str | None = None) -> dict:
+    """``location`` defaults to the active context (salary.location, with
+    per-company overrides); resolution happens in :func:`candid.salary.lookup`.
+    An explicitly passed location wins."""
     from candid import salary as S
     return S.lookup(company=company, title=title, location=location)
 

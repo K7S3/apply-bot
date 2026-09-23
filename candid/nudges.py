@@ -12,13 +12,31 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from candid import config as C
+from candid.contexts import ctx_value, get_store
 
 # After this many days of silence post-interview/offer, suggest a check-in.
+# (No context key covers this one yet, so it stays a plain constant.)
 FOLLOW_UP_AFTER_DAYS = 5
 # A "saved" job untouched this long is probably stale.
 STALE_SAVED_DAYS = 7
 # An application with no response this long deserves a check-in.
 QUIET_APPLIED_DAYS = 14
+
+
+def _ctx_default(key: str, fallback):
+    """Context-aware default that stays byte-identical with no active context.
+
+    Only consults the context layer when a context is actually active; with
+    no active context it returns today's hardcoded ``fallback``. (Plain
+    ``ctx_value`` would fall back to the engine's builtin default, which
+    differs from the current constant for these keys.)
+    """
+    try:
+        if get_store().active_name() is None:
+            return fallback
+    except Exception:
+        return fallback
+    return ctx_value(key, fallback)
 
 
 def _days_since(iso: str, today: date) -> int | None:
@@ -89,11 +107,23 @@ def _scan_text_for_interview_dates(a: dict) -> list[date]:
 
 
 def pending_nudges(apps: list[dict] | None = None,
-                   today: date | None = None) -> list[dict]:
+                   today: date | None = None,
+                   stale_days: int | None = None,
+                   followup_days: int | None = None) -> list[dict]:
     """Return pending nudges, most urgent first.
 
     Each nudge: {kind, app_id, company, role, message, action}.
+
+    ``stale_days`` drives the "saved job gone stale" threshold and
+    ``followup_days`` the "applied, no response" check-in threshold. Both
+    fall back to the active context (nudges.stale_days / nudges.followup_days);
+    with no active context the previous constants apply (STALE_SAVED_DAYS /
+    QUIET_APPLIED_DAYS). Explicitly passed values always win.
     """
+    if stale_days is None:
+        stale_days = _ctx_default("nudges.stale_days", STALE_SAVED_DAYS)
+    if followup_days is None:
+        followup_days = _ctx_default("nudges.followup_days", QUIET_APPLIED_DAYS)
     from candid import tracker as T
     apps = T.list_apps() if apps is None else apps
     today = today or date.today()
@@ -119,7 +149,7 @@ def pending_nudges(apps: list[dict] | None = None,
                 "action": "Draft a thank-you / check-in email",
                 "command": f"python -m candid followup check-in --person <recruiter> --role \"{role}\" --company \"{company}\"",
             })
-        elif status == "saved" and quiet >= STALE_SAVED_DAYS:
+        elif status == "saved" and quiet >= stale_days:
             nudges.append({
                 "kind": "stale_saved",
                 "app_id": a["id"],
@@ -129,7 +159,7 @@ def pending_nudges(apps: list[dict] | None = None,
                 "action": "Apply, or withdraw it from the pipeline",
                 "command": f"python -m candid track update {a['id']} --status applied",
             })
-        elif status == "applied" and quiet >= QUIET_APPLIED_DAYS:
+        elif status == "applied" and quiet >= followup_days:
             nudges.append({
                 "kind": "quiet_applied",
                 "app_id": a["id"],
