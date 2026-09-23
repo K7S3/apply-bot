@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "em",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "em": ["stories", "narrative", "update-template", "exec-summary",
+           "plan-30-60-90"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "EmStoriesError", "EmToolkitError",
     "ValueError",
 }
 
@@ -72,6 +75,8 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "EmStoriesError": "python -m candid em stories --help",
+    "EmToolkitError": "python -m candid em --help",
 }
 
 
@@ -292,6 +297,38 @@ def cmd_followup(a):
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def cmd_em(a):
+    from candid import em_stories as E, em_toolkit as T
+    prof = _profile()
+    name = prof.get("name") or "Your Name"
+    if a.what == "stories":
+        from candid import config as C
+        if a.rebuild or not (C.DATA_DIR / "em_stories.json").exists():
+            E.build_em_stories(prof)
+        stories = E.list_em_stories(competency=a.competency or None,
+                                    query=a.search or None)
+        if not stories:
+            print("No EM stories match. Try --rebuild after adding "
+                  "management bullets to your profile.")
+            return
+        for s in stories:
+            comps = ", ".join(s.get("competencies", [])) or "untagged"
+            print(f"{s['id']}  [{comps}]  {s['title']}")
+    elif a.what == "narrative":
+        result = E.em_narrative(prof, a.prompt)
+        print(result["narrative"])
+    elif a.what == "update-template":
+        print(T.weekly_update_template(name, a.team or "", a.week or ""))
+    elif a.what == "exec-summary":
+        notes = a.notes
+        if notes is None and not sys.stdin.isatty():
+            notes = sys.stdin.read()
+        print(T.exec_summary(notes or "", name=name))
+    elif a.what == "plan-30-60-90":
+        print(T.plan_30_60_90(a.company, a.team, context=a.context or "",
+                              profile=prof))
 
 
 def cmd_offer(a):
@@ -918,6 +955,54 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # em (engineering-manager track)
+    s = _sub(sub, "em", "Engineering-manager interview prep: EM stories, managing-up toolkit.", [
+        "python -m candid em stories --competency hiring_bar",
+        "python -m candid em narrative --prompt struggling-team",
+        "python -m candid em update-template --team Payments",
+        "python -m candid em exec-summary --notes \"- Shipped X\\n- Risk: Y\"",
+        "python -m candid em plan-30-60-90 --company Acme --team Payments",
+    ])
+    es = _nested(s)
+    t = _sub(es, "stories", "List EM STAR story prompts from your resume bullets.", [
+        "python -m candid em stories",
+        "python -m candid em stories --competency growing_engineers",
+        "python -m candid em stories --search outage",
+        "python -m candid em stories --rebuild",
+    ])
+    t.add_argument("--competency", default="",
+                   help="Filter by EM competency (e.g. hiring_bar, growing_engineers)")
+    t.add_argument("--search", default="", help="Free-text search over stories")
+    t.add_argument("--rebuild", action="store_true",
+                   help="Rebuild the story bank from the profile")
+    t = _sub(es, "narrative", "Build a team-health narrative scaffold for a prompt.", [
+        "python -m candid em narrative --prompt struggling-team",
+        "python -m candid em narrative --prompt raised-the-bar",
+    ])
+    t.add_argument("--prompt", required=True,
+                   help="One of: struggling-team, raised-the-bar, managing-up, "
+                        "incident, underperformer, cross-team")
+    t = _sub(es, "update-template", "Render a weekly team-status update template.", [
+        "python -m candid em update-template --team Payments",
+        "python -m candid em update-template --team Payments --week W38",
+    ])
+    t.add_argument("--team", default="")
+    t.add_argument("--week", default="")
+    t = _sub(es, "exec-summary", "Build an exec summary from bullet notes.", [
+        "python -m candid em exec-summary --notes \"- Shipped X\\n- Risk: Y\"",
+        "cat notes.txt | python -m candid em exec-summary",
+    ])
+    t.add_argument("--notes", default=None,
+                   help="Bullet notes (or pipe them via stdin)")
+    t = _sub(es, "plan-30-60-90", "Generate a 30-60-90 day plan for a new EM role.", [
+        "python -m candid em plan-30-60-90 --company Acme --team Payments",
+        "python -m candid em plan-30-60-90 --company Acme --team Payments --context \"Post-launch scale-up\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--team", required=True)
+    t.add_argument("--context", default="")
+    s.set_defaults(func=cmd_em)
 
     return p
 
