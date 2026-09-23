@@ -17,6 +17,19 @@ class TrackerError(Exception):
     """Raised for invalid tracker operations."""
 
 
+def validate_deadline(raw: str) -> str:
+    """Normalize a deadline string to YYYY-MM-DD ("" clears it)."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    try:
+        return date.fromisoformat(s).isoformat()
+    except ValueError:
+        raise TrackerError(
+            f"Bad deadline {raw!r}: use YYYY-MM-DD, e.g. --deadline 2026-10-15."
+        ) from None
+
+
 def _load(path: str | Path | None = None) -> list[dict]:
     p = Path(path) if path else C.TRACKER_PATH
     if not p.exists():
@@ -43,7 +56,8 @@ def _next_id(apps: list[dict]) -> int:
 
 
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
-        notes: str = "", path: str | Path | None = None) -> dict:
+        notes: str = "", deadline: str = "",
+        path: str | Path | None = None) -> dict:
     """Add an application. Returns the new record.
 
     If the same company+role is already tracked, returns the EXISTING
@@ -54,6 +68,7 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         raise TrackerError("Both --company and --role are required to add an application.")
     if status not in C.STATUSES:
         raise TrackerError(f"Unknown status '{status}'. Choose from: {', '.join(C.STATUSES)}")
+    deadline = validate_deadline(deadline)
     apps = _load(path)
     for a in apps:
         if a["company"].lower() == company.lower() and a["role"].lower() == role.lower():
@@ -65,9 +80,14 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         "jd_link": jd_link.strip(),
         "status": status,
         "notes": notes.strip(),
+        "deadline": deadline,
         "date_added": date.today().isoformat(),
         "date_updated": date.today().isoformat(),
         "prep_pack": "",
+        "resume_variant": {},
+        "cover_letter": {},
+        "match_score": None,
+        "gate": {},
     }
     apps.append(rec)
     _save(apps, path)
@@ -75,8 +95,17 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
 
 
 def update(app_id: int, *, status: str | None = None, notes: str | None = None,
-           prep_pack: str | None = None, path: str | Path | None = None) -> dict:
-    """Update an application's status/notes/prep_pack. Returns the record."""
+           prep_pack: str | None = None, deadline: str | None = None,
+           variant_chosen: bool | None = None,
+           match_score: float | None = None,
+           path: str | Path | None = None) -> dict:
+    """Update an application. Returns the record.
+
+    ``deadline`` sets/clears the YYYY-MM-DD deadline ("" clears).
+    ``variant_chosen=True`` marks the recorded resume variant as the
+    chosen one for submission; ``False`` un-marks it.
+    ``match_score`` stores the last match score for the gate's floor check.
+    """
     apps = _load(path)
     rec = next((a for a in apps if a.get("id") == app_id), None)
     if rec is None:
@@ -89,6 +118,91 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
         rec["notes"] = notes
     if prep_pack is not None:
         rec["prep_pack"] = prep_pack
+    if deadline is not None:
+        rec["deadline"] = validate_deadline(deadline)
+    if variant_chosen is not None:
+        variant = rec.get("resume_variant") or {}
+        if not variant.get("tone"):
+            raise TrackerError(
+                f"No tailored resume variant recorded for application #{app_id} yet. "
+                f"Tailor one first: `python -m candid tailor resume --app-id {app_id} --jd jd.txt`."
+            )
+        variant["chosen"] = bool(variant_chosen)
+        rec["resume_variant"] = variant
+    if match_score is not None:
+        try:
+            score = float(match_score)
+        except (TypeError, ValueError):
+            raise TrackerError(f"Bad match score {match_score!r}: use a number 0-100.") from None
+        if not 0 <= score <= 100:
+            raise TrackerError(f"Bad match score {match_score!r}: use a number 0-100.")
+        rec["match_score"] = round(score, 1)
+    # tolerate records created before the gate fields existed
+    rec.setdefault("resume_variant", {})
+    rec.setdefault("cover_letter", {})
+    rec.setdefault("match_score", None)
+    rec.setdefault("gate", {})
+    rec["date_updated"] = date.today().isoformat()
+    _save(apps, path)
+    return rec
+
+
+def record_variant(app_id: int, *, tone: str, length: str, jd_text: str,
+                   resume_text: str, chosen: bool = False,
+                   path: str | Path | None = None) -> dict:
+    """Record a tailored resume variant on the application (for the gate)."""
+    from candid import gate as G
+    apps = _load(path)
+    rec = next((a for a in apps if a.get("id") == app_id), None)
+    if rec is None:
+        raise TrackerError(f"No application with id {app_id}. Use `track list` to see ids.")
+    rec["resume_variant"] = {
+        "tone": tone,
+        "length": length,
+        "jd_sha": G.jd_sha(jd_text),
+        "created_at": date.today().isoformat(),
+        "chosen": bool(chosen),
+        "resume_text": resume_text,
+    }
+    rec["date_updated"] = date.today().isoformat()
+    _save(apps, path)
+    return rec
+
+
+def record_cover_letter(app_id: int, *, text: str, hook: str = "",
+                        path: str | Path | None = None) -> dict:
+    """Record a tailored cover letter on the application (for the gate)."""
+    apps = _load(path)
+    rec = next((a for a in apps if a.get("id") == app_id), None)
+    if rec is None:
+        raise TrackerError(f"No application with id {app_id}. Use `track list` to see ids.")
+    rec["cover_letter"] = {
+        "created_at": date.today().isoformat(),
+        "hook": hook or "",
+        "text": text,
+    }
+    rec["date_updated"] = date.today().isoformat()
+    _save(apps, path)
+    return rec
+
+
+def record_gate_result(app_id: int, result: dict,
+                       path: str | Path | None = None) -> dict:
+    """Stamp the last gate run onto the application. Returns the record."""
+    apps = _load(path)
+    rec = next((a for a in apps if a.get("id") == app_id), None)
+    if rec is None:
+        raise TrackerError(f"No application with id {app_id}. Use `track list` to see ids.")
+    rec["gate"] = {
+        "ran_at": date.today().isoformat(),
+        "gate_version": result.get("gate_version", 1),
+        "verdict": result.get("verdict", ""),
+        "strict": bool(result.get("strict", False)),
+        "blocks": list(result.get("blocks", [])),
+        "warnings": list(result.get("warnings", [])),
+        "passed": result.get("passed", 0),
+        "total": result.get("total", 0),
+    }
     rec["date_updated"] = date.today().isoformat()
     _save(apps, path)
     return rec

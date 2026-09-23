@@ -2,9 +2,6 @@
   "id": "coin-change",
   "title": "Coin Change",
   "topic": "dp",
-  "patterns": [
-    "dp-2d"
-  ],
   "difficulty": "medium",
   "statement": "Given coins of different denominations and a total `amount`, compute the fewest number of coins needed to make up that amount. Return -1 if impossible.\n\nExample: coins = [1, 2, 5], amount = 11 -> 3 (5 + 5 + 1)",
   "function": "solve(coins, amount)",

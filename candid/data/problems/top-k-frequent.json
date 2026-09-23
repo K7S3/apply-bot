@@ -2,10 +2,6 @@
   "id": "top-k-frequent",
   "title": "Top K Frequent Elements",
   "topic": "heap",
-  "patterns": [
-    "heap-top-k",
-    "hashmap"
-  ],
   "difficulty": "medium",
   "statement": "Given an integer array `nums` and an integer `k`, return the `k` most frequent elements, in any order.\n\nExample: nums = [1, 1, 1, 2, 2, 3], k = 2 -> [1, 2]",
   "function": "solve(nums, k)",

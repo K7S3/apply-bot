@@ -10,7 +10,6 @@ The filename must match the problem `id`: `<id>.json`.
   "id": "two-sum",
   "title": "Two Sum",
   "topic": "arrays",
-  "patterns": ["hashmap", "two-pointers"],
   "difficulty": "easy",
   "statement": "Markdown problem statement shown to the candidate.",
   "function": "solve(nums, target)",
@@ -28,13 +27,6 @@ The filename must match the problem `id`: `<id>.json`.
 - `id`: lowercase, hyphenated, unique. Used on the CLI: `mock run --problem two-sum`.
 - `topic`: free text, but prefer existing topics so `--topic` filters stay useful
   (`arrays`, `strings`, `hashmap`, `two-pointers`, `dp`, `graphs`, `heap`).
-- `patterns`: **required.** One or more coding-pattern ids from the taxonomy in
-  `candid/patterns.py` (`PATTERNS`), e.g. `["sliding-window", "hashmap"]`.
-  List the primary pattern first. Run `python -m candid patterns tags` to
-  validate every problem's tags; `candid.patterns.load_bank()` raises
-  `PatternsError` on missing or unknown tags, so the seed script and the
-  study-plan builders fail loudly instead of silently dropping problems.
-  See `docs/patterns.md` for the full taxonomy and tagging guidance.
 - `difficulty`: `easy` | `medium` | `hard`.
 - `function`: the exact signature the candidate must implement, e.g. `solve(nums, target)`.
   The judge calls `solve(*args)` from each test case.

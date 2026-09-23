@@ -2,10 +2,6 @@
   "id": "longest-substring",
   "title": "Longest Substring Without Repeating Characters",
   "topic": "strings",
-  "patterns": [
-    "sliding-window",
-    "hashmap"
-  ],
   "difficulty": "medium",
   "statement": "Given a string `s`, find the length of the longest substring without repeating characters.\n\nExample: s = \"abcabcbb\" -> 3 (\"abc\")",
   "function": "solve(s)",

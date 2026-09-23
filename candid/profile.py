@@ -548,6 +548,30 @@ def load_profile(path: str | Path | None = None) -> dict:
         raise OnboardError(f"Profile file {p} is not valid JSON: {exc}") from exc
 
 
+#: Profile keys `profile set` is allowed to change (contact + identity only;
+#: skills/experience stay owned by onboarding so tailoring stays grounded).
+SETTABLE_FIELDS = ("name", "headline", "location", "email", "phone")
+
+
+def update_fields(fields: dict, path: str | Path | None = None) -> dict:
+    """Set contact/identity fields on the stored profile. Returns the profile."""
+    unknown = [k for k in fields if k not in SETTABLE_FIELDS]
+    if unknown:
+        raise OnboardError(
+            f"Cannot set {', '.join(unknown)}: only "
+            f"{', '.join(SETTABLE_FIELDS)} are settable "
+            "(re-run `onboard` to change skills/experience)."
+        )
+    profile = load_profile(path)
+    for key, value in fields.items():
+        if value is not None:
+            profile[key] = value.strip()
+    p = Path(path) if path else C.PROFILE_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    return profile
+
+
 def profile_card(profile: dict) -> str:
     """One-screen human-readable summary of a profile."""
     lines = [

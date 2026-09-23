@@ -69,10 +69,15 @@ def _short(text: str, n: int = 64) -> str:
     return text if len(text) <= n else text[:n - 3] + "..."
 
 
-def _ats_keyword_check(resume_text: str, jd: str) -> str:
-    """Which JD keywords/skills appear in the tailored resume, which don't."""
+def keyword_coverage(resume_text: str, jd: str) -> dict:
+    """JD skill keywords covered vs missing in the resume text.
+
+    Returns {"covered": [...], "missing": [...], "total": N,
+    "coverage": 0.0-1.0}. Shared by the tailor ATS check and the
+    pre-submit gate so both measure coverage the same way.
+    """
     ex = _extract_jd(jd)
-    low = resume_text.lower()
+    low = (resume_text or "").lower()
     covered, missing = [], []
     for name in sorted(ex["items"]):
         info = ex["items"][name]
@@ -83,9 +88,18 @@ def _ats_keyword_check(resume_text: str, jd: str) -> str:
                             low) is not None
         (covered if hit else missing).append(name)
     total = len(ex["items"])
-    lines = [f"Covered ({len(covered)}/{total}): " + (", ".join(covered) if covered else "none")]
-    lines.append(f"Missing from this resume ({len(missing)}): " +
-                 (", ".join(missing) if missing else "none - good coverage"))
+    return {"covered": covered, "missing": missing, "total": total,
+            "coverage": (len(covered) / total) if total else 1.0}
+
+
+def _ats_keyword_check(resume_text: str, jd: str) -> str:
+    """Which JD keywords/skills appear in the tailored resume, which don't."""
+    cov = keyword_coverage(resume_text, jd)
+    total = cov["total"]
+    lines = [f"Covered ({len(cov['covered'])}/{total}): " +
+             (", ".join(cov["covered"]) if cov["covered"] else "none")]
+    lines.append(f"Missing from this resume ({len(cov['missing'])}): " +
+                 (", ".join(cov["missing"]) if cov["missing"] else "none - good coverage"))
     return "\n".join(lines)
 
 
@@ -139,7 +153,8 @@ def build_resume(profile: dict, jd: str, company: str = "", role: str = "",
 
     name = profile.get("name") or "Your Name"
     lines = [name.upper()]
-    contact_bits = [b for b in [profile.get("location"), profile.get("headline")] if b]
+    contact_bits = [b for b in [profile.get("email"), profile.get("phone"),
+                                profile.get("location"), profile.get("headline")] if b]
     if contact_bits:
         lines.append(" | ".join(contact_bits))
     lines += ["", "SUMMARY", summary, "", "EXPERIENCE", ""]

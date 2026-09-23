@@ -58,6 +58,15 @@ STATUSES = [
 # Responses = the company got back to you in any substantive way.
 RESPONSE_STATUSES = {"selected_for_interview", "rejected", "offer"}
 
+# --- pre-submit quality gate -------------------------------------------------
+#: Warn when the match score for an application is below this (0-100).
+GATE_MATCH_FLOOR = 55
+#: Warn when the application deadline is this many days away (or fewer).
+GATE_DEADLINE_WARN_DAYS = 3
+#: Warn when the tailored resume covers less than this fraction of the
+#: JD's skill keywords (0.0-1.0).
+GATE_KEYWORD_COVERAGE_WARN = 0.5
+
 # --- match scoring ------------------------------------------------------------
 SCORE_STRONG_GO = 70
 SCORE_CONDITIONAL_GO = 50
