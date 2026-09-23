@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "draft", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -40,6 +40,9 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
+    "draft": ["context", "thread", "generate", "ladder", "followups", "check",
+              "send-time", "revise", "save", "list", "show", "diff",
+              "voice-learn"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
@@ -292,6 +295,18 @@ def cmd_followup(a):
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def cmd_draft(a):
+    from candid import drafts as D
+    handler = {
+        "context": D.context, "thread": D.thread, "generate": D.generate,
+        "ladder": D.ladder, "followups": D.followups, "check": D.check,
+        "send-time": D.send_time, "revise": D.revise, "save": D.save,
+        "list": D.list_drafts, "show": D.show, "diff": D.diff,
+        "voice-learn": D.voice_learn,
+    }[a.what]
+    handler(a)
 
 
 def cmd_offer(a):
@@ -652,6 +667,78 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--tone", default="warm", choices=["warm", "formal", "concise"])
     t.add_argument("--topics", default="", help="Your connection to them")
     s.set_defaults(func=cmd_followup)
+
+    # draft (context-aware email drafter; drafts only, never sends)
+    s = _sub(sub, "draft", "Context-aware email drafts from tracker + thread history.", [
+        "python -m candid draft generate --kind thank_you --company Acme",
+        "python -m candid draft ladder --company Acme",
+        "python -m candid draft followups",
+    ])
+    fs = _nested(s)
+    t = _sub(fs, "context", "Show the context packet used for drafting.", [
+        "python -m candid draft context --company Acme",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--app-id", default=None)
+    t = _sub(fs, "thread", "Summarize thread history for a company.", [
+        "python -m candid draft thread --company Acme",
+    ])
+    t.add_argument("--company", required=True)
+    t = _sub(fs, "generate", "Generate a draft email of the given kind.", [
+        "python -m candid draft generate --kind thank_you --company Acme --contact-name \"Jane Doe\"",
+    ])
+    t.add_argument("--kind", required=True,
+                   help="thank_you|check_in|referral_request|post_interview|offer_stall|rejection_thanks|cold_intro")
+    t.add_argument("--company", required=True); t.add_argument("--app-id", default=None)
+    t.add_argument("--contact-name", default=""); t.add_argument("--role", default="")
+    t.add_argument("--last-contact-date", default="")
+    t.add_argument("--tone", default="professional", choices=["professional", "friendly", "concise"])
+    t.add_argument("--personalize", action="store_true", help="Fill tokens from your profile")
+    t.add_argument("--check", action="store_true", help="Run hygiene checks on the draft")
+    t = _sub(fs, "ladder", "Pick the right follow-up tone rung and draft it.", [
+        "python -m candid draft ladder --company Acme",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--app-id", default=None)
+    t.add_argument("--contact-name", default=""); t.add_argument("--role", default="")
+    t = _sub(fs, "followups", "Suggest next follow-up for every stale application.", [
+        "python -m candid draft followups",
+    ])
+    t = _sub(fs, "check", "Run hygiene checks on a draft.", [
+        "python -m candid draft check --subject \"Quick follow-up\" --body \"Hi Jane, ...\"",
+    ])
+    t.add_argument("--subject", default=""); t.add_argument("--body", default="")
+    t.add_argument("--draft-id", default="")
+    t = _sub(fs, "send-time", "Suggest the best send window.", [
+        "python -m candid draft send-time",
+    ])
+    t = _sub(fs, "revise", "Deterministically revise a draft.", [
+        "python -m candid draft revise --subject \"Hi\" --body \"Hello world. ...\" --instruction \"make it shorter\"",
+    ])
+    t.add_argument("--subject", default=""); t.add_argument("--body", default="")
+    t.add_argument("--draft-id", default=""); t.add_argument("--instruction", default="")
+    t.add_argument("--app-id", default=None, help="With --save-to, save revised draft under this app")
+    t.add_argument("--save-to", default="", help="Kind label when saving the revised draft")
+    t = _sub(fs, "save", "Save a draft under a tracker application.", [
+        "python -m candid draft save --app-id 3 --kind check_in --subject \"Hi\" --body \"Hello\"",
+    ])
+    t.add_argument("--app-id", required=True); t.add_argument("--kind", default="")
+    t.add_argument("--subject", required=True); t.add_argument("--body", required=True)
+    t = _sub(fs, "list", "List saved drafts for an application.", [
+        "python -m candid draft list --app-id 3",
+    ])
+    t.add_argument("--app-id", required=True)
+    t = _sub(fs, "show", "Show a saved draft.", [
+        "python -m candid draft show --draft-id <id>",
+    ])
+    t.add_argument("--draft-id", required=True)
+    t = _sub(fs, "diff", "Diff two saved drafts.", [
+        "python -m candid draft diff --a <id1> --b <id2>",
+    ])
+    t.add_argument("--a", required=True); t.add_argument("--b", required=True)
+    t = _sub(fs, "voice-learn", "Learn a style profile from approved sample emails (JSON file).", [
+        "python -m candid draft voice-learn --samples-file samples.json",
+    ])
+    t.add_argument("--samples-file", required=True)
+    s.set_defaults(func=cmd_draft)
 
     # offer
     s = _sub(sub, "offer", "Record and compare offers.", [
