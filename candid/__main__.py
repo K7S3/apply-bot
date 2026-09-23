@@ -32,7 +32,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin", "patterns",
 ]
 
@@ -42,6 +42,9 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
+    "benefits": ["health", "healthcare", "match", "vesting", "pto", "espp",
+                 "hsa", "fsa", "commute", "leave", "stipends",
+                 "normalize", "compare"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -56,7 +59,7 @@ SUBCOMMANDS = {
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "PatternsError",
     "ValueError",
@@ -69,6 +72,7 @@ _NEXT_COMMAND = {
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
+    "BenefitsError": "python -m candid benefits --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
@@ -313,6 +317,94 @@ def cmd_offer(a):
         path = O.export_comparison(O.list_offers(),
                                    path=a.out or None)
         print(f"Offer comparison exported to {path}")
+
+
+def _money(value: float) -> str:
+    return f"${value:,.0f}"
+
+
+def cmd_benefits(a):
+    from candid import benefits as B
+    if a.what == "health":
+        r = B.health_plan_cost(a.premium, a.deductible, a.coinsurance,
+                               a.oop_max, a.spend)
+        print(f"Annual premium: {_money(r['annual_premium'])}")
+        print(f"Out-of-pocket at {_money(a.spend)} spend: {_money(r['oop_cost'])}")
+        print(f"Total annual cost: {_money(r['total_cost'])}")
+    elif a.what == "healthcare":
+        scenarios = None
+        if a.scenario:
+            scenarios = []
+            for spec in a.scenario:
+                try:
+                    p, s = spec.split(":")
+                    scenarios.append((float(p), float(s)))
+                except ValueError:
+                    raise B.BenefitsError(
+                        f"bad --scenario {spec!r}: use prob:spend, e.g. 0.5:1500")
+        r = B.healthcare_expected_cost(a.premium, a.deductible, a.coinsurance,
+                                       a.oop_max, scenarios=scenarios)
+        for row in r["scenarios"]:
+            print(f"  p={row['probability']:.0%} spend={_money(row['spend'])} "
+                  f"-> cost={_money(row['cost'])}")
+        print(f"Expected annual cost: {_money(r['expected_cost'])}")
+    elif a.what == "match":
+        r = B.match_401k(a.salary, a.contrib_pct, a.formula)
+        print(f"Eligible pay: {_money(r['eligible_pay'])}")
+        for t in r["tiers"]:
+            print(f"  {t['tier']}: {_money(t['amount'])}")
+        print(f"Annual employer match: {_money(r['annual_match'])}")
+    elif a.what == "vesting":
+        r = B.vesting_value(a.balance, a.years, a.schedule)
+        print(f"Vested: {r['vested_pct']:.0%} = {_money(r['vested_value'])} "
+              f"(unvested {_money(r['unvested_value'])})")
+    elif a.what == "pto":
+        r = B.pto_value(a.salary, a.pto_days, a.sick_days, a.holidays)
+        print(f"{r['paid_days_off']:.0f} paid days off at {_money(r['daily_rate'])}/day "
+              f"= {_money(r['value'])}/yr")
+    elif a.what == "espp":
+        r = B.espp_value(a.salary, a.contrib_pct, a.discount_pct,
+                         lookback=a.lookback)
+        print(f"Annual contribution: {_money(r['annual_contribution'])}")
+        print(f"Estimated annual gain: {_money(r['estimated_annual_gain'])}"
+              + (" (with lookback)" if a.lookback else ""))
+    elif a.what == "hsa":
+        r = B.hsa_value(a.seed, a.contribution, a.tax_rate)
+        print(f"Employer seed: {_money(r['employer_seed'])} + "
+              f"tax savings {_money(r['tax_savings'])} = {_money(r['total_value'])}/yr")
+    elif a.what == "fsa":
+        r = B.fsa_value(a.election, a.tax_rate)
+        print(f"FSA tax savings on {_money(r['election'])}: {_money(r['tax_savings'])}/yr")
+        print(f"Note: {r['note']}")
+    elif a.what == "commute":
+        r = B.commute_value(a.pretax, a.subsidy, a.tax_rate)
+        print(f"Tax savings: {_money(r['tax_savings'])} + "
+              f"subsidy {_money(r['subsidy_value'])} = {_money(r['total_value'])}/yr")
+    elif a.what == "leave":
+        r = B.leave_value(a.salary, a.full_weeks, a.partial_weeks, a.partial_pct)
+        print(f"Paid leave value: {_money(r['value'])} "
+              f"({r['weeks_full_pay']:.0f} wks full + {r['weeks_partial_pay']:.0f} wks "
+              f"at {a.partial_pct:.0%})")
+    elif a.what == "stipends":
+        stipends = {}
+        for spec in a.set or []:
+            try:
+                k, v = spec.split("=", 1)
+                stipends[k.strip()] = float(v)
+            except ValueError:
+                raise B.BenefitsError(
+                    f"bad --set {spec!r}: use name=amount, e.g. wellness=1200")
+        r = B.stipends_value(stipends)
+        for item in r["stipends"]:
+            print(f"  {item['name']}: {_money(item['amount'])}")
+        print(f"Total stipends: {_money(r['total_value'])}/yr")
+    elif a.what == "normalize":
+        pkg = B.load_package(a.package)
+        print(B.render_normalized(B.normalize_package(pkg)))
+    elif a.what == "compare":
+        pa = B.load_package(a.package_a)
+        pb = B.load_package(a.package_b)
+        print(B.render_comparison(B.compare_packages(pa, pb)))
 
 
 def cmd_negotiate(a):
@@ -801,6 +893,102 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
     s.set_defaults(func=cmd_offer)
+
+    # benefits
+    s = _sub(sub, "benefits", "Normalize benefits into dollars and compare packages.", [
+        "python -m candid benefits health --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000 --spend 8000",
+        "python -m candid benefits match --salary 150000 --contrib-pct 0.10 --formula 100:3,50:2",
+        "python -m candid benefits pto --salary 150000 --pto-days 20 --sick-days 5",
+        "python -m candid benefits normalize --package samples/candid/sample_benefits_a.json",
+        "python -m candid benefits compare --package-a samples/candid/sample_benefits_a.json --package-b samples/candid/sample_benefits_b.json",
+    ])
+    bs = _nested(s)
+    t = _sub(bs, "health", "Annual cost of a health plan at a given spend level.", [
+        "python -m candid benefits health --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000 --spend 8000",
+    ])
+    t.add_argument("--premium", type=float, required=True, help="Employee monthly premium $")
+    t.add_argument("--deductible", type=float, required=True)
+    t.add_argument("--coinsurance", type=float, required=True, help="Fraction 0-1, e.g. 0.2")
+    t.add_argument("--oop-max", type=float, required=True)
+    t.add_argument("--spend", type=float, required=True, help="Expected annual medical spend $")
+    t = _sub(bs, "healthcare", "Scenario-weighted expected healthcare cost.", [
+        "python -m candid benefits healthcare --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000",
+        "python -m candid benefits healthcare --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000 --scenario 0.6:1000 --scenario 0.4:12000",
+    ])
+    t.add_argument("--premium", type=float, required=True)
+    t.add_argument("--deductible", type=float, required=True)
+    t.add_argument("--coinsurance", type=float, required=True)
+    t.add_argument("--oop-max", type=float, required=True)
+    t.add_argument("--scenario", action="append", default=[],
+                   help="prob:spend, repeatable (default low/mid/high mix)")
+    t = _sub(bs, "match", "Annual 401(k) employer match in dollars.", [
+        "python -m candid benefits match --salary 150000 --contrib-pct 0.10 --formula 100:3,50:2",
+    ])
+    t.add_argument("--salary", type=float, required=True)
+    t.add_argument("--contrib-pct", type=float, default=0.06,
+                   help="Your contribution as fraction of pay, e.g. 0.10")
+    t.add_argument("--formula", default="100:3,50:2",
+                   help="Tiered formula, e.g. '100:3,50:2'")
+    t = _sub(bs, "vesting", "Vested fraction of an employer-match balance.", [
+        "python -m candid benefits vesting --balance 20000 --years 2 --schedule cliff:3",
+    ])
+    t.add_argument("--balance", type=float, required=True)
+    t.add_argument("--years", type=float, required=True, help="Years of service")
+    t.add_argument("--schedule", default="graded:6", help="'cliff:N' or 'graded:N'")
+    t = _sub(bs, "pto", "Convert PTO / sick / holidays to dollars.", [
+        "python -m candid benefits pto --salary 150000 --pto-days 20 --sick-days 5",
+    ])
+    t.add_argument("--salary", type=float, required=True)
+    t.add_argument("--pto-days", type=float, default=0)
+    t.add_argument("--sick-days", type=float, default=0)
+    t.add_argument("--holidays", type=float, default=0)
+    t = _sub(bs, "espp", "Estimated annual ESPP gain.", [
+        "python -m candid benefits espp --salary 150000 --contrib-pct 0.10 --discount-pct 0.15",
+        "python -m candid benefits espp --salary 150000 --contrib-pct 0.10 --discount-pct 0.15 --lookback",
+    ])
+    t.add_argument("--salary", type=float, required=True)
+    t.add_argument("--contrib-pct", type=float, default=0.10)
+    t.add_argument("--discount-pct", type=float, default=0.15)
+    t.add_argument("--lookback", action="store_true")
+    t = _sub(bs, "hsa", "HSA annual value: employer seed + tax savings.", [
+        "python -m candid benefits hsa --seed 1000 --contribution 3000 --tax-rate 0.24",
+    ])
+    t.add_argument("--seed", type=float, default=0)
+    t.add_argument("--contribution", type=float, default=0)
+    t.add_argument("--tax-rate", type=float, default=0.24, help="Marginal rate 0-1")
+    t = _sub(bs, "fsa", "FSA annual value: tax savings on the election.", [
+        "python -m candid benefits fsa --election 3000 --tax-rate 0.24",
+    ])
+    t.add_argument("--election", type=float, required=True)
+    t.add_argument("--tax-rate", type=float, default=0.24)
+    t = _sub(bs, "commute", "Commuter/parking benefit annual value.", [
+        "python -m candid benefits commute --pretax 200 --subsidy 100 --tax-rate 0.24",
+    ])
+    t.add_argument("--pretax", type=float, default=0, help="Monthly pre-tax deduction $")
+    t.add_argument("--subsidy", type=float, default=0, help="Monthly employer subsidy $")
+    t.add_argument("--tax-rate", type=float, default=0.24)
+    t = _sub(bs, "leave", "Paid parental/family leave converted to dollars.", [
+        "python -m candid benefits leave --salary 150000 --full-weeks 12",
+        "python -m candid benefits leave --salary 150000 --partial-weeks 8 --partial-pct 0.6",
+    ])
+    t.add_argument("--salary", type=float, required=True)
+    t.add_argument("--full-weeks", type=float, default=0)
+    t.add_argument("--partial-weeks", type=float, default=0)
+    t.add_argument("--partial-pct", type=float, default=0.6)
+    t = _sub(bs, "stipends", "Sum named stipends into annual dollars.", [
+        "python -m candid benefits stipends --set wellness=1200 --set learning=3000",
+    ])
+    t.add_argument("--set", action="append", default=[], help="name=amount, repeatable")
+    t = _sub(bs, "normalize", "Roll a benefits package JSON into one annual $ number.", [
+        "python -m candid benefits normalize --package samples/candid/sample_benefits_a.json",
+    ])
+    t.add_argument("--package", required=True, help="Path to package JSON file")
+    t = _sub(bs, "compare", "Side-by-side comparison of two package JSON files.", [
+        "python -m candid benefits compare --package-a samples/candid/sample_benefits_a.json --package-b samples/candid/sample_benefits_b.json",
+    ])
+    t.add_argument("--package-a", required=True)
+    t.add_argument("--package-b", required=True)
+    s.set_defaults(func=cmd_benefits)
 
     # negotiate
     s = _sub(sub, "negotiate", "Negotiation playbook, scripts, counter drafts.", [
