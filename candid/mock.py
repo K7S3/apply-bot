@@ -448,6 +448,98 @@ def design_session(level: str | None = None, ai_feedback: bool = False) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# voice mock mode (optional TTS/STT, degrades to text)
+# ---------------------------------------------------------------------------
+
+def _key_points_behavioral(q: dict) -> list[dict]:
+    """STAR rubric dimensions + what-good-looks-like as key points."""
+    from candid import voice as V
+    points = [{"point": f"{r['dimension']}: {r['check']}", "keywords": r["signals"]}
+              for r in _behavioral_rubric()]
+    points.append({"point": f"What good looks like: {q['what_good_looks_like']}",
+                   "keywords": V.significant_words(q["what_good_looks_like"])})
+    return points
+
+
+def _key_points_design(q: dict) -> list[dict]:
+    """Sample-structure steps as key points."""
+    from candid import voice as V
+    return [{"point": step, "keywords": V.significant_words(step)}
+            for step in q["sample_structure"]]
+
+
+def _key_points_coding(p: dict) -> list[dict]:
+    """Hints + complexity as key points for a talk-through of the approach."""
+    from candid import voice as V
+    points = [{"point": f"Key idea {i}: {h[:100]}",
+               "keywords": V.significant_words(h)}
+              for i, h in enumerate(p.get("hints", []), 1)]
+    points.append({"point": "States time/space complexity of the approach",
+                   "keywords": ["complexity", "time", "space", "o(n", "o(1",
+                                "big-o", "big o", "linear", "log"]})
+    return points
+
+
+def voice_session(kind: str = "behavioral", stt_backend: str | None = None,
+                  theme: str | None = None, level: str | None = None,
+                  topic: str | None = None, difficulty: str | None = None,
+                  problem_id: str | None = None, seed: int | None = None) -> dict:
+    """Voice mock interview: question read aloud (TTS if available),
+    answer captured via an STT backend (or typed), transcript scored by
+    key-point coverage. Fully degrades to text mode. Returns the session report.
+    """
+    from candid import voice as V
+
+    kind = (kind or "behavioral").lower()
+    if kind not in ("behavioral", "coding", "design"):
+        raise MockError(f"Unknown voice kind '{kind}'. Choose: behavioral, coding, design.")
+
+    stt = V.select_stt(stt_backend)
+
+    if kind == "behavioral":
+        q = _pick_behavioral(theme)
+        item_id, title = q["id"], f"Behavioral — {q['theme']}"
+        spoken = f"Behavioral question, theme {q['theme']}. {q['question']}"
+        points = _key_points_behavioral(q)
+    elif kind == "design":
+        q = _pick_design(level)
+        item_id, title = q["id"], f"System design ({q['level']})"
+        spoken = f"System design prompt, {q['level']} level. {q['prompt']}"
+        points = _key_points_design(q)
+    else:
+        p = get_problem(problem_id) if problem_id else pick_problem(topic, difficulty, seed)
+        item_id, title = p["id"], f"Coding — {p['title']}"
+        spoken = f"Coding problem: {p['title']}. {p['statement']} Talk through your approach out loud."
+        points = _key_points_coding(p)
+
+    print(f"### Voice mock — {title}\n")
+    print(f"STT backend: {stt.name}")
+    mode = V.speak(spoken)
+    if mode == "text":
+        print("(No TTS engine found — tried: say, espeak, spd-say. Text mode.)\n")
+        print(spoken + "\n")
+    else:
+        print("(Question read aloud.)\n")
+
+    t0 = datetime.now()
+    answer = stt.capture()
+    if len(answer.strip()) < 50:
+        print("That answer is very short — a strong spoken answer is usually 150+ words.\n")
+
+    result = V.score_points(answer, points)
+    print(V.render_point_score(result))
+
+    notes = (f"Voice session via STT backend '{stt.name}' ({mode} mode). "
+             f"Point coverage {result['score']}/{result['max']}.\n"
+             f"Transcript excerpt: {answer[:800]}")
+    report = _session_report(f"voice_{kind}", item_id, "completed", 1, 0,
+                             t0, f"{result['score']}/{result['max']}", notes=notes)
+    _save_session(report)
+    print("\n" + _render_report(report))
+    return report
+
+
+# ---------------------------------------------------------------------------
 # session reports
 # ---------------------------------------------------------------------------
 

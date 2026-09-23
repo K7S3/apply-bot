@@ -37,6 +37,7 @@ DATA_DIR = _data_dir()
 CONFIG_DIR = _config_dir()
 PROFILE_PATH = DATA_DIR / "profile.json"
 TRACKER_PATH = DATA_DIR / "tracker.json"
+NETWORK_PATH = DATA_DIR / "network.json"
 OFFERS_PATH = DATA_DIR / "offers.json"
 SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
@@ -54,6 +55,7 @@ STATUSES = [
     "rejected",
     "offer",
     "withdrawn",
+    "archived",
 ]
 # Responses = the company got back to you in any substantive way.
 RESPONSE_STATUSES = {"selected_for_interview", "rejected", "offer"}

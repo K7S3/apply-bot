@@ -19,6 +19,15 @@ Also surfaces: matched skills with the JD snippet each appeared in, missing
 must-have skills with a one-line pointer on how to close each, gaps, a go /
 conditional / no-go recommendation, a parse-confidence note, and - when
 salary data exists - the market range for the role (see candid.salary).
+
+Skill aliases (candid.skills, data in candid/data/skill_aliases.json) are
+applied during matching, in both directions: JD "k8s" matches profile
+"Kubernetes" and vice versa. Aliases only add matches, never remove.
+
+When the profile has GitHub projects stored (via
+`python -m candid profile github --user NAME`), the result also includes
+"best_project": the repo with the most JD keyword overlap, labeled as a
+keyword-overlap match only — never a claim about what the project proves.
 """
 
 from __future__ import annotations
@@ -27,6 +36,7 @@ import re
 import urllib.request
 
 from candid import config as C
+from candid import skills as SK
 
 
 class MatchError(Exception):
@@ -456,6 +466,22 @@ def _confidence_note(jd: str, ex: dict, jd_level: int | None) -> str:
     return f"Medium parse confidence: {n} skill/seniority signals found."
 
 
+def _best_project(profile: dict, jd: str) -> dict | None:
+    """Most relevant GitHub project for this JD (keyword overlap only).
+
+    Returns None when the profile has no stored projects or nothing
+    overlaps. Lazy import: github_projects is only needed here.
+    """
+    repos = profile.get("github_projects") or []
+    if not repos or not (jd or "").strip():
+        return None
+    try:
+        from candid import github_projects as G
+        return G.best_project_for_jd(repos, jd)
+    except Exception:
+        return None
+
+
 def score_match(profile: dict, jd: str, title: str = "", company: str = "",
                 location: str = "") -> dict:
     """Score the JD against the profile. Returns a full breakdown dict."""
@@ -466,11 +492,27 @@ def score_match(profile: dict, jd: str, title: str = "", company: str = "",
     prof_text = json_text(profile).lower()
 
     def _matched(name: str, info: dict) -> bool:
+        # Alias-aware matching (candid.skills): a JD term and a profile term
+        # match when they normalize to the same canonical skill name, in
+        # either direction (JD says "k8s", profile says "Kubernetes" and vice
+        # versa). Aliases only ADD matches — the plain checks below still run.
+        want = SK.canonical(name)
+        pcanon = {SK.canonical(s) for s in pskills}
+        if want in pcanon:
+            return True
         if info["aliases"] is not None:
-            return name in pskills
-        # free-form term: look for it in the profile's full text
-        return re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])",
-                         prof_text) is not None
+            # lexicon item (e.g. "mlops" from a "kubernetes" mention): the
+            # profile may name the tool rather than the umbrella term.
+            alias_canon = {SK.canonical(a) for a in info["aliases"]}
+            return bool(pcanon & alias_canon)
+        # free-form term: raw text check, then alias-normalized token check
+        # (so JD "k8s" finds profile "Kubernetes" in bullets/headline text).
+        if re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])",
+                     prof_text) is not None:
+            return True
+        tokens = {SK.canonical(t)
+                  for t in re.findall(r"[A-Za-z0-9+#]+", prof_text)}
+        return want in tokens
 
     matched = {n for n, i in items.items() if _matched(n, i)}
     missing = set(items) - matched
@@ -574,6 +616,8 @@ def score_match(profile: dict, jd: str, title: str = "", company: str = "",
                                    for s in sorted(must & missing)},
         "confidence_note": _confidence_note(jd, ex, jd_level),
         "years_required": jd_years,
+        # most relevant GitHub project (keyword overlap only, not proof of skill)
+        "best_project": _best_project(profile, jd),
     }
 
 
@@ -618,6 +662,13 @@ def render_report(result: dict, company: str = "", title: str = "") -> str:
         lines.append("How to close the must-have gaps:")
         for s, tip in result["missing_skill_pointers"].items():
             lines.append(f"  - {s}: {tip}")
+    bp = result.get("best_project")
+    if bp:
+        repo = bp["repo"]
+        lines += ["", "Most relevant project (keyword overlap with this JD only — "
+                  "not proof of skill; see the repo for what it actually does):",
+                  f"  {repo.get('name')} — {repo.get('url')}",
+                  "  overlap: " + ", ".join(bp["overlap"])]
     if result["gaps"]:
         lines += ["", "Gaps to close:"] + [f"  * {g}" for g in result["gaps"]]
     m = result.get("market")

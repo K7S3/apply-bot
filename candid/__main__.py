@@ -5,6 +5,7 @@
     python -m candid tailor resume --jd jd.txt --company X --role Y
     python -m candid track add --company X --role Y
     python -m candid prep --company X --role Y
+    python -m candid prep brief --company X
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
     python -m candid dashboard            # local web UI (127.0.0.1 only)
@@ -32,29 +33,34 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "network",
 ]
 
 SUBCOMMANDS = {
-    "profile": ["show"],
+    "profile": ["show", "autofill", "github"],
+    "prep": ["brief"],
     "tailor": ["resume", "cover-letter"],
-    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
+    "track": ["add", "list", "update", "remove", "stats", "search", "export-csv",
+              "export-ics", "ghosts"],
+    "network": ["add", "list", "thanks", "mark-thanked"],
     "followup": ["thank-you", "check-in", "referral"],
-    "offer": ["add", "list", "compare", "export"],
+    "offer": ["add", "list", "compare", "export", "parse"],
     "negotiate": ["playbook", "script", "counter"],
-    "salary": ["lookup", "import-lca", "parse-range"],
+    "salary": ["lookup", "import-lca", "parse-range", "sponsor"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
-             "behavioral", "design"],
-    "jobs": ["curate", "refresh", "list"],
-    "gmail": ["import", "proposals", "confirm", "reject", "guide"],
+             "behavioral", "design", "voice"],
+    "jobs": ["curate", "refresh", "list", "rank-remote"],
+    "gmail": ["import", "proposals", "confirm", "reject", "guide", "classify"],
     "linkedin": ["import", "guide"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
-    "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "SalaryError", "MockError", "JudgeError",
+    "OnboardError", "MatchError", "TrackerError", "PrepError", "BriefError",
+    "OfferError", "SalaryError", "MockError", "JudgeError", "VoiceError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "AutofillError", "IcalError", "GithubError", "SponsorError",
+    "GhostError", "NetworkError",
     "ValueError",
 }
 
@@ -64,14 +70,22 @@ _NEXT_COMMAND = {
     "MatchError": "python -m candid match --help",
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
+    "BriefError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
+    "VoiceError": "python -m candid mock voice --help",
     "GmailError": "python -m candid gmail --help",
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "AutofillError": "python -m candid profile autofill --help",
+    "IcalError": "python -m candid track export-ics --help",
+    "GithubError": "python -m candid profile github --help",
+    "SponsorError": "python -m candid salary sponsor --help",
+    "GhostError": "python -m candid track ghosts --help",
+    "NetworkError": "python -m candid network --help",
 }
 
 
@@ -147,8 +161,36 @@ def cmd_onboard(a):
 
 
 def cmd_profile_show(a):
+    if getattr(a, "what", "show") == "autofill":
+        from candid import autofill as A
+        print(A.autofill_kit(section=a.section or "all"))
+        return
     from candid import profile as P
     print(P.profile_card(_profile()))
+
+
+def cmd_profile_github(a):
+    from candid import github_projects as G
+    if not a.user:
+        sys.exit("Provide your GitHub username with --user.\n"
+                 "Next: run `python -m candid profile github --help`.")
+    repos, source = G.fetch_or_cached(a.user, refresh=a.refresh)
+    G.store_in_profile(a.user, repos)
+    notes = {"api": "fresh from the GitHub API",
+             "cache": "from the local cache (use --refresh to refetch)",
+             "cache-stale": "from an older local cache — the API was unreachable"}
+    print(f"Stored {len(repos)} public repo(s) for GitHub user '{a.user}' "
+          f"({notes.get(source, source)}).")
+    print("They are now part of your profile: `match` will cite the most "
+          "relevant one per JD (keyword overlap only).")
+    print(G.render_projects(repos))
+
+
+def cmd_profile(a):
+    if a.what == "github":
+        cmd_profile_github(a)
+    else:
+        cmd_profile_show(a)
 
 
 def _jd_text(a) -> str:
@@ -202,6 +244,11 @@ def cmd_match(a):
         print(json.dumps(result, indent=2, default=str))
     else:
         print(M.render_report(result, company=company, title=role))
+    if company:
+        from candid import sponsor as SP
+        line = SP.sponsor_line(company)
+        if line:
+            print("\n" + line)
 
 
 def cmd_tailor(a):
@@ -267,13 +314,65 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+    elif a.what == "export-ics":
+        from candid import ical as I
+        path, events, skipped = I.export_ics(a.out)
+        print(I.render_report(path, events, skipped))
+    elif a.what == "ghosts":
+        from candid import ghosts as G
+        ghosts = G.find_ghosts(days=a.days)
+        print(G.render_ghosts(ghosts, days=a.days))
+
+
+def cmd_network(a):
+    from candid import network as N
+    if a.what == "add":
+        rec = N.add(a.type, a.contact, company=a.company or "",
+                    role=a.role or "", notes=a.notes or "")
+        print(f"Logged {rec['type']} #{rec['id']}: {rec['contact']}"
+              + (f" @ {rec['company']}" if rec['company'] else ""))
+        if rec["type"] in N.THANK_YOU_TYPES:
+            print("Thank-you owed — see it with: python -m candid network thanks")
+    elif a.what == "list":
+        contacts = N.list_contacts(type_=a.type)
+        if a.json:
+            print(json.dumps(contacts, indent=2, default=str))
+            return
+        print(N.render_list(contacts))
+    elif a.what == "thanks":
+        if a.draft is not None:
+            prof = _profile()
+            print(N.thank_you_draft(a.draft, prof.get("name") or "Your Name"))
+        else:
+            print(N.render_thanks(N.thanks_owed()))
+    elif a.what == "mark-thanked":
+        rec = N.mark_thanked(a.id)
+        print(f"Marked #{rec['id']} ({rec['contact']}) as thanked.")
 
 
 def cmd_prep(a):
-    from candid import prep as P
+    from candid import prep as P, briefs as B
+    what = getattr(a, "what", None)
+    if what == "brief":
+        if not a.company:
+            sys.exit('`prep brief` needs --company "Name" '
+                     '(e.g. --company "Acme Corp").')
+        brief = B.get_brief(a.company, refresh=a.refresh)
+        print(B.render_brief(brief))
+        return
+    if not a.company or not a.role:
+        sys.exit('`prep` needs --company "Name" and --role "Title".')
     jd = _jd_text(a) if a.jd else ""
+    brief_section = None
+    if not a.no_brief:
+        try:
+            brief_section = B.render_brief(
+                B.get_brief(a.company, refresh=a.refresh))
+        except B.BriefError:
+            brief_section = None
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
-                                  app_id=a.app_id, location=a.location or "")
+                                  app_id=a.app_id, location=a.location or "",
+                                  brief_section=brief_section)
     print(f"Prep pack saved to {path}\n")
     print(markdown[:3000])
     if len(markdown) > 3000:
@@ -308,6 +407,15 @@ def cmd_offer(a):
         path = O.export_comparison(O.list_offers(),
                                    path=a.out or None)
         print(f"Offer comparison exported to {path}")
+    elif a.what == "parse":
+        cmd_offer_parse(a)
+
+
+def cmd_offer_parse(a):
+    from candid import offer_parse as OP
+    OP.confirm_and_add(
+        OP.parse_letter_text(OP.read_letter_text(a.letter)),
+        company=a.company, role=a.role, yes=a.yes, source=str(a.letter))
 
 
 def cmd_negotiate(a):
@@ -338,8 +446,15 @@ def cmd_salary(a):
                                   title=a.title or "", location=a.location or ""))
     elif a.what == "import-lca":
         print(f"Importing {a.file} ...")
-        res = S.import_lca(a.file, limit=a.limit)
+        res = S.import_lca(a.file, limit=a.limit, fiscal_year=a.fiscal_year)
         print(f"Imported {res['imported']} rows, skipped {res['skipped']}.")
+    elif a.what == "sponsor":
+        from candid import sponsor as SP
+        res = SP.score_company(a.company)
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+        else:
+            print(SP.render_score(res, a.company))
     elif a.what == "parse-range":
         if a.text:
             text = a.text
@@ -391,6 +506,10 @@ def cmd_mock(a):
         M.behavioral_session(theme=a.theme, ai_feedback=a.ai)
     elif a.what == "design":
         M.design_session(level=a.level, ai_feedback=a.ai)
+    elif a.what == "voice":
+        M.voice_session(kind=a.kind, stt_backend=a.stt_backend, theme=a.theme,
+                        level=a.level, topic=a.topic, difficulty=a.difficulty,
+                        problem_id=a.problem, seed=a.seed)
 
 
 def cmd_jobs(a):
@@ -405,7 +524,8 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    min_sponsor=getattr(a, "min_sponsor", 0) or 0)
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -425,6 +545,31 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+    elif a.what == "rank-remote":
+        from candid import geo as GEO
+        from candid import jobs as JJ
+        table = GEO.load_col_index()
+        found = GEO.find_metro(a.location, table)
+        if not found:
+            raise J.JobsError(
+                f"Unknown location {a.location!r}. Available metros: "
+                + ", ".join(GEO.list_metros(table)))
+        key, entry = found
+        raw = JJ._adapt_remoteok()
+        if a.role:
+            raw = J.filter_jobs(raw, a.role, "", remote=True,
+                                limit=max(a.limit * 4, 50))
+        ranked = GEO.rank_remote_jobs(raw, key, entry["index"])
+        compare = None
+        if a.compare:
+            cfound = GEO.find_metro(a.compare, table)
+            if not cfound:
+                raise J.JobsError(
+                    f"Unknown --compare location {a.compare!r}. Available: "
+                    + ", ".join(GEO.list_metros(table)))
+            compare = cfound
+        print(GEO.render_ranking(ranked, entry["label"], entry["index"],
+                                 limit=a.limit, compare=compare))
 
 
 def cmd_dashboard(a):
@@ -471,6 +616,13 @@ def cmd_gmail(a):
         print(f"Dismissed proposal #{a.id}.")
     elif a.what == "guide":
         print(G.TAKEOUT_GUIDE)
+    elif a.what == "classify":
+        from candid import classify as CL
+        if not a.mbox:
+            raise G.GmailError("No mbox file given. "
+                               "Run: python -m candid gmail classify --mbox mail.mbox")
+        res = CL.classify_mbox(a.mbox, max_messages=a.max)
+        print(CL.render_classify_summary(res))
 
 
 def cmd_linkedin(a):
@@ -515,12 +667,24 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_onboard)
 
     # profile
-    s = _sub(sub, "profile", "Show your stored profile.", [
+    s = _sub(sub, "profile", "Show your stored profile; autofill kit; link GitHub projects.", [
         "python -m candid profile",
         "python -m candid profile show",
+        "python -m candid profile autofill",
+        "python -m candid profile autofill --section work",
+        "python -m candid profile github --user octocat",
+        "python -m candid profile github --user octocat --refresh",
     ])
-    s.add_argument("what", nargs="?", default="show", choices=["show"])
-    s.set_defaults(func=cmd_profile_show)
+    s.add_argument("what", nargs="?", default="show", choices=["show", "autofill", "github"],
+                   help="show: profile card · autofill: copy-pasteable form answers (fills, never submits) · github: link public GitHub repos")
+    s.add_argument("--section", default="all",
+                   choices=["work", "skills", "education", "eeo", "all"],
+                   help="Which autofill section to print (default: all)")
+    s.add_argument("--user", default="",
+                   help="GitHub username (for `profile github`)")
+    s.add_argument("--refresh", action="store_true",
+                   help="Refetch from the GitHub API instead of using the cache")
+    s.set_defaults(func=cmd_profile)
 
     # match
     s = _sub(sub, "match", "Score a job description against your profile.", [
@@ -606,19 +770,80 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track export-csv tracker.csv",
     ])
     t.add_argument("dest", help="Destination CSV file path")
+    t = _sub(ts, "export-ics", "Export interviews + follow-up reminders as an .ics calendar file.", [
+        "python -m candid track export-ics",
+        "python -m candid track export-ics --out calendar.ics",
+    ])
+    t.add_argument("--out", default="candid.ics",
+                   help="Destination .ics file path (default: candid.ics)")
+    t = _sub(ts, "ghosts", "Flag applications quiet for N days (default 21).", [
+        "python -m candid track ghosts",
+        "python -m candid track ghosts --days 30",
+    ])
+    t.add_argument("--days", type=int, default=21,
+                   help="Flag apps with no status movement in this many days (default: 21)")
     s.set_defaults(func=cmd_track)
 
+    # network
+    s = _sub(sub, "network", "Networking CRM: coffee chats, referrals, thank-yous owed.", [
+        "python -m candid network add --type coffee-chat --contact \"Jane Doe\" --company Acme",
+        "python -m candid network add --type referral-received --contact \"Sam Lee\" --company Acme --role \"Data Scientist\"",
+        "python -m candid network list",
+        "python -m candid network thanks",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "add", "Log a coffee chat, received referral, or given referral.", [
+        "python -m candid network add --type coffee-chat --contact \"Jane Doe\" --company Acme",
+        "python -m candid network add --type referral-received --contact \"Sam Lee\" --company Acme --role \"Data Scientist\" --notes \"referred me for the ML role\"",
+        "python -m candid network add --type referral-given --contact \"Alex Rivera\" --company Globex --role \"Backend Engineer\"",
+    ])
+    t.add_argument("--type", required=True,
+                   choices=["coffee-chat", "referral-received", "referral-given"],
+                   help="Kind of networking entry")
+    t.add_argument("--contact", required=True, help="Person's name")
+    t.add_argument("--company", default=""); t.add_argument("--role", default="")
+    t.add_argument("--notes", default="")
+    t = _sub(ns, "list", "List networking contacts, optionally filtered by type.", [
+        "python -m candid network list",
+        "python -m candid network list --type coffee-chat",
+        "python -m candid network list --json",
+    ])
+    t.add_argument("--type", default=None,
+                   choices=["coffee-chat", "referral-received", "referral-given"])
+    t.add_argument("--json", action="store_true",
+                   help="Print the contact list as JSON (for scripting)")
+    t = _sub(ns, "thanks", "List thank-yous owed, with follow-up draft hooks.", [
+        "python -m candid network thanks",
+        "python -m candid network thanks --draft 2",
+    ])
+    t.add_argument("--draft", type=int, default=None, metavar="ID",
+                   help="Print the thank-you draft for this contact id")
+    t = _sub(ns, "mark-thanked", "Mark a contact's thank-you as sent.", [
+        "python -m candid network mark-thanked 2",
+    ])
+    t.add_argument("id", type=int, help="Network entry id")
+    s.set_defaults(func=cmd_network)
+
     # prep
-    s = _sub(sub, "prep", "Build an interview prep pack.", [
+    s = _sub(sub, "prep", "Build an interview prep pack, or print a company brief.", [
         "python -m candid prep --company Acme --role \"Data Scientist\"",
         "python -m candid prep --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid prep --company Acme --role \"Data Scientist\" --app-id 3",
+        "python -m candid prep --company Acme --role \"Data Scientist\" --no-brief",
+        "python -m candid prep brief --company Acme",
+        "python -m candid prep brief --company Acme --refresh",
     ])
-    s.add_argument("--company", required=True)
-    s.add_argument("--role", required=True)
+    s.add_argument("what", nargs="?", default=None, choices=["brief"],
+                   help='brief: print just the company brief (Wikipedia + SEC EDGAR)')
+    s.add_argument("--company", default="")
+    s.add_argument("--role", default="")
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--no-brief", action="store_true",
+                   help="Skip the company-brief section in the prep pack")
+    s.add_argument("--refresh", action="store_true",
+                   help="Re-fetch the company brief instead of using the local cache")
     s.set_defaults(func=cmd_prep)
 
     # followup
@@ -689,6 +914,14 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid offer export --out offers.md",
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
+    t = _sub(os_, "parse", "Parse an offer letter PDF into an offer record.", [
+        "python -m candid offer parse letter.pdf --company Acme --role \"Data Scientist\"",
+        "python -m candid offer parse letter.pdf --company Acme --role DS --yes",
+    ])
+    t.add_argument("letter", help="Offer letter file (.pdf, .txt, .md)")
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--yes", action="store_true",
+                   help="Accept the extracted fields without confirmation")
     s.set_defaults(func=cmd_offer)
 
     # negotiate
@@ -738,8 +971,18 @@ def build_parser() -> argparse.ArgumentParser:
     t = _sub(ss, "import-lca", "Import DOL H-1B LCA disclosure data.", [
         "python -m candid salary import-lca dol_h1b.csv",
         "python -m candid salary import-lca dol_h1b.csv --limit 5000",
+        "python -m candid salary import-lca H-1B_Disclosure_Data_FY2024.csv --fiscal-year 2024",
     ])
     t.add_argument("file"); t.add_argument("--limit", type=int, default=None)
+    t.add_argument("--fiscal-year", type=int, default=None,
+                   help="DOL disclosure fiscal year (auto-detected from FY#### in the file name)")
+    t = _sub(ss, "sponsor", "H-1B sponsorship likelihood for a company, from your imported LCA rows.", [
+        "python -m candid salary sponsor --company Acme",
+        "python -m candid salary sponsor --company Acme --json",
+    ])
+    t.add_argument("--company", required=True, help="Company name (fuzzy-matched against employer names)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw score breakdown as JSON (for scripting)")
     t = _sub(ss, "parse-range", "Extract and store a pay range from JD text.", [
         "python -m candid salary parse-range --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid salary parse-range --company Acme --role DS --text \"Pay range $120k-$150k\"",
@@ -797,6 +1040,24 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid mock design --level senior --ai",
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
+    t = _sub(ms, "voice", "Voice mock interview: question read aloud (TTS if available), "
+             "answer via STT or typed input, key-point coverage scoring. "
+             "Degrades to text mode when no TTS/mic is available.", [
+        "python -m candid mock voice --kind behavioral",
+        "python -m candid mock voice --kind design --level senior",
+        "python -m candid mock voice --kind coding --difficulty medium --stt-backend vosk",
+    ])
+    t.add_argument("--kind", default="behavioral",
+                   help="behavioral | coding | design")
+    t.add_argument("--stt-backend", default=None,
+                   help="STT backend: typed (default), vosk, speech_recognition. "
+                        "Unavailable backends fall back to typed.")
+    t.add_argument("--theme", default=None, help="behavioral theme filter")
+    t.add_argument("--level", default=None, help="design level filter")
+    t.add_argument("--topic", default=None, help="coding topic filter")
+    t.add_argument("--difficulty", default=None, help="coding difficulty filter")
+    t.add_argument("--problem", default=None, help="coding problem id")
+    t.add_argument("--seed", type=int, default=None, help="coding problem random seed")
     s.set_defaults(func=cmd_mock)
 
     # jobs
@@ -810,6 +1071,7 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid jobs curate --role \"Data Scientist\" --remote",
         "python -m candid jobs curate --role \"Data Scientist\" --location \"New York\" --level senior --limit 10",
         "python -m candid jobs curate --role \"Data Scientist\" --sources arbeitnow",
+        "python -m candid jobs curate --role \"Data Scientist\" --remote --min-sponsor 60",
     ])
     t.add_argument("--role", required=True, help="Wanted title, e.g. \"Data Scientist\"")
     t.add_argument("--location", default="")
@@ -821,9 +1083,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--min-sponsor", type=float, default=0,
+                   help="Only keep jobs from companies with H-1B sponsorship score >= N "
+                        "(needs imported LCA data; default 0 = off)")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
+        "python -m candid jobs refresh --role \"Data Scientist\" --min-sponsor 60",
     ])
     t.add_argument("--role", required=True)
     t.add_argument("--location", default="")
@@ -835,12 +1101,26 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--min-sponsor", type=float, default=0,
+                   help="Only keep jobs from companies with H-1B sponsorship score >= N "
+                        "(needs imported LCA data; default 0 = off)")
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",
         "python -m candid jobs list --json   # machine-readable output",
     ])
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
+    t = _sub(js, "rank-remote", "Rank remote roles by effective pay vs cost of living (all figures are estimates).", [
+        "python -m candid jobs rank-remote --location \"New York, NY\"",
+        "python -m candid jobs rank-remote --location \"Austin, TX\" --role \"Data Scientist\"",
+        "python -m candid jobs rank-remote --location \"New York, NY\" --compare \"Austin, TX\"",
+    ])
+    t.add_argument("--location", required=True,
+                   help="Your location, e.g. \"New York, NY\" (see bundled COL metros)")
+    t.add_argument("--role", default="", help="Optional role filter, e.g. \"Data Scientist\"")
+    t.add_argument("--limit", type=int, default=15, help="Roles to show (default: 15)")
+    t.add_argument("--compare", default="",
+                   help="Extra metro for a side-by-side effective-pay column, e.g. \"Austin, TX\"")
     s.set_defaults(func=cmd_jobs)
 
     # dashboard
@@ -870,12 +1150,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_import)
 
     # gmail
-    s = _sub(sub, "gmail", "Gmail Takeout mbox import: parse, propose, confirm.", [
+    s = _sub(sub, "gmail", "Gmail Takeout mbox import: parse, propose, confirm, classify.", [
         "python -m candid gmail import mail.mbox",
         "python -m candid gmail proposals",
         "python -m candid gmail confirm 1",
         "python -m candid gmail reject 2",
         "python -m candid gmail guide",
+        "python -m candid gmail classify --mbox mail.mbox",
     ])
     gs = _nested(s)
     t = _sub(gs, "import", "Import a Google Takeout .mbox file (or directory of them).", [
@@ -898,6 +1179,13 @@ def build_parser() -> argparse.ArgumentParser:
     t = _sub(gs, "guide", "How to export Gmail via Google Takeout.", [
         "python -m candid gmail guide",
     ])
+    t = _sub(gs, "classify", "Classify recruiter mail in a Takeout mbox: direct / agency / interview / unsure. Interview invites become pending proposals.", [
+        "python -m candid gmail classify --mbox mail.mbox",
+        "python -m candid gmail classify --mbox takeout-mail/ --max 500",
+    ])
+    t.add_argument("--mbox", default=None,
+                   help="Path to the .mbox file or a directory of .mbox files")
+    t.add_argument("--max", type=int, default=0, help="Max messages to read (0 = all)")
     s.set_defaults(func=cmd_gmail)
 
     # linkedin
