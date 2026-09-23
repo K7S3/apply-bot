@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "a11y",
 ]
 
 SUBCOMMANDS = {
@@ -430,6 +430,20 @@ def cmd_jobs(a):
 def cmd_dashboard(a):
     from candid import dashboard as D
     D.serve(port=a.port, open_browser=not a.no_browser)
+
+
+def cmd_a11y(a):
+    """Audit the dashboard HTML for accessibility (WCAG 2.2 AA)."""
+    from candid import a11y as A
+    from candid import dashboard as D
+    html_path = a.file or D.HTML_PATH
+    results = A.audit_file(html_path)
+    if a.json:
+        print(json.dumps(A.results_to_dict(results, str(html_path)), indent=2))
+    else:
+        print(A.render_report(results, str(html_path)))
+    if not A.all_passed(results):
+        sys.exit(1)
 
 
 def cmd_import(a):
@@ -852,6 +866,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=8765, help="Preferred port (tries the next 10 if busy)")
     s.add_argument("--no-browser", action="store_true", help="Don't auto-open the browser")
     s.set_defaults(func=cmd_dashboard)
+
+    # a11y
+    s = _sub(sub, "a11y", "Audit the dashboard UI for accessibility (WCAG 2.2 AA).", [
+        "python -m candid a11y",
+        "python -m candid a11y --json",
+    ])
+    s.add_argument("--json", action="store_true",
+                   help="Print the audit as JSON (for scripting/CI)")
+    s.add_argument("--file", metavar="dashboard.html",
+                   help="Audit this HTML file instead of the bundled dashboard")
+    s.set_defaults(func=cmd_a11y)
 
     # import (general entry point for user-supplied exports)
     s = _sub(sub, "import", "Import your own data exports (mbox, LinkedIn ZIP, ...).", [

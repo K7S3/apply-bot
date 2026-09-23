@@ -5,9 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>candid — job search dashboard</title>
 <style>
+/* ---------- accessibility: color contrast audit (WCAG 2.1 AA) ----------
+   Normal text needs 4.5:1; large text (18pt+, or 14pt+ bold) and UI
+   boundaries need 3:1. Audited 2026-09-22 with the WCAG relative-luminance
+   formula (see tests/test_a11y_contrast.py, which re-checks every pair).
+   Text pairs, all passing, so no text color needed changing:
+   --text on --bg 15.7 | --muted on --bg 7.6, on --panel 6.7, on --panel2 5.9
+   --accent on --bg 7.1, on --panel 6.2, on --panel2 5.5
+   --green on --panel 8.1, on --panel2 7.1 | --amber on --panel 8.9, on --panel2 7.9
+   --red on --panel 5.6, on --panel2 4.9
+   button text #06101f on --accent 7.3 (also .chip.active)
+   .saved #e8edf7 on #2b3b5e 9.5 | .applied on #274b63 7.9
+   .selected_for_interview #ffd97a on #3d3a1e 8.5 | .rejected #ff9d9d on #4a2b2b 6.3
+   .offer/.kwchip.covered #7deda9 on #1e4a34 7.0 | .withdrawn on #333 10.8
+   UI boundaries: --line was #2a3856, only 1.2-1.6:1 against adjacent
+   backgrounds, below the 3:1 needed for form-control boundaries.
+   Bumped to #576b96: 3.5 vs --bg, 3.1 vs --panel, 2.7 vs --panel2
+   (borders sit on --bg or --panel, never directly on --panel2, so the
+   3:1 cases are the ones that matter). Dark theme kept.
+   -------------------------------------------------------------------- */
   :root{
     --bg:#0f1420; --panel:#182034; --panel2:#1f2a44;
-    --line:#2a3856; --text:#e8edf7; --muted:#9aa7c4; --accent:#5aa2ff;
+    --line:#576b96; --text:#e8edf7; --muted:#9aa7c4; --accent:#5aa2ff;
     --green:#3ecf8e; --amber:#f5b544; --red:#f26d6d; --radius:12px;
   }
   *{box-sizing:border-box}
@@ -40,6 +59,7 @@
   .toolbar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
   input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid var(--line);
       background:var(--panel2);color:var(--text);padding:8px 10px}
+  input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
   textarea{width:100%;min-height:110px;resize:vertical}
   button{background:var(--accent);border-color:var(--accent);color:#06101f;
          font-weight:600;cursor:pointer}
@@ -89,10 +109,41 @@
   #dropzone.over{border-color:var(--accent);background:var(--panel2)}
   .progress{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:8px}
   .progress>div{height:100%;background:var(--accent);width:0%;transition:width .2s}
+  /* ---------- visible keyboard focus (WCAG 2.4.7) ----------
+     Covers buttons, links, inputs, selects, textareas, sortable th,
+     .chip elements, and any [tabindex] host: the global :focus-visible
+     rule catches them all, so keyboard users always see a 3px white
+     outline (14-18:1 against every dark surface here) with a 2px offset.
+     Never suppress this without a replacement. In Windows forced-colors
+     mode the outline follows the system Highlight color. ---------- */
+  :focus-visible{outline:3px solid #ffffff;outline-offset:2px}
+  @media (forced-colors:active){:focus-visible{outline-color:Highlight}}
+  /* ---------- reduced motion ----------
+     Two switches, same ruleset: the OS-level media query and a manual
+     toggle via html[data-motion="reduced"]. CONTRACT for the JS worker:
+     render a "Reduce motion" checkbox in the header profile area; on
+     change set document.documentElement.dataset.motion to "reduced" or ""
+     and persist the choice in localStorage under "candid-motion".
+     The CSS kills transitions/animations; any JS smooth scrolling
+     (scrollIntoView({behavior:"smooth"})) must check the same two signals
+     before choosing smooth vs auto. ---------- */
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;
+      transition-duration:.01ms !important;scroll-behavior:auto !important}
+  }
+  html[data-motion="reduced"] *,html[data-motion="reduced"] *::before,
+  html[data-motion="reduced"] *::after{animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;transition-duration:.01ms !important;
+    scroll-behavior:auto !important}
+/* a11y (batch-104): skip link, visually hidden until focused */
+.skip-link{position:absolute;left:16px;top:-48px;padding:8px 14px;border-radius:6px;
+  background:var(--accent,#5aa2ff);color:#06101f;font-weight:600;z-index:100;transition:top .15s}
+.skip-link:focus{top:8px}
 </style>
 </head>
 <body>
-<header>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+<header aria-label="candid dashboard">
   <div><h1>candid <span>dashboard</span></h1>
   <div class="sub">local-only · nothing leaves this machine</div></div>
   <div class="profile-card" id="profileCard">
@@ -100,35 +151,45 @@
     <div class="headline" id="profileHeadline">no profile yet — run <code>python -m candid onboard</code></div>
   </div>
 </header>
-<main>
+<main id="main-content">
+<!-- a11y (batch-104, feature 7): polite live region; announce() in the script posts async status updates here -->
+<div id="a11yStatus" class="visually-hidden" role="status" aria-live="polite"></div>
 
 <!-- 1. stats + funnel + nudges -->
-<section id="sec-overview"><h2>Overview</h2>
+<section id="sec-overview" aria-labelledby="h-overview"><h2 id="h-overview">Overview</h2>
   <div class="statcards" id="statCards"></div>
-  <h2 style="font-size:14px;color:var(--muted)">Pipeline funnel</h2>
+  <h3 id="h-funnel" style="font-size:14px;color:var(--muted)">Pipeline funnel</h3>
   <div class="funnelbar" id="funnelBars"></div>
 </section>
 
-<section id="sec-nudges"><h2>Due nudges</h2><div id="nudges"></div></section>
+<section id="sec-nudges" aria-labelledby="h-nudges"><h2 id="h-nudges">Due nudges</h2><div id="nudges"></div></section>
 
 <!-- 2. applications -->
-<section id="sec-apps"><h2>Applications</h2>
+<section id="sec-apps" aria-labelledby="h-apps"><h2 id="h-apps">Applications</h2>
   <div class="toolbar">
+    <label for="q" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Search applications by company, role, or notes</label>
     <input id="q" placeholder="Search company / role / notes…" style="flex:1;min-width:200px">
     <button class="ghost" id="refreshApps">Refresh</button>
   </div>
   <div id="statusChips" style="margin-bottom:12px"></div>
-  <div style="overflow-x:auto"><table><thead><tr id="appsHead"></tr></thead>
+  <div style="overflow-x:auto"><table>
+  <caption style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Applications tracker: sortable list of tracked job applications</caption>
+  <thead><tr id="appsHead"></tr></thead>
   <tbody id="appsBody"></tbody></table></div></section>
 
 <!-- 3. curated jobs -->
-<section id="sec-jobs"><h2>Curated jobs <span class="sub" style="color:var(--muted);font-weight:400">(scored, not yet applied)</span></h2>
+<section id="sec-jobs" aria-labelledby="h-jobs"><h2 id="h-jobs">Curated jobs <span class="sub" style="color:var(--muted);font-weight:400">(scored, not yet applied)</span></h2>
   <div class="toolbar">
-    <input id="cRole" placeholder="Role, e.g. Data Scientist" style="flex:1;min-width:180px">
+    <label for="cRole" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Role (required)</label>
+    <input id="cRole" placeholder="Role, e.g. Data Scientist" style="flex:1;min-width:180px" aria-required="true">
+    <span style="font-size:12px;color:var(--muted);align-self:center">(required)</span>
+    <label for="cLocation" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Location</label>
     <input id="cLocation" placeholder="Location" style="width:150px">
     <label style="font-size:13px;color:var(--muted)"><input type="checkbox" id="cRemote" style="width:auto"> remote</label>
+    <label for="cLevel" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Seniority level</label>
     <select id="cLevel"><option value="">any level</option><option>entry</option><option>junior</option>
       <option>mid</option><option>senior</option><option>lead</option><option>staff</option><option>principal</option></select>
+    <label for="cLimit" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Result limit</label>
     <input id="cLimit" type="number" value="15" min="1" max="50" style="width:70px" title="limit">
     <button id="btnCurate">Curate</button>
   </div>
@@ -136,10 +197,10 @@
   <div class="cards" id="jobsCards" style="margin-top:12px"></div></section>
 
 <!-- 4. prep -->
-<section id="sec-prep"><h2>Interview prep</h2><div id="prepList"></div></section>
+<section id="sec-prep" aria-labelledby="h-prep"><h2 id="h-prep">Interview prep</h2><div id="prepList"></div></section>
 
 <!-- 5. import + proposals -->
-<section id="sec-import"><h2>Import your data</h2>
+<section id="sec-import" aria-labelledby="h-import"><h2 id="h-import">Import your data</h2>
   <p style="color:var(--muted);font-size:14px;margin-top:0">candid <b>never connects to your accounts</b>.
   You export your own data, then feed the file in below — nothing leaves this machine.</p>
   <div id="importGuides"></div>
@@ -151,17 +212,21 @@
     <code>python -m candid import --gmail-takeout mail.mbox</code> ·
     <code>python -m candid import --linkedin-zip export.zip</code></div>
   <pre class="report hidden" id="importOut" style="margin-top:12px"></pre>
-  <h2 style="font-size:14px;color:var(--muted);margin-top:16px">Gmail proposals — review before they hit your tracker</h2>
+  <h3 id="h-gmail-proposals" style="font-size:14px;color:var(--muted);margin-top:16px">Gmail proposals, review before they hit your tracker</h3>
   <div id="gmailBox"></div><div class="cards" id="proposalCards" style="margin-top:12px"></div></section>
 
 <!-- 6. match & tailor lab -->
-<section id="sec-tools"><h2>Match &amp; tailor lab</h2>
+<section id="sec-tools" aria-labelledby="h-tools"><h2 id="h-tools">Match &amp; tailor lab</h2>
   <div class="grid2">
-    <div><input id="tCompany" placeholder="Company" style="width:100%;margin-bottom:8px">
+    <div><label for="tCompany" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Company</label>
+         <input id="tCompany" placeholder="Company" style="width:100%;margin-bottom:8px">
+         <label for="tRole" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Role title</label>
          <input id="tRole" placeholder="Role title" style="width:100%;margin-bottom:8px"></div>
-    <div><select id="tTone"><option>confident</option><option>concise</option><option>formal</option><option>warm</option></select>
-         <span style="color:var(--muted);font-size:13px">tone for tailoring</span></div>
+    <div><label for="tTone" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Tone for tailoring</label>
+         <select id="tTone"><option>confident</option><option>concise</option><option>formal</option><option>warm</option></select>
+         <span style="color:var(--muted);font-size:13px" aria-hidden="true">tone for tailoring</span></div>
   </div>
+  <label for="tJd" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Job description</label>
   <textarea id="tJd" placeholder="Paste the job description here…"></textarea>
   <div class="toolbar" style="margin-top:8px">
     <button id="btnMatch">Score match</button>
@@ -171,14 +236,18 @@
   <div id="tailorOut" class="hidden"></div></section>
 
 <!-- 7. salary -->
-<section id="sec-salary"><h2>Salary insights</h2>
+<section id="sec-salary" aria-labelledby="h-salary"><h2 id="h-salary">Salary insights</h2>
   <div class="toolbar">
-    <input id="sCompany" placeholder="Company"><input id="sTitle" placeholder="Title">
+    <label for="sCompany" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Company</label>
+    <input id="sCompany" placeholder="Company">
+    <label for="sTitle" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Title</label>
+    <input id="sTitle" placeholder="Title">
+    <label for="sLoc" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0">Location</label>
     <input id="sLoc" placeholder="Location"><button id="btnSalary">Look up</button>
   </div><pre class="report hidden" id="salaryOut"></pre></section>
 
 </main>
-<footer>
+<footer role="contentinfo">
   🔒 All data stays on this machine. candid never connects to your accounts —
   you export your own data (Gmail Takeout mbox, LinkedIn archive) and feed it in.
   Proposals are never written to your tracker until you confirm them. ·
@@ -196,6 +265,142 @@ const api={
     .then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;})
 };
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---------- 0. accessibility utilities: live regions, focus trap, modals, shortcuts ---------- */
+(function injectA11yCss(){
+  if(document.getElementById("a11yCss"))return;
+  const s=document.createElement("style"); s.id="a11yCss";
+  s.textContent=".visually-hidden{position:absolute!important;width:1px!important;height:1px!important;"+
+    "padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;"+
+    "white-space:nowrap!important;border:0!important}"+
+    ".thbtn{all:unset;cursor:pointer;font:inherit;font-weight:600;display:inline-flex;align-items:center;gap:6px;border-radius:4px}"+
+    ".thbtn:hover{text-decoration:underline}"+
+    ".thbtn:focus-visible{outline:2px solid var(--accent,#4da3ff);outline-offset:2px}"+
+    "dialog.a11y-dlg{border:1px solid var(--border,#3a3a3a);border-radius:10px;background:var(--card,#161616);"+
+    "color:inherit;padding:20px;max-width:440px}"+
+    "dialog.a11y-dlg::backdrop{background:rgba(0,0,0,.6)}"+
+    "dialog.a11y-dlg .actions{margin-top:16px;display:flex;gap:10px;justify-content:flex-end}";
+  document.head.appendChild(s);
+})();
+
+/* Polite + assertive live regions. The polite one lives in the markup right after
+   <main> opens; the assertive one is created here so markup stays at one addition. */
+function ensureAlertRegion(){
+  if(!$("a11yAlert")){
+    const d=document.createElement("div");
+    d.id="a11yAlert"; d.className="visually-hidden";
+    d.setAttribute("role","alert"); d.setAttribute("aria-live","assertive");
+    document.body.appendChild(d);
+  }
+}
+function announce(msg,priority){
+  ensureAlertRegion();
+  const el=priority==="assertive"?$("a11yAlert"):$("a11yStatus");
+  if(!el)return;
+  el.textContent="";
+  const set=()=>{el.textContent=msg;};
+  if(typeof requestAnimationFrame==="function")requestAnimationFrame(set);else setTimeout(set,30);
+}
+function announceErr(msg){announce(msg,"assertive");}
+
+/* Focus trap: cycles Tab/Shift+Tab inside the container. Returns a release fn. */
+function trapFocus(container){
+  const sel='a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),'+
+    'textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  function onKey(e){
+    if(e.key!=="Tab")return;
+    const f=Array.from(container.querySelectorAll(sel)).filter(el=>el.getClientRects().length>0);
+    if(!f.length)return;
+    const first=f[0],last=f[f.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+  }
+  container.addEventListener("keydown",onKey);
+  return function release(){container.removeEventListener("keydown",onKey);};
+}
+
+let _trapRelease=null,_returnFocusTo=null;
+function openModal(dlg){
+  if(!dlg||dlg.open)return;
+  _returnFocusTo=document.activeElement;
+  if(typeof dlg.showModal==="function")dlg.showModal();else dlg.setAttribute("open","");
+  _trapRelease=trapFocus(dlg);
+  const f=dlg.querySelector("[data-autofocus]")||dlg.querySelector("button:not([disabled])");
+  if(f)f.focus();
+}
+function closeModal(dlg){
+  if(dlg&&dlg.open)dlg.close();
+}
+function wireModalClose(dlg){
+  dlg.addEventListener("close",()=>{
+    if(_trapRelease){_trapRelease();_trapRelease=null;}
+    const t=_returnFocusTo;_returnFocusTo=null;
+    if(t&&document.contains(t)){try{t.focus();}catch(e){}}
+  });
+}
+
+/* Shortcut-help dialog (built dynamically; shares the modal helpers). */
+const dlgHelp=document.createElement("dialog");
+dlgHelp.id="helpDialog"; dlgHelp.className="a11y-dlg";
+dlgHelp.setAttribute("aria-labelledby","helpTitle");
+dlgHelp.innerHTML=
+ '<h3 id="helpTitle" style="margin-top:0">Keyboard shortcuts</h3>'+
+ '<ul style="font-size:14px;line-height:1.9;margin:0 0 0 18px;padding:0">'+
+ '<li><b>/</b> - focus the applications search box</li>'+
+ '<li><b>?</b> - open this shortcut help</li>'+
+ '<li><b>Esc</b> - close dialogs and overlays</li>'+
+ '<li><b>Enter</b> / <b>Space</b> - activate focused buttons, including sortable table headers</li>'+
+ '<li><b>Tab</b> / <b>Shift+Tab</b> - move focus (kept inside open dialogs)</li></ul>'+
+ '<div class="actions"><button data-autofocus id="helpClose">Close</button></div>';
+document.body.appendChild(dlgHelp);
+$("helpClose").onclick=()=>closeModal(dlgHelp);
+wireModalClose(dlgHelp);
+
+/* Destructive dismiss-job confirmation as a real <dialog> (replaces confirm()). */
+const dlgDismiss=document.createElement("dialog");
+dlgDismiss.id="dismissDialog"; dlgDismiss.className="a11y-dlg";
+dlgDismiss.setAttribute("aria-labelledby","dismissTitle");
+dlgDismiss.setAttribute("aria-describedby","dismissText");
+dlgDismiss.innerHTML=
+ '<h3 id="dismissTitle" style="margin-top:0">Dismiss curated job?</h3>'+
+ '<p id="dismissText" style="font-size:14px"></p>'+
+ '<div class="actions"><button class="ghost" data-autofocus id="dismissCancel">Cancel</button>'+
+ '<button class="danger" id="dismissConfirm">Dismiss job</button></div>';
+document.body.appendChild(dlgDismiss);
+wireModalClose(dlgDismiss);
+let pendingDismiss=null;
+function openDismissDialog(info){
+  pendingDismiss=info;
+  const lbl=[info.role,info.company].filter(Boolean).join(" @ ")||"this curated job";
+  $("dismissText").textContent="Dismiss "+lbl+"? It will be hidden, not tracked.";
+  openModal(dlgDismiss);
+}
+$("dismissCancel").onclick=()=>{pendingDismiss=null;closeModal(dlgDismiss);announce("Dismiss cancelled.");};
+$("dismissConfirm").onclick=async()=>{
+  const info=pendingDismiss; pendingDismiss=null;
+  closeModal(dlgDismiss);
+  if(!info)return;
+  try{
+    await api.post("/api/jobs/dismiss",{app_id:info.app_id,source_id:info.source_id||undefined});
+    announce("Curated job dismissed.");
+  }catch(err){announceErr(err.message);}
+  loadJobs(); loadOverview();
+};
+
+/* Global shortcuts: / focuses search, ? opens help, Esc closes dialogs. */
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){
+    const open=document.querySelector("dialog[open]");
+    if(open){e.preventDefault();closeModal(open);}
+    return;
+  }
+  if(document.querySelector("dialog[open]"))return;
+  const t=e.target,tag=(t&&t.tagName||"").toLowerCase();
+  const typing=tag==="input"||tag==="textarea"||tag==="select"||(t&&t.isContentEditable);
+  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
+  if(e.key==="/"){e.preventDefault();const q=$("q");if(q){q.focus();q.select();}announce("Search box focused.");}
+  else if(e.key==="?"){e.preventDefault();openModal(dlgHelp);}
+});
 const STATUSES=["saved","applied","selected_for_interview","rejected","offer","withdrawn"];
 const pretty=s=>String(s).replace(/_/g," ");
 
@@ -223,7 +428,10 @@ async function loadOverview(){
       <div class="lbl">${pretty(s)}</div>
       <div class="barwrap"><div class="bar" style="width:${w}%"></div></div>
       <div class="cnt">${n}</div></div>`;
-  }).join("");
+  }).join("")+
+  `<table style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0"><caption>Pipeline funnel: application count per stage</caption><tbody>${
+    STATUSES.map(s=>`<tr><th scope="row">${pretty(s)}</th><td>${o.funnel[s]||0}</td></tr>`).join("")
+  }</tbody></table>`;
   $("funnelBars").querySelectorAll(".row").forEach(r=>r.onclick=()=>{
     state.statusFilter=r.dataset.status; renderChips(); loadApps();
     document.querySelector("#sec-apps").scrollIntoView({behavior:"smooth"});
@@ -267,28 +475,29 @@ function sortApps(apps){
   });
 }
 
-async function loadApps(){
+async function loadApps(announceMsg){
   const q=$("q").value;
   const apps=await api.get(`/api/apps?status=${encodeURIComponent(state.statusFilter)}&q=${encodeURIComponent(q)}`);
   $("appsHead").innerHTML=COLS.map(([k,label])=>{
-    const arrow=state.sortKey===k?`<span class="arrow">${state.sortDir===1?"▲":"▼"}</span>`:"";
-    return `<th data-k="${k}">${label} ${arrow}</th>`;
-  }).join("")+"<th>Prep</th><th>Status</th>";
-  $("appsHead").querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{
-    const k=th.dataset.k;
+    const arrow=state.sortKey===k?`<span class="arrow" aria-hidden="true">${state.sortDir===1?"▲":"▼"}</span>`:"";
+    const sort=state.sortKey===k?(state.sortDir===1?"ascending":"descending"):"none";
+    return `<th scope="col" data-k="${k}" aria-sort="${sort}"><button type="button" class="thbtn" data-sort="${k}">${label} ${arrow}</button></th>`;
+  }).join("")+'<th scope="col">Prep</th><th scope="col">Status</th>';
+  $("appsHead").querySelectorAll("button[data-sort]").forEach(btn=>btn.onclick=()=>{
+    const k=btn.dataset.sort;
     if(state.sortKey===k) state.sortDir*=-1; else {state.sortKey=k;state.sortDir=1;}
-    loadApps();
+    loadApps("Applications sorted by "+pretty(k)+", "+(state.sortDir===1?"ascending":"descending")+".");
   });
   const tb=$("appsBody"); tb.innerHTML="";
   if(!apps.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--muted)">Nothing here. Curate jobs or add an application from the CLI.</td></tr>';return;}
   for(const a of sortApps(apps)){
     const tr=document.createElement("tr");
     tr.innerHTML=`<td>${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td>
-      <td><span class="pill ${a.status}">${pretty(a.status)}</span></td>
+      <td><span class="pill ${a.status}" aria-label="Application status: ${pretty(a.status)}"><span aria-hidden="true">${({saved:"●",applied:"➤",selected_for_interview:"★",rejected:"✕",offer:"◆",withdrawn:"○"})[a.status]||"●"}</span> ${pretty(a.status)}</span></td>
       <td>${esc(a.date_updated||"")}</td>
       <td>${a.prep_pack?'<span class="ok">✓ pack</span>':'<span class="warn">—</span>'}
           <button class="ghost" data-prep="${a.id}" data-c="${esc(a.company)}" data-r="${esc(a.role)}" style="padding:4px 8px;font-size:12px">Prep</button></td>
-      <td><select data-id="${a.id}" class="stSel">${STATUSES.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select></td>`;
+      <td><select data-id="${a.id}" class="stSel" aria-label="Application status for ${esc(a.company)} ${esc(a.role)}">${STATUSES.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select></td>`;
     tb.appendChild(tr);
   }
   tb.querySelectorAll(".stSel").forEach(sel=>sel.onchange=async e=>{
@@ -297,6 +506,8 @@ async function loadApps(){
     loadApps(); loadOverview();
   });
   tb.querySelectorAll("[data-prep]").forEach(b=>b.onclick=()=>genPrep(b.dataset.c,b.dataset.r,b.dataset.prep));
+  if(announceMsg)announce(typeof announceMsg==="string"?announceMsg:
+    apps.length+" application"+(apps.length===1?"":"s")+" shown.");
 }
 
 async function genPrep(company,role,appId){
@@ -307,7 +518,7 @@ async function genPrep(company,role,appId){
   loadPrep(); loadApps();
 }
 
-$("refreshApps").onclick=loadApps;
+$("refreshApps").onclick=()=>loadApps(true);
 $("q").oninput=loadApps;
 
 /* ---------- 3. curated jobs: badges, apply, dismiss, tailor, curate ---------- */
@@ -319,11 +530,11 @@ async function loadJobs(){
   for(const j of jobs){
     const d=document.createElement("div"); d.className="card";
     d.innerHTML=`<h3>${esc(j.role)}</h3><div class="meta">${esc(j.company)} · ${esc(j.source||"")}</div>
-      <div><span class="scorebadge ${scoreClass(j.score)}">${j.score??"—"}/100</span></div>
+      <div><span class="scorebadge ${scoreClass(j.score)}" aria-label="Match score ${j.score??"not scored"} of 100, ${j.score==null?"not scored":j.score>=70?"high":j.score>=45?"medium":"low"}">${j.score??"—"}/100</span></div>
       <div class="actions">
         ${j.url?`<a href="${esc(j.url)}" target="_blank" rel="noopener"><button class="ghost">Apply ↗</button></a>`:""}
         <button class="ghost" data-tailor="${j.app_id}" data-c="${esc(j.company)}" data-r="${esc(j.role)}">Tailor</button>
-        <button class="danger" data-dismiss="${j.app_id}" data-sid="${esc(j.source_id||"")}">Dismiss</button>
+        <button class="danger" data-dismiss="${j.app_id}" data-sid="${esc(j.source_id||"")}" data-c="${esc(j.company)}" data-r="${esc(j.role)}">Dismiss</button>
       </div>`;
     w.appendChild(d);
   }
@@ -332,12 +543,9 @@ async function loadJobs(){
     document.querySelector("#sec-tools").scrollIntoView({behavior:"smooth"});
     runTailorDiff();
   });
-  w.querySelectorAll("[data-dismiss]").forEach(b=>b.onclick=async()=>{
-    if(!confirm("Dismiss this curated job? It will be hidden, not tracked."))return;
-    try{
-      await api.post("/api/jobs/dismiss",{app_id:parseInt(b.dataset.dismiss),source_id:b.dataset.sid||undefined});
-    }catch(err){alert("Error: "+err.message);}
-    loadJobs(); loadOverview();
+  w.querySelectorAll("[data-dismiss]").forEach(b=>b.onclick=()=>{
+    openDismissDialog({app_id:parseInt(b.dataset.dismiss),source_id:b.dataset.sid||undefined,
+      company:b.dataset.c,role:b.dataset.r});
   });
 }
 
@@ -345,12 +553,14 @@ $("btnCurate").onclick=async()=>{
   const role=$("cRole").value.trim();
   if(!role){alert("Enter a role first (e.g. Data Scientist).");return;}
   const o=$("curateOut"); o.classList.remove("hidden"); o.textContent="Curating… (fetches live job boards)";
+  announce("Curating jobs. This may take a while.");
   try{
     const r=await api.post("/api/curate",{role,location:$("cLocation").value,
       remote:$("cRemote").checked,level:$("cLevel").value||null,
       limit:parseInt($("cLimit").value)||15,sources:null});
     o.textContent=r.summary;
-  }catch(err){o.textContent="Error: "+err.message;}
+    announce("Curation finished. "+(r.summary||""));
+  }catch(err){o.textContent="Error: "+err.message;announceErr(err.message);}
   loadJobs(); loadOverview();
 };
 
@@ -390,18 +600,20 @@ function uploadFile(file){
   const bar=$("uploadProgress"); bar.classList.remove("hidden");
   const fill=bar.firstElementChild; fill.style.width="0%";
   o.textContent=`Uploading ${file.name}…`;
+  announce("Uploading "+file.name+".");
   const xhr=new XMLHttpRequest();
   xhr.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=Math.round(100*e.loaded/e.total)+"%";};
   xhr.onload=()=>{
     fill.style.width="100%";
     let r={};
     try{r=JSON.parse(xhr.responseText);}catch(e){r={error:"bad server response"};}
-    if(xhr.status!==200){o.textContent="Error: "+(r.error||xhr.status);return;}
-    if(r.error){o.textContent="Error: "+r.error;return;}
+    if(xhr.status!==200){o.textContent="Error: "+(r.error||xhr.status);announceErr(r.error||String(xhr.status));return;}
+    if(r.error){o.textContent="Error: "+r.error;announceErr(r.error);return;}
     o.textContent=r.summary||JSON.stringify(r,null,2);
+    announce("Import finished. "+(r.summary||""));
     loadProposals(); loadOverview(); loadApps();
   };
-  xhr.onerror=()=>{o.textContent="Error: upload failed.";};
+  xhr.onerror=()=>{o.textContent="Error: upload failed.";announceErr("upload failed");};
   const fd=new FormData(); fd.append("file",file);
   xhr.open("POST","/api/import"); xhr.send(fd);
 }
@@ -428,11 +640,13 @@ async function loadProposals(){
     w.appendChild(d);
   }
   w.querySelectorAll("[data-ok]").forEach(b=>b.onclick=async()=>{
-    try{await api.post(`/api/proposals/${b.dataset.ok}/confirm`);}catch(err){alert("Error: "+err.message);}
+    try{await api.post(`/api/proposals/${b.dataset.ok}/confirm`);announce("Proposal confirmed and added to your tracker.");}
+    catch(err){alert("Error: "+err.message);announceErr(err.message);}
     loadProposals(); loadApps(); loadOverview();
   });
   w.querySelectorAll("[data-no]").forEach(b=>b.onclick=async()=>{
-    try{await api.post(`/api/proposals/${b.dataset.no}/reject`);}catch(err){alert("Error: "+err.message);}
+    try{await api.post(`/api/proposals/${b.dataset.no}/reject`);announce("Proposal rejected.");}
+    catch(err){alert("Error: "+err.message);announceErr(err.message);}
     loadProposals(); loadOverview();
   });
 }
@@ -442,6 +656,7 @@ const BD_MAX={skills:50,seniority:25,domain:15,title_alignment:10};
 
 async function runMatch(){
   const o=$("matchOut"); o.classList.remove("hidden"); o.textContent="Scoring…";
+  announce("Scoring match.");
   try{
     const r=await api.post("/api/match",{company:$("tCompany").value,role:$("tRole").value,jd:$("tJd").value});
     const bars=Object.entries(r.breakdown||{}).map(([k,v])=>{
@@ -450,30 +665,33 @@ async function runMatch(){
         <div class="barwrap"><div class="bar" style="width:${w}%"></div></div>
         <div class="val">${v}/${max}</div></div></div>`;
     }).join("");
-    const miss=(r.skills_missing||[]).map(s=>`<span class="kwchip missing">${esc(s)}</span>`).join("");
+    const miss=(r.skills_missing||[]).map(s=>`<span class="kwchip missing" aria-label="Missing skill: ${esc(s)}"><span aria-hidden="true">✗</span> ${esc(s)}</span>`).join("");
     o.innerHTML=`<div class="card"><h3>Match score: <span class="score">${r.score}/100</span> — ${esc(r.verdict)}</h3>
       <div class="meta">${esc(r.verdict_reason||"")}</div>${bars}
       <div style="margin-top:8px"><b>Missing skills:</b><br>${miss||'<span class="ok">none</span>'}</div>
       <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--muted)">Full report</summary>
       <pre class="report">${esc(r.report||"")}</pre></details></div>`;
     o.scrollIntoView({behavior:"smooth"});
-  }catch(err){o.innerHTML=`<div class="err">Error: ${esc(err.message)}</div>`;}
+    announce("Match score "+r.score+" of 100: "+r.verdict+".");
+  }catch(err){o.innerHTML=`<div class="err" role="alert">Error: ${esc(err.message)}</div>`;announceErr(err.message);}
 }
 
 async function runTailorDiff(){
   const o=$("tailorOut"); o.classList.remove("hidden"); o.textContent="Tailoring…";
+  announce("Tailoring resume.");
   try{
     const r=await api.post("/api/tailor-diff",{kind:"resume",company:$("tCompany").value,
       role:$("tRole").value,jd:$("tJd").value,tone:$("tTone").value});
     const cov=r.coverage||{covered:[],missing:[]};
-    const chips=(cov.covered||[]).map(s=>`<span class="kwchip covered">✓ ${esc(s)}</span>`).join("")+
-      (cov.missing||[]).map(s=>`<span class="kwchip missing">✗ ${esc(s)}</span>`).join("");
+    const chips=(cov.covered||[]).map(s=>`<span class="kwchip covered" aria-label="Covered keyword: ${esc(s)}"><span aria-hidden="true">✓</span> ${esc(s)}</span>`).join("")+
+      (cov.missing||[]).map(s=>`<span class="kwchip missing" aria-label="Missing keyword: ${esc(s)}"><span aria-hidden="true">✗</span> ${esc(s)}</span>`).join("");
     o.innerHTML=`<div class="card"><h3>Tailored résumé — keyword coverage</h3>
       <div style="margin:8px 0">${chips||'<span style="color:var(--muted)">no keywords detected</span>'}</div>
       <details open><summary style="cursor:pointer;color:var(--muted)">Tailored text</summary>
       <pre class="report">${esc(r.text||"")}</pre></details></div>`;
     o.scrollIntoView({behavior:"smooth"});
-  }catch(err){o.innerHTML=`<div class="err">Error: ${esc(err.message)}</div>`;}
+    announce("Tailoring complete. Keyword coverage shown.");
+  }catch(err){o.innerHTML=`<div class="err" role="alert">Error: ${esc(err.message)}</div>`;announceErr(err.message);}
 }
 
 $("btnMatch").onclick=runMatch;
@@ -482,11 +700,13 @@ $("btnTailorDiff").onclick=runTailorDiff;
 /* ---------- 7. salary ---------- */
 $("btnSalary").onclick=async()=>{
   const o=$("salaryOut"); o.classList.remove("hidden"); o.textContent="Looking up…";
+  announce("Looking up salary data.");
   try{
     const r=await api.get(`/api/salary?company=${encodeURIComponent($("sCompany").value)}&title=${encodeURIComponent($("sTitle").value)}&location=${encodeURIComponent($("sLoc").value)}`);
     o.textContent=!r.n?("No salary data yet — import DOL LCA data or parse JDs to build it up.")
       :`n=${r.n} · p25 $${Math.round(r.p25).toLocaleString()} · median $${Math.round(r.median).toLocaleString()} · p75 $${Math.round(r.p75).toLocaleString()}\nSources: ${(r.sources||[]).join("; ")}`;
-  }catch(err){o.textContent="Error: "+err.message;}
+    announce(!r.n?"No salary data found.":("Salary data loaded: n="+r.n+"."));
+  }catch(err){o.textContent="Error: "+err.message;announceErr(err.message);}
 };
 
 /* ---------- boot ---------- */
