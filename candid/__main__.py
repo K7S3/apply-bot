@@ -20,8 +20,10 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -32,7 +34,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "sprint",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +50,10 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "sprint": ["plan", "list", "show", "add-target", "remove-target",
+               "batch", "timebox", "log", "unlog", "checkin", "status",
+               "review", "carryover", "compare", "streaks", "templates",
+               "schedule", "export-ics"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +61,8 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "SprintError", "SprintExecError", "SprintReviewError",
+    "SprintScheduleError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +79,10 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "SprintError": "python -m candid sprint --help",
+    "SprintExecError": "python -m candid sprint --help",
+    "SprintReviewError": "python -m candid sprint --help",
+    "SprintScheduleError": "python -m candid sprint --help",
 }
 
 
@@ -484,6 +495,207 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _resolve_sprint_ref(ref) -> dict:
+    """Resolve a sprint ref: numeric id, 'current' (default), or 'latest'.
+
+    'current' falls back to 'latest' when no active sprint covers this week.
+    """
+    from candid import sprint as SP
+    ref = ref or "current"
+    if isinstance(ref, str) and ref.isdigit():
+        ref = int(ref)
+    try:
+        return SP.get_sprint(ref)
+    except SP.SprintError:
+        if ref == "current":
+            return SP.get_sprint("latest")  # raises its own SprintError if empty
+        raise
+
+
+def _render_sprint_card(sp: dict) -> str:
+    targets = sp.get("targets", [])
+    done = sum(1 for t in targets if t.get("status") == "done")
+    lines = [
+        f"Sprint #{sp.get('id')}: {sp.get('title', '')}",
+        f"Week of {sp.get('week_start', '?')} · status: {sp.get('status', '?')} "
+        f"· goal: {sp.get('target_apps')} applications",
+        f"Targets: {done}/{len(targets)} done · {sp.get('hours_budget')}h budgeted",
+        "",
+    ]
+    if sp.get("template"):
+        lines.append(f"Template: {sp['template']}")
+    if targets:
+        lines.append(f"{'Status':<6}{'Pri':<8}{'Batch':<9}Target")
+        for t in targets:
+            batch = t.get("batch") or "-"
+            lines.append(f"{t.get('status', ''):<6}{(t.get('priority') or ''):<8}"
+                         f"{batch:<9}{t.get('company', '')} — {t.get('role', '')}")
+        lines.append("")
+    blocks = sp.get("time_blocks") or []
+    if blocks:
+        lines.append("Time blocks:")
+        for b in blocks:
+            lines.append(f"  {b.get('day', '')} {b.get('start', '')}-{b.get('end', '')} "
+                         f"{b.get('label', b.get('kind', ''))}")
+        lines.append("")
+    lines.append(f"Check-ins: {len(sp.get('notes') or [])}")
+    return "\n".join(lines).rstrip()
+
+
+def _cmd_sprint_templates(a, SS) -> None:
+    t = a.tcmd
+    if t == "list":
+        templates = SS.list_templates()
+        if not templates:
+            print("No templates yet. Save one with `sprint templates save --name NAME`.")
+            return
+        print(f"{'Name':<20}{'Goal':<8}{'Hours':<8}Source")
+        for name in sorted(templates):
+            tpl = templates[name]
+            print(f"{name:<20}{tpl.get('target_apps', 0):<8}"
+                  f"{tpl.get('hours_budget', 0):<8}{tpl.get('source', '')}")
+    elif t == "save":
+        SS.save_template(a.name, target_apps=a.target, hours_budget=a.hours)
+        print(f"Saved template '{a.name}': goal {a.target} apps, {a.hours}h budget.")
+    elif t == "delete":
+        SS.delete_template(a.name)
+        print(f"Deleted template '{a.name}'.")
+    elif t == "apply":
+        sp = SS.apply_template(_resolve_sprint_ref(a.sprint)["id"], a.name)
+        print(f"Applied template '{a.name}' to sprint #{sp['id']}: "
+              f"goal {sp['target_apps']} apps, {sp['hours_budget']}h budget.")
+
+
+def cmd_sprint(a):
+    from candid import sprint as SP
+    from candid import sprint_exec as SE
+    from candid import sprint_review as SR
+    from candid import sprint_schedule as SS
+    w = a.what
+    if w == "plan":
+        sp = SP.create_sprint(a.week, title=a.title or "",
+                              target_apps=a.target, hours_budget=a.hours)
+        if a.template:
+            SS.apply_template(sp["id"], a.template)
+            sp = SP.get_sprint(sp["id"])
+        print(f"Created sprint #{sp['id']}: {sp['title']}")
+        print(f"Week of {sp['week_start']} · goal {sp['target_apps']} apps · "
+              f"{sp['hours_budget']}h budgeted"
+              + (f" · template '{a.template}'" if a.template else ""))
+    elif w == "list":
+        sprints = SP.list_sprints()
+        if not a.all:
+            sprints = [s for s in sprints if s.get("status") == "active"]
+        if not sprints:
+            print("No sprints to show. Run `python -m candid sprint plan --week YYYY-MM-DD`.")
+            return
+        print(f"{'ID':<5}{'Week':<12}{'Status':<8}{'Goal':<6}{'Done':<9}Title")
+        for s in sprints:
+            ts = s.get("targets", [])
+            done = sum(1 for t in ts if t.get("status") == "done")
+            print(f"{s.get('id', 0):<5}{s.get('week_start', ''):<12}"
+                  f"{s.get('status', ''):<8}{s.get('target_apps', 0):<6}"
+                  f"{done}/{len(ts):<9}{s.get('title', '')}")
+    elif w == "show":
+        print(_render_sprint_card(_resolve_sprint_ref(a.ref)))
+    elif w == "add-target":
+        sp = _resolve_sprint_ref(a.sprint)
+        t = SP.add_target(sp["id"], a.company, a.role,
+                          jd_link=a.jd or "", priority=a.priority)
+        if t.get("duplicate"):
+            print(f"Already a target in sprint #{sp['id']}: "
+                  f"{t['role']} @ {t['company']} — not duplicated.")
+        else:
+            print(f"Added to sprint #{sp['id']}: {t['role']} @ {t['company']} "
+                  f"[{t['priority']}]")
+    elif w == "remove-target":
+        sp = _resolve_sprint_ref(a.sprint)
+        SP.remove_target(sp["id"], a.company, a.role)
+        print(f"Removed {a.role} @ {a.company} from sprint #{sp['id']}.")
+    elif w == "batch":
+        sp = _resolve_sprint_ref(a.sprint)
+        groups = SP.batch_targets(sp["id"])
+        if not groups:
+            print(f"No targets to batch in sprint #{sp['id']}.")
+            return
+        print(f"{len(groups)} batch(es) in sprint #{sp['id']}:")
+        for bid, ts in groups.items():
+            print(f"  {bid}:")
+            for t in ts:
+                print(f"    {t['company']} — {t['role']} [{t.get('priority', '')}]")
+    elif w == "timebox":
+        sp = _resolve_sprint_ref(a.sprint)
+        blocks = SP.plan_timeboxes(sp["id"], block_minutes=a.block_minutes)
+        print(f"{len(blocks)} time block(s) for sprint #{sp['id']}:")
+        for b in blocks:
+            print(f"  {b['day']} {b['start']}-{b['end']}  {b['label']}")
+    elif w == "log":
+        sp = _resolve_sprint_ref(a.sprint)
+        t = SE.log_application(sp["id"], a.company, a.role,
+                               tracker_id=a.tracker_id)
+        print(f"Logged application: {t['role']} @ {t['company']} ({t.get('done_at')})")
+    elif w == "unlog":
+        sp = _resolve_sprint_ref(a.sprint)
+        SE.unlog_application(sp["id"], a.company, a.role)
+        print(f"Unlogged: {a.role} @ {a.company} — back to todo in sprint #{sp['id']}.")
+    elif w == "checkin":
+        sp = _resolve_sprint_ref(a.sprint)
+        SE.daily_checkin(sp["id"], a.text)
+        print(f"Check-in saved to sprint #{sp['id']}.")
+    elif w == "status":
+        sp = _resolve_sprint_ref(a.sprint)
+        p = SE.progress(sp["id"])
+        pace = "on pace" if p["on_pace"] else "behind pace"
+        print(f"Sprint #{sp['id']}: {p['done']}/{p['total_targets']} done "
+              f"({p['pct_of_targets']}%) · goal {p['target_apps']} apps — {pace}")
+        print(f"Expected by now: {p['expected_by_now']:.1f} apps")
+        if p["remaining"]:
+            print("\nRemaining:")
+            for t in p["remaining"]:
+                print(f"  [{t.get('priority', '')}] {t['company']} — {t['role']}")
+    elif w == "review":
+        print(SR.render_review(_resolve_sprint_ref(a.sprint)["id"]))
+    elif w == "carryover":
+        sp = _resolve_sprint_ref(a.sprint)
+        new = SR.carryover(sp["id"], new_week_start=a.week or None)
+        print(f"Carryover sprint #{new['id']}: {new['title']}")
+        print(f"{len(new['targets'])} unfinished target(s) carried over; "
+              f"sprint #{sp['id']} closed.")
+    elif w == "compare":
+        cmp = SR.compare_sprints(a.a, a.b)
+        hit_a, hit_b = cmp["hit_target"]
+        print(f"Sprint #{a.a} -> #{a.b}:")
+        print(f"  goal: {cmp['target_apps']:+d} · done: {cmp['done']:+d} · "
+              f"completion: {cmp['completion_pct']:+.1f}pp")
+        print(f"  hit target: {hit_a} -> {hit_b}")
+    elif w == "streaks":
+        st = SR.streaks()
+        print(f"Current streak: {st['current_streak']} week(s)")
+        print(f"Best streak: {st['best_streak']} week(s)")
+    elif w == "templates":
+        _cmd_sprint_templates(a, SS)
+    elif w == "schedule":
+        sp = _resolve_sprint_ref(a.sprint)
+        sug = SS.suggest_day(sp["id"], day=a.day)
+        if not sug:
+            print(f"No time blocks scheduled for '{a.day}' in sprint #{sp['id']}.")
+            return
+        print(f"Plan for '{a.day}' (sprint #{sp['id']}):")
+        for s in sug:
+            b = s["block"]
+            print(f"  {b['day']} {b['start']}-{b['end']}: {s['task']}")
+    elif w == "export-ics":
+        sp = _resolve_sprint_ref(a.sprint)
+        if a.out:
+            out = a.out
+        else:
+            from candid import config as C
+            out = str(Path(os.environ.get("CANDID_DATA_DIR")
+                           or str(C.DATA_DIR)) / f"sprint_{sp['id']}.ics")
+        path = SS.write_ics(sp["id"], out)
+        print(f"Exported sprint #{sp['id']} time blocks to {path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1130,161 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # sprint
+    s = _sub(sub, "sprint", "Weekly application sprint: plan, execute, review.", [
+        "python -m candid sprint plan --week 2026-09-21 --target 5 --hours 6",
+        "python -m candid sprint add-target --company Acme --role \"Data Scientist\"",
+        "python -m candid sprint log --company Acme --role \"Data Scientist\"",
+        "python -m candid sprint status",
+        "python -m candid sprint review",
+    ])
+    sp_ = _nested(s)
+
+    t = _sub(sp_, "plan", "Create a sprint for a week (snapped to Monday).", [
+        "python -m candid sprint plan --week 2026-09-21",
+        "python -m candid sprint plan --week 2026-09-21 --title \"Week 38\" --target 8 --hours 8",
+        "python -m candid sprint plan --week 2026-09-21 --template standard",
+    ])
+    t.add_argument("--week", required=True, help="Any date in the week (YYYY-MM-DD); snapped to Monday")
+    t.add_argument("--title", default="", help="Sprint title (default: 'Week of <monday>')")
+    t.add_argument("--target", type=int, default=5, help="Application goal (default: 5)")
+    t.add_argument("--hours", type=float, default=6.0, help="Hours budget (default: 6.0)")
+    t.add_argument("--template", default=None, help="Apply a saved template after creating")
+
+    t = _sub(sp_, "list", "List sprints (default: active only).", [
+        "python -m candid sprint list",
+        "python -m candid sprint list --all",
+    ])
+    t.add_argument("--all", action="store_true", help="Include closed sprints")
+
+    t = _sub(sp_, "show", "Show a sprint's targets, blocks, and notes.", [
+        "python -m candid sprint show",
+        "python -m candid sprint show latest",
+        "python -m candid sprint show 3",
+    ])
+    t.add_argument("ref", nargs="?", default="current",
+                   help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "add-target", "Add an application target to a sprint.", [
+        "python -m candid sprint add-target --company Acme --role \"Data Scientist\"",
+        "python -m candid sprint add-target --company Acme --role \"Data Scientist\" --priority high",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--jd", default="", help="JD URL or link")
+    t.add_argument("--priority", default="medium", choices=["high", "medium", "low"])
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "remove-target", "Remove a target from a sprint.", [
+        "python -m candid sprint remove-target --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "batch", "Batch targets by company, then role family.", [
+        "python -m candid sprint batch",
+    ])
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "timebox", "Plan evening time blocks from the hours budget.", [
+        "python -m candid sprint timebox",
+        "python -m candid sprint timebox --block-minutes 60",
+    ])
+    t.add_argument("--block-minutes", type=int, default=90,
+                   help="Minutes per time block (default: 90)")
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "log", "Mark a target as applied.", [
+        "python -m candid sprint log --company Acme --role \"Data Scientist\"",
+        "python -m candid sprint log --company Acme --role \"Data Scientist\" --tracker-id 4",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--tracker-id", type=int, default=None,
+                   help="Existing tracker id to link (must exist)")
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "unlog", "Revert a logged application back to todo.", [
+        "python -m candid sprint unlog --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "checkin", "Add a daily check-in note.", [
+        'python -m candid sprint checkin --text "Applied to Acme, tailoring for Beta"',
+    ])
+    t.add_argument("--text", required=True, help="Check-in text")
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "status", "Pace report: done vs goal, expected by now.", [
+        "python -m candid sprint status",
+    ])
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "review", "End-of-week review: completion, batches, outcomes.", [
+        "python -m candid sprint review",
+    ])
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "carryover", "Start next week's sprint; unfinished targets carry over.", [
+        "python -m candid sprint carryover",
+        "python -m candid sprint carryover --week 2026-09-28",
+    ])
+    t.add_argument("--week", default=None, help="New week start (YYYY-MM-DD); default: next Monday")
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "compare", "Compare two sprints' reviews (b minus a).", [
+        "python -m candid sprint compare --a 1 --b 2",
+    ])
+    t.add_argument("--a", type=int, required=True, help="First sprint id")
+    t.add_argument("--b", type=int, required=True, help="Second sprint id")
+
+    t = _sub(sp_, "streaks", "Hit-target streaks over closed sprints.", [
+        "python -m candid sprint streaks",
+    ])
+
+    t = _sub(sp_, "templates", "Save, list, delete, or apply sprint templates.", [
+        "python -m candid sprint templates list",
+        "python -m candid sprint templates save --name heavy --target 10 --hours 10",
+        "python -m candid sprint templates apply --name heavy",
+        "python -m candid sprint templates delete --name heavy",
+    ])
+    ts = _nested(t, dest="tcmd")
+    u = _sub(ts, "list", "List built-in and saved templates.", [
+        "python -m candid sprint templates list",
+    ])
+    u = _sub(ts, "save", "Save a template (goal + hours budget).", [
+        "python -m candid sprint templates save --name heavy --target 10 --hours 10",
+    ])
+    u.add_argument("--name", required=True, help="Template name")
+    u.add_argument("--target", type=int, default=5, help="Application goal (default: 5)")
+    u.add_argument("--hours", type=float, default=6.0, help="Hours budget (default: 6.0)")
+    u = _sub(ts, "delete", "Delete a saved template (built-ins are protected).", [
+        "python -m candid sprint templates delete --name heavy",
+    ])
+    u.add_argument("--name", required=True, help="Template name")
+    u = _sub(ts, "apply", "Apply a template to a sprint.", [
+        "python -m candid sprint templates apply --name heavy",
+        "python -m candid sprint templates apply --name heavy --sprint 2",
+    ])
+    u.add_argument("--name", required=True, help="Template name")
+    u.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "schedule", "Today's suggested tasks from the sprint's blocks.", [
+        "python -m candid sprint schedule",
+        "python -m candid sprint schedule --day tue",
+    ])
+    t.add_argument("--day", default="today",
+                   help="'today' or a weekday (mon..sun); accepts full names too")
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    t = _sub(sp_, "export-ics", "Export the sprint's time blocks as an .ics file.", [
+        "python -m candid sprint export-ics",
+        "python -m candid sprint export-ics --out ~/sprint.ics",
+    ])
+    t.add_argument("--out", default="", help="Output path (default: <data_dir>/sprint_<id>.ics)")
+    t.add_argument("--sprint", default="current", help="Sprint id, 'current', or 'latest' (default: current)")
+
+    s.set_defaults(func=cmd_sprint)
 
     return p
 
