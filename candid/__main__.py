@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "quality",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "quality": [],  # flag-based, like dashboard
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "QualityError",
     "ValueError",
 }
 
@@ -425,6 +427,32 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+
+
+def cmd_quality(a):
+    from candid import quality as Q
+    from candid.quality import fixes as QF
+    from candid import tracker as T
+    apps, issues = Q.run_all()
+    if a.min_severity:
+        rank = {"error": 0, "warning": 1, "info": 2}
+        issues = [i for i in issues
+                  if rank.get(i.severity, 0) <= rank[a.min_severity]]
+    if a.fix or a.dry_run:
+        dry = (not a.fix) or a.dry_run
+        new_apps, log = QF.apply_fixes(apps, issues, dry_run=dry)
+        if dry:
+            print("Dry run - no changes saved. Re-run without --dry-run to apply.")
+        else:
+            T._save(new_apps)
+            print(f"Applied safe fixes and saved {len(new_apps)} record(s) to the tracker.")
+        print("\n".join(log))
+    if a.json:
+        print(Q.render_report(issues, json_mode=True))
+    else:
+        print(Q.render_report(issues))
+        print(f"\nQuality score: {Q.quality_score(issues)}/100 "
+              f"({len(issues)} issue(s))")
 
 
 def cmd_dashboard(a):
@@ -918,6 +946,25 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # quality (flag-based, like dashboard)
+    s = _sub(sub, "quality", "Check tracker/profile data quality.", [
+        "python -m candid quality",
+        "python -m candid quality --json",
+        "python -m candid quality --fix --dry-run   # preview safe fixes",
+        "python -m candid quality --fix             # apply safe fixes",
+        "python -m candid quality --min-severity warning",
+    ])
+    s.add_argument("--json", action="store_true",
+                   help="Print the issue list as JSON (for scripting)")
+    s.add_argument("--fix", action="store_true",
+                   help="Apply safe auto-fixes (whitespace, status casing, missing date_updated) and save the tracker")
+    s.add_argument("--dry-run", action="store_true",
+                   help="Preview fixes without saving (--fix --dry-run shows what would change)")
+    s.add_argument("--min-severity", choices=["error", "warning", "info"],
+                   default=None,
+                   help="Show only issues at or above this severity")
+    s.set_defaults(func=cmd_quality)
 
     return p
 
