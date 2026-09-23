@@ -2,6 +2,9 @@
   "id": "word-break",
   "title": "Word Break",
   "topic": "dp",
+  "patterns": [
+    "dp-1d"
+  ],
   "difficulty": "medium",
   "statement": "Given a string `s` and a list of strings `word_dict`, return True if `s` can be segmented into a space-separated sequence of one or more dictionary words. The same word may be reused.\n\nExample: s = \"leetcode\", word_dict = [\"leet\",\"code\"] -> True",
   "function": "solve(s, word_dict)",
