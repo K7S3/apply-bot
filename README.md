@@ -38,11 +38,6 @@ python -m candid tailor cover-letter --jd samples/candid/sample_jd.txt \
 python -m candid track add --company "Acme Corp" --role "Senior Data Scientist"
 python -m candid track update 1 --status selected_for_interview
 python -m candid prep --company "Capital One" --role "Senior Data Scientist" --app-id 1
-
-# 5. Drill coding patterns: log attempts, get a gap-driven study plan
-python -m candid patterns log --problem two-sum --solved --quality 4
-python -m candid patterns plan --out plan.md
-python -m candid patterns drill --minutes-per-day 45
 ```
 
 All commands are `python -m candid <command> --help`. No accounts, no keys.
@@ -63,17 +58,16 @@ one ends with the exact next command to run.
 | `track` | Application tracker: add / list / update / stats / search / export-csv, with funnel + response/interview/offer rates and per-status next-action hints. Re-adding an existing company+role returns the existing record instead of duplicating. |
 | `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
-| `tracks` | Role-family prep tracks (MLE, backend, frontend, data science, PM, EM): the typical interview loop, curated question banks, concept deep-dives, timed drills with self-checks, N-day study plans, progress tracking, mock-session presets, and track suggestions from your match gaps. See [docs/prep_tracks.md](docs/prep_tracks.md). |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
-| `patterns` | Coding patterns curriculum on the problem bank: 20-pattern taxonomy with recognition cues + templates, per-problem pattern tags, **Blind-75-style study plans generated from your skill gaps**, SM-2 **spaced repetition** scheduling, day-by-day **weekly drills** (new weak-pattern problems + due reviews in your time budget), per-pattern **mastery dashboard**, and one-page **cheat sheets**. See [docs/patterns.md](docs/patterns.md). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
-| `benefits` | Benefits comparator: health-plan cost at a spend level, scenario-weighted healthcare cost, 401(k) match math, vesting schedules, PTO valuation, ESPP gain, HSA/FSA value, commuter benefits, paid-leave valuation, stipends, whole-package normalization (`normalize`) and head-to-head package comparison (`compare`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
-| `alumni` | Alumni network mapper: import LinkedIn `Connections.csv` (or the export ZIP), enrich contacts with schools/past jobs, find school/company overlap with your profile, get ranked warm paths into target companies, a tiered outreach queue, and grounded referral/info-chat/reconnect drafts. Includes an interaction log and a stale-contact re-engagement detector. See `docs/alumni.md`. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `templates` | **Template gallery**: versioned, shareable template packs (cover-letter tones, outreach, verified interview questions). `templates list/show/use` to browse and render with `{{variables}}`, `templates gallery/search` for built-ins, `templates validate` to check a pack. Ships with 6 starter packs. |
+| `templates pack` | Share packs as `.candidpack` archives: `export` (checksummed), `import` (integrity-verified, refuses downgrades without `--force`), `upgrade` (newer-only), `versions` (side-by-side installs), `diff` (added/removed/changed templates + manifest changes). |
+| `templates questions` | Import kind=`questions` packs into the verified question bank (`import --dry-run`, dedupe, per-company filter, import registry). Every question must carry a `Source:` link — link-less questions are rejected. |
 
 ## Job-source coverage (honest)
 
