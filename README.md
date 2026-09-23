@@ -65,6 +65,9 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `audit` | Append-only audit trail of every change: `audit log` (filter by entity, action, entity id, date), `audit search` (full-text), `audit stats` (totals by day/action/entity), `audit export` (CSV or Markdown), `audit prune` (age-based retention, dry-run by default), `audit verify` (hash-chain tamper check). See [docs/audit.md](docs/audit.md). |
+| `undo` | Revert the last change to your tracker using the audit log's before-snapshots. Tracker-only: the log itself is never edited or rewritten. |
+| `dashboard` audit view | Read-only Audit trail page in the local dashboard (`/audit`): filter the log, search entries, and run the integrity check from your browser. |
 
 ## Job-source coverage (honest)
 

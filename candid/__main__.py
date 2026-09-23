@@ -11,6 +11,8 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid audit log                      # what changed and when
+    python -m candid undo a1b2c3d4                # restore the change logged under that entry id
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -32,7 +34,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "audit", "undo",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +50,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "audit": ["log", "search", "stats", "export", "prune", "verify"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "UndoError", "AuditError",
     "ValueError",
 }
 
@@ -72,6 +76,8 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "UndoError": "python -m candid audit log",
+    "AuditError": "python -m candid audit log --help",
 }
 
 
@@ -454,6 +460,154 @@ def cmd_import(a):
     else:
         raise ValueError("Nothing to import. Use --gmail-takeout FILE.mbox "
                          "or --linkedin-zip FILE.zip")
+
+
+def _audit_module():
+    """Import candid.audit lazily (keeps --help fast and the base CLI importable)."""
+    try:
+        from candid import audit as A
+    except ImportError:
+        sys.exit("Audit log is unavailable: the candid.audit module is not installed.")
+    return A
+
+
+def _changes_summary(changes) -> str:
+    """One-line summary of an entry's changes.
+
+    Handles the sibling audit module's list format [{field, old, new}]
+    and a plain {field: {before, after}} mapping.
+    """
+    if not changes:
+        return ""
+    bits = []
+    if isinstance(changes, list):
+        for c in changes:
+            if isinstance(c, dict) and "field" in c:
+                bits.append(f"{c.get('field')}: {c.get('old')} -> {c.get('new')}")
+    elif isinstance(changes, dict):
+        for k, v in changes.items():
+            if isinstance(v, dict) and "before" in v and "after" in v:
+                bits.append(f"{k}: {v['before']} -> {v['after']}")
+            else:
+                bits.append(f"{k}={v}")
+    return ", ".join(bits)
+
+
+def _audit_line(e: dict) -> str:
+    ts = str(e.get("ts", ""))[:19].replace("T", " ")
+    what = f"{e.get('entity', '')}/{e.get('entity_id', '')}"
+    line = f"{ts}  #{e.get('id')}  {e.get('action', '')} {what}"
+    summary = _changes_summary(e.get("changes") or {})
+    if summary:
+        line += f"  [{summary}]"
+    note = e.get("note") or ""
+    if note:
+        line += f"  - {note}"
+    return line
+
+
+def _render_audit_stats(s: dict) -> str:
+    lines = [f"Audit log: {s.get('total', 0)} entries"]
+    lines.append("")
+    lines.append("By day (last 14):")
+    by_day = s.get("by_day") or {}
+    if by_day:
+        for day in sorted(by_day)[-14:]:
+            lines.append(f"  {day}: {by_day[day]}")
+    else:
+        lines.append("  (none)")
+    lines.append("")
+    lines.append("By action:")
+    by_action = s.get("by_action") or {}
+    if by_action:
+        for k in sorted(by_action):
+            lines.append(f"  {k}: {by_action[k]}")
+    else:
+        lines.append("  (none)")
+    lines.append("")
+    lines.append("By entity:")
+    by_entity = s.get("by_entity") or {}
+    if by_entity:
+        for k in sorted(by_entity):
+            lines.append(f"  {k}: {by_entity[k]}")
+    else:
+        lines.append("  (none)")
+    return "\n".join(lines)
+
+
+def cmd_audit(a):
+    A = _audit_module()
+    if a.what == "log":
+        rows = A.read(limit=a.limit, since=a.since, until=a.until,
+                      entity=a.entity, action=a.action, entity_id=a.entity_id)
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            print("No audit entries match those filters.")
+            return
+        for e in rows:
+            print(_audit_line(e))
+    elif a.what == "search":
+        rows = A.search(a.query)
+        if a.limit:
+            rows = rows[:a.limit]
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            print(f"No audit entries match {a.query!r}.")
+            return
+        for e in rows:
+            print(_audit_line(e))
+    elif a.what == "stats":
+        s = A.stats()
+        if a.json:
+            print(json.dumps(s, indent=2, default=str))
+            return
+        print(_render_audit_stats(s))
+    elif a.what == "export":
+        if a.csv:
+            path = A.export_csv(a.csv)
+            print(f"Exported audit log to {path}")
+        elif a.md:
+            path = A.export_markdown(a.md)
+            print(f"Exported audit log to {path}")
+        else:  # pragma: no cover - argparse enforces one of the two
+            sys.exit("Pass --csv PATH or --md PATH to choose the export format.")
+    elif a.what == "prune":
+        result = A.prune(older_than_days=a.older_than, dry_run=not a.yes)
+        count = result.get("pruned", 0) if isinstance(result, dict) else result
+        if a.yes:
+            print(f"Pruned {count} audit entr{'y' if count == 1 else 'ies'} "
+                  f"older than {a.older_than} day(s).")
+        else:
+            print(f"Would prune {count} audit entr{'y' if count == 1 else 'ies'} "
+                  f"older than {a.older_than} day(s).")
+            print("Re-run with --yes to apply.")
+    elif a.what == "verify":
+        problems = A.verify()
+        if not problems:
+            print("Audit log OK: all entries well-formed.")
+            return
+        print(f"Audit log has {len(problems)} problem(s):")
+        for p in problems:
+            print(f"  - {p}")
+        sys.exit(1)
+
+
+def cmd_undo(a):
+    try:
+        from candid import undo as U
+    except ImportError:
+        sys.exit("Undo is unavailable: the candid.undo module is not installed.")
+    result = U.undo(a.entry_id)
+    note = result.get("note") or "Done."
+    print(note)
+    restored = result.get("restored") or {}
+    for k, v in restored.items():
+        print(f"  {k}: {v}")
+    print("Next: run `python -m candid audit log` to review the change history.")
 
 
 def cmd_gmail(a):
@@ -918,6 +1072,78 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # audit
+    s = _sub(sub, "audit", "Read, search, and maintain the audit log of changes.", [
+        "python -m candid audit log",
+        "python -m candid audit log --entity application --action update",
+        "python -m candid audit search acme --json",
+        "python -m candid audit stats",
+        "python -m candid audit export --csv /tmp/audit.csv",
+        "python -m candid audit prune --older-than 90",
+        "python -m candid audit verify",
+    ])
+    as_ = _nested(s)
+    t = _sub(as_, "log", "List audit entries (newest last), with optional filters.", [
+        "python -m candid audit log",
+        "python -m candid audit log --limit 20",
+        "python -m candid audit log --entity application --action update",
+        "python -m candid audit log --entity-id 3",
+        "python -m candid audit log --since 2026-09-01 --until 2026-09-30",
+        "python -m candid audit log --json",
+    ])
+    t.add_argument("--entity", default=None, help="Filter: entity type (e.g. application)")
+    t.add_argument("--action", default=None, help="Filter: action (e.g. create, update)")
+    t.add_argument("--entity-id", default=None, help="Filter: entity id")
+    t.add_argument("--since", default=None, help="Filter: entries on/after YYYY-MM-DD")
+    t.add_argument("--until", default=None, help="Filter: entries on/before YYYY-MM-DD")
+    t.add_argument("--limit", type=int, default=25,
+                   help="Max entries to show (default: 25)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the entries as JSON (for scripting)")
+    t = _sub(as_, "search", "Free-text search over the audit log.", [
+        "python -m candid audit search acme",
+        "python -m candid audit search interview --limit 10",
+        "python -m candid audit search acme --json",
+    ])
+    t.add_argument("query", help="Search text (matches action, entity, note, changes)")
+    t.add_argument("--limit", type=int, default=25,
+                   help="Max entries to show (default: 25)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the entries as JSON (for scripting)")
+    t = _sub(as_, "stats", "Counts: total, by day (last 14), by action, by entity.", [
+        "python -m candid audit stats",
+        "python -m candid audit stats --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the stats as JSON (for scripting)")
+    t = _sub(as_, "export", "Write the audit log to CSV or Markdown.", [
+        "python -m candid audit export --csv /tmp/audit.csv",
+        "python -m candid audit export --md /tmp/audit.md",
+    ])
+    grp = t.add_mutually_exclusive_group(required=True)
+    grp.add_argument("--csv", help="Destination CSV file path")
+    grp.add_argument("--md", help="Destination Markdown file path")
+    t = _sub(as_, "prune", "Delete entries older than DAYS (dry-run unless --yes).", [
+        "python -m candid audit prune --older-than 90",
+        "python -m candid audit prune --older-than 90 --yes",
+    ])
+    t.add_argument("--older-than", type=int, required=True,
+                   help="Prune entries older than this many days")
+    t.add_argument("--yes", action="store_true",
+                   help="Actually delete; without it, only shows how many would go")
+    t = _sub(as_, "verify", "Check the audit log for malformed entries.", [
+        "python -m candid audit verify",
+    ])
+    s.set_defaults(func=cmd_audit)
+
+    # undo
+    s = _sub(sub, "undo", "Restore the change recorded as an audit entry.", [
+        "python -m candid undo a1b2c3d4",
+        "python -m candid audit log --limit 5   # find the entry id first",
+    ])
+    s.add_argument("entry_id", help="Audit entry id to undo (from `audit log`)")
+    s.set_defaults(func=cmd_undo)
 
     return p
 

@@ -422,6 +422,142 @@ def salary_lookup(company: str, title: str, location: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# audit trail (read-only)
+# ---------------------------------------------------------------------------
+
+def audit_entries(limit: int | None = None, entity: str | None = None,
+                  action: str | None = None, query: str = "") -> list[dict]:
+    """Read-only audit trail: entries newest-first, with optional filters.
+
+    ``query`` does a substring search (delegates to audit.search);
+    otherwise audit.read applies the entity/action filters.
+    """
+    from candid import audit as A
+    if query:
+        entries = A.search(query)
+    else:
+        entries = A.read(entity=entity or None, action=action or None)
+    if limit is not None:
+        entries = entries[:limit]
+    return entries
+
+
+def audit_verify() -> dict:
+    """Tamper check for the audit log. Returns {"ok", "problems"}."""
+    from candid import audit as A
+    problems = A.verify()
+    return {"ok": not problems, "problems": problems}
+
+
+def _qs_int(qs: dict, name: str) -> int | None:
+    """Parse an integer query param; None when missing or invalid."""
+    raw = (qs.get(name, [None])[0] or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
+
+
+_AUDIT_PAGE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>candid - Audit trail</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1100px;margin:2rem auto;
+padding:0 1rem;color:#1a1a1a;background:#fff}
+h1{font-size:1.6rem;margin-bottom:0}
+.sub{color:#555;margin-top:.3rem}
+form#filters{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;
+margin:1.2rem 0}
+label{font-size:.85rem;color:#333;display:flex;flex-direction:column;gap:.2rem}
+input,button{font:inherit;padding:.35rem .5rem;border:1px solid #bbb;
+border-radius:.3rem}
+button{cursor:pointer;background:#f3f3f3}
+button:hover{background:#e9e9e9}
+#verifyResult{margin:.5rem 0;font-weight:600}
+#verifyResult.ok{color:#0a6b2d}
+#verifyResult.bad{color:#a31515}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th,td{border:1px solid #ddd;padding:.4rem .5rem;text-align:left;
+vertical-align:top}
+th{background:#f6f6f6}
+td.ts{white-space:nowrap}
+details{font-size:.82rem}
+pre{white-space:pre-wrap;word-break:break-word;margin:.3rem 0;max-height:
+200px;overflow:auto;background:#fafafa;padding:.4rem;border:1px solid #eee}
+.readonly{font-size:.85rem;color:#555;border:1px dashed #bbb;border-radius:
+.3rem;padding:.6rem .8rem;margin:1rem 0;background:#fcfcfc}
+</style>
+</head>
+<body>
+<h1>Audit trail</h1>
+<p class="sub">Every recorded change, newest first. <a href="/">Back to dashboard</a></p>
+<div class="readonly">This view is read-only: the log can only grow (or be
+pruned by age from the CLI). Undo happens through tracker snapshots, never by
+editing the log.</div>
+<form id="filters">
+<label>entity<input name="entity" placeholder="tracker"></label>
+<label>action<input name="action" placeholder="create / update / remove"></label>
+<label>search<input name="q" placeholder="company, command, note..."></label>
+<label>limit<input name="limit" value="200" size="6"></label>
+<button type="submit">Filter</button>
+<button type="button" id="verifyBtn">Verify integrity</button>
+</form>
+<div id="verifyResult"></div>
+<table id="entries">
+<thead><tr><th>when</th><th>actor</th><th>command</th><th>entity</th>
+<th>entity id</th><th>action</th><th>changes</th></tr></thead>
+<tbody></tbody>
+</table>
+<script>
+const tbody = document.querySelector("#entries tbody");
+const vres = document.querySelector("#verifyResult");
+const esc = s => String(s == null ? "" : s)
+  .replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",
+  '"':"&quot;","'":"&#39;"}[c]));
+function changeSummary(e){
+  const ch = e.changes || [];
+  if(!ch.length) return esc(e.note || "");
+  const fields = ch.map(c => esc(c.field)).join(", ");
+  const extra = ch.length > 6 ? " (+ " + (ch.length - 6) + " more)" : "";
+  return "fields: " + ch.slice(0, 6).map(c => esc(c.field)).join(", ") + extra
+    + '<details><summary>details</summary><pre>'
+    + esc(JSON.stringify(ch, null, 1)) + "</pre></details>";
+}
+function render(entries){
+  tbody.innerHTML = entries.map(e =>
+    "<tr><td class=ts>" + esc(e.ts) + "</td><td>" + esc(e.actor) + "</td><td>" +
+    esc(e.command) + "</td><td>" + esc(e.entity) + "</td><td>" +
+    esc(e.entity_id) + "</td><td>" + esc(e.action) + "</td><td>" +
+    changeSummary(e) + "</td></tr>").join("")
+    || '<tr><td colspan="7">No entries match.</td></tr>';
+}
+async function load(){
+  const q = new URLSearchParams(new FormData(document.querySelector("#filters")));
+  const res = await fetch("/api/audit?" + q);
+  render(await res.json());
+}
+document.querySelector("#filters").addEventListener("submit", ev => {
+  ev.preventDefault(); load();
+});
+document.querySelector("#verifyBtn").addEventListener("click", async () => {
+  const res = await fetch("/api/audit/verify");
+  const v = await res.json();
+  vres.className = v.ok ? "ok" : "bad";
+  vres.textContent = v.ok ? "Integrity OK: hash chain verified."
+    : "Problems: " + v.problems.join("; ");
+});
+load();
+</script>
+</body>
+</html>"""
+
+
+# ---------------------------------------------------------------------------
 # HTTP server
 # ---------------------------------------------------------------------------
 
@@ -526,6 +662,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     status=qs.get("status", [None])[0]))
             elif path == "/api/import-guides":
                 _send_json(self, import_guides())
+            elif path == "/audit":
+                self._serve_audit_page()
+            elif path == "/api/audit":
+                _send_json(self, audit_entries(
+                    limit=(_qs_int(qs, "limit")
+                           if "limit" in qs else 200),
+                    entity=qs.get("entity", [None])[0],
+                    action=qs.get("action", [None])[0],
+                    query=qs.get("q", [""])[0]))
+            elif path == "/api/audit/verify":
+                _send_json(self, audit_verify())
             else:
                 _send_json(self, {"error": "not found"}, 404)
         except DashboardError as e:
@@ -672,6 +819,15 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         except OSError:
             _send_json(self, {"error": "dashboard.html missing"}, 500)
             return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_audit_page(self):
+        """Serve the read-only Audit trail page (inline HTML)."""
+        body = _AUDIT_PAGE_HTML.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

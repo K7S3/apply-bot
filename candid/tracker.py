@@ -7,6 +7,7 @@ Statuses: saved, applied, selected_for_interview, rejected, offer, withdrawn.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -15,6 +16,18 @@ from candid import config as C
 
 class TrackerError(Exception):
     """Raised for invalid tracker operations."""
+
+
+def _audit_record(**kwargs) -> None:
+    """Record an audit entry; failures are logged to stderr and never raised.
+
+    Audit is best-effort: it must never break a tracker operation.
+    """
+    try:
+        from candid import audit as audit_mod
+        audit_mod.record(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - audit must never break tracker ops
+        print(f"candid: audit failed ({exc}); continuing", file=sys.stderr)
 
 
 def _load(path: str | Path | None = None) -> list[dict]:
@@ -71,6 +84,11 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     }
     apps.append(rec)
     _save(apps, path)
+    if path is None:
+        # Default path only: audit records the real tracker file, not test temps.
+        _audit_record(actor="cli", command="track add", entity="tracker",
+                      entity_id=str(rec["id"]), action="create",
+                      before=None, after=dict(rec))
     return rec
 
 
@@ -81,6 +99,7 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
     rec = next((a for a in apps if a.get("id") == app_id), None)
     if rec is None:
         raise TrackerError(f"No application with id {app_id}. Use `track list` to see ids.")
+    before = dict(rec)
     if status is not None:
         if status not in C.STATUSES:
             raise TrackerError(f"Unknown status '{status}'. Choose from: {', '.join(C.STATUSES)}")
@@ -91,15 +110,24 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
         rec["prep_pack"] = prep_pack
     rec["date_updated"] = date.today().isoformat()
     _save(apps, path)
+    if path is None:
+        _audit_record(actor="cli", command="track update", entity="tracker",
+                      entity_id=str(rec["id"]), action="update",
+                      before=before, after=dict(rec))
     return rec
 
 
 def remove(app_id: int, path: str | Path | None = None) -> None:
     apps = _load(path)
-    kept = [a for a in apps if a.get("id") != app_id]
-    if len(kept) == len(apps):
+    rec = next((a for a in apps if a.get("id") == app_id), None)
+    if rec is None:
         raise TrackerError(f"No application with id {app_id}.")
+    kept = [a for a in apps if a.get("id") != app_id]
     _save(kept, path)
+    if path is None:
+        _audit_record(actor="cli", command="track remove", entity="tracker",
+                      entity_id=str(app_id), action="delete",
+                      before=dict(rec), after=None)
 
 
 def list_apps(*, status: str | None = None, company: str | None = None,
