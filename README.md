@@ -44,7 +44,7 @@ All commands are `python -m candid <command> --help`. No accounts, no keys.
 
 CLI niceties: `python -m candid --version`, typo-tolerant commands
 (`candid macth` suggests `match`), `--json` on `match`, `track list`,
-`jobs list`, and `salary lookup` for scripting, and `--jd -` reads the JD
+`jobs list`, `salary lookup`, and `--jd -` reads the JD
 from stdin wherever a JD is accepted. Errors never dump tracebacks — each
 one ends with the exact next command to run.
 
@@ -61,6 +61,7 @@ one ends with the exact next command to run.
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
+| `tradeoff` | Sign-on vs base trade-off calculator: bonus↔raise equivalence, multi-year projections, breakeven years, NPV present value, guaranteed-vs-probabilistic bonus risk framing, tax-timing notes, counter bridge-ask, and two-offer comparison reports. See [docs/bonus_tradeoff.md](docs/bonus_tradeoff.md). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
@@ -157,13 +158,15 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+295 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
 salary (LCA import variants, title aggregation), judge verdicts (incl.
 infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
-STAR prompts), offers (sign-on amortization, markdown export), negotiation
+STAR prompts), offers (sign-on amortization, markdown export), sign-on vs
+base trade-offs (equivalence, multi-year projection, breakeven, NPV,
+counter bridge-ask, report export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly

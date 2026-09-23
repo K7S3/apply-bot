@@ -128,6 +128,14 @@ def list_offers(path: str | Path | None = None) -> list[dict]:
     return sorted(_load(path), key=lambda o: o.get("normalized_annual", 0), reverse=True)
 
 
+def get_offer(offer_id: int, path: str | Path | None = None) -> dict:
+    """Fetch one recorded offer by id. Raises OfferError if missing."""
+    for o in _load(path):
+        if o.get("id") == int(offer_id):
+            return o
+    raise OfferError(f"No offer with id {offer_id}.")
+
+
 def render_comparison(offers: list[dict]) -> str:
     """Side-by-side comparison table, sorted by normalized annual comp."""
     if not offers:

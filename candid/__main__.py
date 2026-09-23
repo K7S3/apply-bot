@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "tradeoff",
 ]
 
 SUBCOMMANDS = {
@@ -41,6 +41,10 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
+    "tradeoff": ["equiv", "project", "breakeven", "compare", "counter",
+                 "risk", "report"],
+    "tradeoff": ["equiv", "project", "breakeven", "compare", "counter",
+                 "risk", "report"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -53,7 +57,7 @@ SUBCOMMANDS = {
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "TradeoffError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
 }
@@ -65,6 +69,8 @@ _NEXT_COMMAND = {
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
+    "TradeoffError": "python -m candid tradeoff --help",
+    "TradeoffError": "python -m candid tradeoff --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
@@ -294,6 +300,8 @@ def cmd_followup(a):
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
 
 
+
+
 def cmd_offer(a):
     from candid import offer as O
     if a.what == "add":
@@ -310,6 +318,96 @@ def cmd_offer(a):
         print(f"Offer comparison exported to {path}")
 
 
+def _fmt(x) -> str:
+    try:
+        return f"${float(x or 0):,.0f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def cmd_tradeoff(a):
+    from candid import bonus_tradeoff as T
+    from candid import offer as O
+
+    def _offer_fields(args, prefix=""):
+        oid = getattr(args, f"{prefix}offer", None)
+        if oid:
+            return O.get_offer(oid)
+        return {
+            "company": getattr(args, f"{prefix}company", "") or "Offer",
+            "base": getattr(args, f"{prefix}base", 0),
+            "bonus_target_pct": getattr(args, f"{prefix}bonus_pct", 0),
+            "sign_on": getattr(args, f"{prefix}sign_on", 0),
+            "annual_equity": getattr(args, f"{prefix}equity_yr", 0),
+            "equity_total": getattr(args, f"{prefix}equity_total", 0),
+            "vest_years": getattr(args, f"{prefix}vest_years", 4),
+            "benefits_value": getattr(args, f"{prefix}benefits", 0),
+        }
+
+    if a.what == "equiv":
+        if a.sign_on:
+            r = T.base_raise_equivalence(a.sign_on, a.years,
+                                         discount_rate=a.discount_rate)
+            print(r["explanation"])
+        else:
+            r = T.bonus_raise_equivalence(a.raise_, a.years,
+                                          discount_rate=a.discount_rate)
+            print(r["explanation"])
+    elif a.what == "project":
+        o = _offer_fields(a)
+        proj = T.multi_year_projection(
+            o.get("base", 0), o.get("bonus_target_pct", 0), o.get("sign_on", 0),
+            o.get("annual_equity", 0) or (float(o.get("equity_total") or 0) /
+                                          max(int(o.get("vest_years") or 4), 1)),
+            o.get("benefits_value", 0), a.years, raise_pct=a.raise_pct,
+            bonus_attainment=a.attainment)
+        print(f"Multi-year projection: {o.get('company', '')}")
+        for row in proj:
+            print(f"  yr {row['year']}: base {_fmt(row['base'])} + bonus "
+                  f"{_fmt(row['bonus'])} + vest {_fmt(row['equity_vest'])} + "
+                  f"benefits {_fmt(row['benefits'])}"
+                  + (f" + sign-on {_fmt(row['sign_on'])}" if row["sign_on"] else "")
+                  + f" = {_fmt(row['total'])}")
+        cum = T.cumulative_value(proj)
+        print(f"Cumulative after {a.years} yrs: {_fmt(cum[-1]['cumulative'])} | "
+              f"NPV @ {a.discount_rate:.0%}: {_fmt(T.present_value(proj, a.discount_rate))}")
+    elif a.what == "breakeven":
+        if a.offer_a and a.offer_b:
+            oa, ob = O.get_offer(a.offer_a), O.get_offer(a.offer_b)
+            r = T.breakeven_years(oa.get("base", 0), oa.get("sign_on", 0),
+                                  ob.get("base", 0), ob.get("sign_on", 0))
+        else:
+            r = T.breakeven_years(a.base_a, a.sign_on_a, a.base_b, a.sign_on_b)
+        print(r["note"])
+    elif a.what == "compare":
+        comp = T.compare_tradeoffs(
+            _offer_fields(a, "a_"), _offer_fields(a, "b_"),
+            years=a.years, discount_rate=a.discount_rate,
+            raise_pct=a.raise_pct, attainment=a.attainment)
+        print(T.render_report(comp))
+    elif a.what == "counter":
+        r = T.counter_bridge_amount(a.gap, a.years,
+                                    discount_rate=a.discount_rate)
+        print(r["script"])
+        print()
+        print(r["negotiation_note"])
+    elif a.what == "risk":
+        r = T.bonus_vs_sign_on(a.sign_on, a.bonus_target,
+                               attainment=a.attainment)
+        print(f"Guaranteed sign-on {_fmt(r['sign_on_guaranteed'])} vs bonus target "
+              f"{_fmt(r['bonus_target'])} at {r['attainment']:.0%} attainment "
+              f"(expected {_fmt(r['bonus_expected_value'])}).")
+        print(f"Better expected value: {r['better_expected_value']}.")
+        print(r["risk_note"])
+    elif a.what == "report":
+        comp = T.compare_tradeoffs(
+            _offer_fields(a, "a_"), _offer_fields(a, "b_"),
+            years=a.years, discount_rate=a.discount_rate,
+            raise_pct=a.raise_pct, attainment=a.attainment)
+        path = T.export_report(comp, path=a.out or None)
+        print(f"Trade-off report exported to {path}")
+
+
 def cmd_negotiate(a):
     from candid import negotiate as N
     if a.what == "playbook":
@@ -324,6 +422,8 @@ def cmd_negotiate(a):
                               base_ask_reason=a.base_ask, second_item=a.second_item,
                               second_ask_reason=a.second_ask or "",
                               target_summary=a.target or "", call_time=a.call_time))
+
+
 
 
 def cmd_salary(a):
@@ -718,6 +818,117 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--second-ask", default=""); t.add_argument("--target", default="")
     t.add_argument("--call-time", default="tomorrow")
     s.set_defaults(func=cmd_negotiate)
+
+
+    # tradeoff — signing bonus vs base trade-off calculator
+    s = _sub(sub, "tradeoff", "Model sign-on vs base trade-offs.", [
+        "python -m candid tradeoff equiv --raise 10000 --years 4",
+        "python -m candid tradeoff breakeven --base-a 180000 --sign-on-a 0 --base-b 165000 --sign-on-b 40000",
+        "python -m candid tradeoff compare --offer-a 1 --offer-b 2 --years 4",
+        "python -m candid tradeoff counter --gap 15000 --years 3",
+    ])
+    ts = _nested(s)
+
+    def _horizon(t):
+        t.add_argument("--years", type=int, default=4, help="Horizon in years")
+        t.add_argument("--discount-rate", type=float, default=0.05,
+                       help="Discount rate as a decimal (e.g. 0.05)")
+        return t
+
+    t = _sub(ts, "equiv", "Sign-on <-> annual-raise equivalence.", [
+        "python -m candid tradeoff equiv --raise 10000 --years 4",
+        "python -m candid tradeoff equiv --sign-on 40000 --years 4 --discount-rate 0.05",
+    ])
+    t.add_argument("--raise", dest="raise_", type=float, default=0,
+                   help="Annual base raise $ (ignored if --sign-on given)")
+    t.add_argument("--sign-on", type=float, default=0,
+                   help="Sign-on $ to convert into an annual raise")
+    _horizon(t)
+
+    t = _sub(ts, "project", "Year-by-year projection for one offer.", [
+        "python -m candid tradeoff project --offer 1 --years 4",
+        "python -m candid tradeoff project --company Acme --base 180000 --sign-on 30000 --bonus-pct 15",
+    ])
+    t.add_argument("--offer", type=int, default=0,
+                   help="Recorded offer id (from: offer list)")
+    t.add_argument("--company", default=""); t.add_argument("--base", type=float, default=0)
+    t.add_argument("--bonus-pct", type=float, default=0)
+    t.add_argument("--sign-on", type=float, default=0)
+    t.add_argument("--equity-yr", dest="equity_yr", type=float, default=0,
+                   help="Annual equity vesting $")
+    t.add_argument("--benefits", type=float, default=0)
+    t.add_argument("--raise-pct", type=float, default=3.0,
+                   help="Assumed annual base raise, in percent")
+    t.add_argument("--attainment", type=float, default=1.0,
+                   help="Bonus payout as fraction of target (e.g. 0.8)")
+    _horizon(t)
+
+    t = _sub(ts, "breakeven", "Years until the higher-base offer wins.", [
+        "python -m candid tradeoff breakeven --offer-a 1 --offer-b 2",
+        "python -m candid tradeoff breakeven --base-a 180000 --sign-on-a 0 --base-b 165000 --sign-on-b 40000",
+    ])
+    t.add_argument("--offer-a", type=int, default=0)
+    t.add_argument("--offer-b", type=int, default=0)
+    t.add_argument("--base-a", type=float, default=0)
+    t.add_argument("--sign-on-a", type=float, default=0)
+    t.add_argument("--base-b", type=float, default=0)
+    t.add_argument("--sign-on-b", type=float, default=0)
+
+    def _offer_args(t, tag):
+        d = lambda name: f"{tag}_{name}"  # noqa: E731
+        t.add_argument(f"--offer-{tag}", dest=d("offer"), type=int, default=0,
+                       help=f"Recorded offer id for {tag.upper()} (from: offer list)")
+        t.add_argument(f"--company-{tag}", dest=d("company"), default="")
+        t.add_argument(f"--base-{tag}", dest=d("base"), type=float, default=0)
+        t.add_argument(f"--bonus-pct-{tag}", dest=d("bonus_pct"),
+                       type=float, default=0)
+        t.add_argument(f"--sign-on-{tag}", dest=d("sign_on"),
+                       type=float, default=0)
+        t.add_argument(f"--equity-yr-{tag}", dest=d("equity_yr"),
+                       type=float, default=0,
+                       help="Annual equity vesting $")
+        t.add_argument(f"--equity-total-{tag}", dest=d("equity_total"),
+                       type=float, default=0)
+        t.add_argument(f"--vest-years-{tag}", dest=d("vest_years"),
+                       type=int, default=4)
+        t.add_argument(f"--benefits-{tag}", dest=d("benefits"),
+                       type=float, default=0)
+        return t
+
+    t = _sub(ts, "compare", "Multi-year side-by-side of two offers.", [
+        "python -m candid tradeoff compare --offer-a 1 --offer-b 2 --years 4",
+        "python -m candid tradeoff compare --company-a Acme --base-a 180000 --sign-on-a 30000 --company-b Beta --base-b 195000 --years 4",
+    ])
+    _offer_args(t, "a"); _offer_args(t, "b")
+    t.add_argument("--raise-pct", type=float, default=3.0)
+    t.add_argument("--attainment", type=float, default=1.0)
+    _horizon(t)
+
+    t = _sub(ts, "counter", "Sign-on ask that bridges a base gap.", [
+        "python -m candid tradeoff counter --gap 15000 --years 3",
+    ])
+    t.add_argument("--gap", type=float, required=True,
+                   help="Base shortfall in $/yr (target base minus offered base)")
+    _horizon(t)
+
+    t = _sub(ts, "risk", "Guaranteed sign-on vs probabilistic bonus.", [
+        "python -m candid tradeoff risk --sign-on 30000 --bonus-target 45000 --attainment 0.8",
+    ])
+    t.add_argument("--sign-on", type=float, default=0)
+    t.add_argument("--bonus-target", type=float, default=0)
+    t.add_argument("--attainment", type=float, default=0.8,
+                   help="Expected bonus payout as fraction of target")
+
+    t = _sub(ts, "report", "Export the two-offer comparison as markdown.", [
+        "python -m candid tradeoff report --offer-a 1 --offer-b 2 --out tradeoff.md",
+    ])
+    _offer_args(t, "a"); _offer_args(t, "b")
+    t.add_argument("--raise-pct", type=float, default=3.0)
+    t.add_argument("--attainment", type=float, default=1.0)
+    _horizon(t)
+    t.add_argument("--out", default="",
+                   help="Output path (default: candid_data/tradeoff_reports/<date>_tradeoff.md)")
+    s.set_defaults(func=cmd_tradeoff)
 
     # salary
     s = _sub(sub, "salary", "Salary intelligence database.", [
