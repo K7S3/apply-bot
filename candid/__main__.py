@@ -11,6 +11,7 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid changelog generate              # changelog from git history
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -20,8 +21,10 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -33,6 +36,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
+    "changelog",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +52,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "changelog": ["generate", "check", "suggest-bump"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +60,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "ChangelogError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +77,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "ChangelogError": "python -m candid changelog --help",
 }
 
 
@@ -484,6 +490,335 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+# ---------------------------------------------------------------------------
+# changelog (generate / check / suggest-bump)
+# ---------------------------------------------------------------------------
+#
+# The real implementation lives in candid/changelog.py (worker A). Until it
+# lands, and as a safety net afterwards, _changelog_backend() resolves each
+# function via getattr and falls back to a minimal built-in implementation
+# with identical signatures. The fallback is plain conventional-commit
+# parsing on top of `git log`, so the CLI stays fully local and testable.
+
+_CL_TYPES = {
+    "feat": ("Features", "minor"),
+    "fix": ("Bug Fixes", "patch"),
+    "perf": ("Performance Improvements", "patch"),
+    "revert": ("Reverts", "patch"),
+    "docs": ("Documentation", "patch"),
+    "style": ("Styles", None),
+    "refactor": ("Code Refactoring", "patch"),
+    "test": ("Tests", "patch"),
+    "chore": ("Chores", None),
+    "ci": ("CI", None),
+    "build": ("Build System", None),
+}
+
+_CL_SECTION_ORDER = [
+    "Breaking Changes", "Features", "Bug Fixes", "Performance Improvements",
+    "Reverts", "Documentation", "Code Refactoring", "Styles", "Tests",
+    "CI", "Build System", "Chores", "Other Changes",
+]
+
+_CL_SEP = "\x1f"
+
+
+def _cl_git(repo: str, *args: str):
+    import subprocess
+    return subprocess.run(["git", "-C", repo, *args],
+                          capture_output=True, text=True)
+
+
+def _cl_latest_tag(repo: str):
+    r = _cl_git(repo, "describe", "--tags", "--abbrev=0")
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _cl_categorize(commit: dict):
+    """(category, bump) from a conventional-commit subject/body."""
+    subject = commit.get("subject", "")
+    body = commit.get("body", "")
+    m = re.match(r"^(\w+)(?:\(([^)]*)\))?(!)?:\s*(.*)$", subject)
+    if not m:
+        if "BREAKING CHANGE" in body:
+            return ("Breaking Changes", "major")
+        return ("Other Changes", None)
+    ctype, scope, bang, _rest = m.groups()
+    commit["type"] = ctype
+    commit["scope"] = scope or ""
+    if bang or "BREAKING CHANGE" in body:
+        return ("Breaking Changes", "major")
+    return _CL_TYPES.get(ctype.lower(), ("Other Changes", None))
+
+
+def _cl_get_commits(since=None, repo=None):
+    repo = repo or os.getcwd()
+    if since is None:
+        since = _cl_latest_tag(repo)
+    rev = f"{since}..HEAD" if since else "HEAD"
+    r = _cl_git(repo, "log", rev, "--no-merges", "--date=short",
+                f"--pretty=format:%H{_CL_SEP}%h{_CL_SEP}%an{_CL_SEP}"
+                f"%ad{_CL_SEP}%s{_CL_SEP}%b")
+    if r.returncode != 0:
+        sys.exit(f"Could not read git history in {repo}: "
+                 f"{r.stderr.strip() or r.stdout.strip()}")
+    commits = []
+    for line in r.stdout.splitlines():
+        parts = line.split(_CL_SEP)
+        if len(parts) != 6:
+            continue
+        h, short, author, date, subject, body = parts
+        c = {"hash": h, "short": short, "author": author, "date": date,
+             "subject": subject.strip(), "body": body.strip(),
+             "type": "", "scope": ""}
+        c["category"], _bump = _cl_categorize(c)
+        commits.append(c)
+    return commits
+
+
+def _cl_group_commits(commits):
+    groups = {label: [] for label in _CL_SECTION_ORDER}
+    for c in commits:
+        cat = c.get("category") or "Other Changes"
+        groups.setdefault(cat, []).append(c)
+    out = {k: groups[k] for k in _CL_SECTION_ORDER if groups[k]}
+    for k, v in groups.items():
+        if k not in out and v:
+            out[k] = v
+    return out
+
+
+def _cl_suggest_bump(commits):
+    rank = {"major": 3, "minor": 2, "patch": 1}
+    best = None
+    for c in commits:
+        _cat, bump = _cl_categorize(c)
+        if bump and (best is None or rank[bump] > rank[best]):
+            best = bump
+    return best or "none"
+
+
+def _cl_stats(commits):
+    authors: dict = {}
+    for c in commits:
+        name = c.get("author") or "unknown"
+        authors[name] = authors.get(name, 0) + 1
+    return {
+        "commits": len(commits),
+        "authors": authors,
+        "contributors": len(authors),
+        "breaking": sum(1 for c in commits
+                        if c.get("category") == "Breaking Changes"),
+        "features": sum(1 for c in commits
+                        if c.get("category") == "Features"),
+        "fixes": sum(1 for c in commits
+                     if c.get("category") == "Bug Fixes"),
+    }
+
+
+def _cl_render_markdown(groups, stats=None, version=None, since=None,
+                        include_stats=True):
+    lines = []
+    title = f"## {version}" if version else "## Changelog"
+    if since:
+        title += f" (since {since})"
+    lines += [title, ""]
+    for label, commits in groups.items():
+        lines += [f"### {label}", ""]
+        for c in commits:
+            lines.append(f"- {c['subject']} ({c['short']})")
+        lines.append("")
+    if include_stats and stats:
+        lines += ["### Stats", "",
+                  f"- {stats['commits']} commit(s) by "
+                  f"{stats['contributors']} contributor(s)",
+                  f"- {stats['features']} feature(s), {stats['fixes']} fix(es), "
+                  f"{stats['breaking']} breaking change(s)", ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _cl_render_plain(groups, stats=None, version=None, since=None,
+                    include_stats=True):
+    lines = []
+    title = f"Changelog {version}" if version else "Changelog"
+    if since:
+        title += f" (since {since})"
+    lines += [title, "=" * len(title), ""]
+    for label, commits in groups.items():
+        lines += [label, "-" * len(label)]
+        for c in commits:
+            lines.append(f"  * {c['subject']} ({c['short']})")
+        lines.append("")
+    if include_stats and stats:
+        lines.append(f"{stats['commits']} commit(s) by "
+                     f"{stats['contributors']} contributor(s).")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _cl_render_json(groups, stats, version, since):
+    return json.dumps({
+        "version": version, "since": since, "stats": stats,
+        "groups": {label: [dict(c) for c in commits]
+                   for label, commits in groups.items()},
+    }, indent=2, default=str) + "\n"
+
+
+def _cl_render_github(groups, stats, version, since, repo_url=None):
+    lines = [f"## What's Changed in {version or 'this release'}", ""]
+    if since:
+        lines.append(f"Changes since `{since}`.")
+        lines.append("")
+    for label, commits in groups.items():
+        lines += [f"### {label}", ""]
+        for c in commits:
+            lines.append(f"* {c['subject']} ({c['short']})")
+        lines.append("")
+    if stats:
+        lines.append(f"**Full Changelog**: {since or '...'}...{version or 'HEAD'}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _cl_check_against_file(path, generated):
+    """Return (ok, missing_subjects) for `generated` vs the file at `path`.
+
+    `generated` may be a groups dict, a list of commit dicts, or rendered
+    text (bullets are parsed back out). Mirrors candid.changelog.
+    """
+    if isinstance(generated, dict):
+        entries = [e for items in generated.values() for e in items]
+    elif isinstance(generated, list):
+        entries = generated
+    else:
+        entries = []
+        for line in str(generated).splitlines():
+            m = re.match(r"^[-*]\s+(.+?)(?:\s+\([0-9a-f]{7,40}\))?\s*$", line)
+            if m:
+                entries.append({"subject": m.group(1)})
+    subjects = [e.get("subject", "") for e in entries]
+    p = Path(path)
+    if not p.exists():
+        return (False, subjects)
+    text = p.read_text(encoding="utf-8", errors="replace")
+    missing = [s for s in subjects if s not in text]
+    return (not missing, missing)
+
+
+def _changelog_backend():
+    """Resolve the candid.changelog API, with a local fallback per function."""
+    import types
+    try:
+        from candid import changelog as real
+    except ImportError:
+        real = None
+
+    def need(name, fallback):
+        return getattr(real, name, fallback) if real is not None else fallback
+
+    return types.SimpleNamespace(
+        get_commits=need("get_commits", _cl_get_commits),
+        group_commits=need("group_commits", _cl_group_commits),
+        suggest_bump=need("suggest_bump", _cl_suggest_bump),
+        stats=need("stats", _cl_stats),
+        render_markdown=need("render_markdown", _cl_render_markdown),
+        render_plain=need("render_plain", _cl_render_plain),
+        render_json=need("render_json", _cl_render_json),
+        render_github=need("render_github", _cl_render_github),
+        check_against_file=need("check_against_file", _cl_check_against_file),
+    )
+
+
+def _changelog_since_label(repo: str, since):
+    return since or _cl_latest_tag(repo) or "the beginning of history"
+
+
+def _bump_version(version: str, bump: str) -> str:
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(.*)$", version.strip())
+    if not m or bump not in ("major", "minor", "patch"):
+        return version
+    major, minor, patch, rest = (int(m.group(1)), int(m.group(2)),
+                                 int(m.group(3)), m.group(4))
+    if bump == "major":
+        major, minor, patch = major + 1, 0, 0
+    elif bump == "minor":
+        minor, patch = minor + 1, 0
+    else:
+        patch += 1
+    return f"{major}.{minor}.{patch}{rest}"
+
+
+def _changelog_render(CL, a, groups, stats, since_label):
+    fmt = a.format
+    if fmt == "markdown":
+        return CL.render_markdown(groups, stats=stats, version=__version__,
+                                  since=since_label,
+                                  include_stats=getattr(a, "stats", True))
+    if fmt == "plain":
+        return CL.render_plain(groups, stats=stats, version=__version__,
+                               since=since_label,
+                               include_stats=getattr(a, "stats", True))
+    if fmt == "json":
+        return CL.render_json(groups, stats=stats, version=__version__,
+                              since=since_label)
+    return CL.render_github(groups, stats=stats, version=__version__,
+                            since=since_label)
+
+
+def cmd_changelog(a):
+    CL = _changelog_backend()
+    repo = a.repo or os.getcwd()
+    if a.what == "generate":
+        commits = CL.get_commits(since=a.since, repo=repo)
+        groups = CL.group_commits(commits)
+        stats = CL.stats(commits)
+        text = _changelog_render(CL, a, groups, stats,
+                                _changelog_since_label(repo, a.since))
+        if a.output:
+            out = Path(a.output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+            print(str(out))
+        else:
+            print(text, end="" if text.endswith("\n") else "\n")
+    elif a.what == "check":
+        commits = CL.get_commits(since=a.since, repo=repo)
+        groups = CL.group_commits(commits)
+        since_label = _changelog_since_label(repo, a.since)
+        if not Path(a.file).exists():
+            n = len(commits)
+            print(f"{a.file} does not exist: all {n} "
+                  f"entr{'y' if n == 1 else 'ies'} since {since_label} missing.")
+            for c in commits:
+                print(f"  - {c.get('subject', '')}")
+            sys.exit(f"{a.file} not found; create it with "
+                     f"`python -m candid changelog generate --output {a.file}`")
+        result = CL.check_against_file(a.file, groups)
+        if isinstance(result, tuple):
+            ok, missing = result
+        elif isinstance(result, dict):
+            missing = result.get("missing", [])
+            ok = not missing
+        else:
+            missing = list(result or [])
+            ok = not missing
+        if ok:
+            print(f"OK: {a.file} covers all {len(commits)} commit(s) "
+                  f"since {since_label}.")
+            return
+        n = len(missing)
+        print(f"{a.file} is missing {n} entr{'y' if n == 1 else 'ies'}:")
+        for m in missing:
+            print(f"  - {m}")
+        sys.exit(f"{n} changelog entr{'y' if n == 1 else 'ies'} "
+                 f"missing from {a.file}; regenerate with "
+                 f"`python -m candid changelog generate --output {a.file}`")
+    elif a.what == "suggest-bump":
+        commits = CL.get_commits(since=a.since, repo=repo)
+        bump = CL.suggest_bump(commits)
+        nxt = _bump_version(__version__, bump)
+        print(f"bump: {bump}")
+        print(f"version: {__version__} -> {nxt}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1253,56 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # changelog
+    s = _sub(sub, "changelog", "Generate a changelog from git history.", [
+        "python -m candid changelog generate",
+        "python -m candid changelog generate --since v0.1.0 --format json",
+        "python -m candid changelog generate --output CHANGELOG.md",
+        "python -m candid changelog check --file CHANGELOG.md",
+        "python -m candid changelog suggest-bump",
+    ])
+    cs = _nested(s)
+    t = _sub(cs, "generate",
+             "Render a changelog from commits since REF (default: most recent tag).", [
+        "python -m candid changelog generate",
+        "python -m candid changelog generate --since v0.1.0 --format github",
+        "python -m candid changelog generate --output CHANGELOG.md --no-stats",
+    ])
+    t.add_argument("--since", metavar="REF", default=None,
+                   help="git ref/tag to start from (default: most recent tag)")
+    t.add_argument("--format", default="markdown",
+                   choices=["markdown", "plain", "json", "github"],
+                   help="output format (default: markdown)")
+    t.add_argument("--output", metavar="FILE", default=None,
+                   help="write the rendered changelog to FILE (creates parent dirs)")
+    t.add_argument("--repo", metavar="PATH", default=None,
+                   help="git repo to read (default: current directory)")
+    t.add_argument("--stats", dest="stats", default=True,
+                   action=argparse.BooleanOptionalAction,
+                   help="include the stats section in markdown output "
+                        "(default: on; --no-stats to skip)")
+    t = _sub(cs, "check",
+             "Check that CHANGELOG.md covers every commit since REF.", [
+        "python -m candid changelog check",
+        "python -m candid changelog check --file CHANGELOG.md --since v0.1.0",
+    ])
+    t.add_argument("--file", metavar="FILE", default="CHANGELOG.md",
+                   help="changelog file to check (default: CHANGELOG.md)")
+    t.add_argument("--since", metavar="REF", default=None,
+                   help="git ref/tag to start from (default: most recent tag)")
+    t.add_argument("--repo", metavar="PATH", default=None,
+                   help="git repo to read (default: current directory)")
+    t = _sub(cs, "suggest-bump",
+             "Suggest a semver bump from conventional-commit types.", [
+        "python -m candid changelog suggest-bump",
+        "python -m candid changelog suggest-bump --since v0.1.0",
+    ])
+    t.add_argument("--since", metavar="REF", default=None,
+                   help="git ref/tag to start from (default: most recent tag)")
+    t.add_argument("--repo", metavar="PATH", default=None,
+                   help="git repo to read (default: current directory)")
+    s.set_defaults(func=cmd_changelog)
 
     return p
 
