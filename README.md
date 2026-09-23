@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `recruiter` | Recruiter relationship manager: profiles (in-house vs agency, channels, notes, tags), do-not-engage list, interaction log, Gmail Takeout proposals (guesses labeled, nothing saved automatically), per-recruiter response rates and a 0-100 worth-replying score, agency vs in-house comparison, recruiter-to-application links with recruiter-sourced funnel stats, stale-thread nudges, double-submission guard, and reply drafts (interested / not interested / need details / schedule call). Drafts are copy-paste; nothing is ever sent. |
 
 ## Job-source coverage (honest)
 

@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "recruiter",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,10 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "recruiter": ["add", "list", "show", "update", "delete", "block", "unblock",
+                  "touch", "replied", "thread", "score", "rank", "agency-vs-inhouse",
+                  "link", "unlink", "funnel", "stale", "draft", "dupes",
+                  "from-gmail"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +59,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "RecruiterError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +76,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "RecruiterError": "python -m candid recruiter list",
 }
 
 
@@ -484,6 +489,156 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _fmt_rate(r):
+    return "n/a" if r is None else f"{r * 100:.0f}%"
+
+
+def cmd_recruiter(a):
+    from candid import recruiter_contacts as RC
+    from candid import recruiter_threads as RT
+    from candid import recruiter_scoring as RS
+    from candid import recruiter_pipeline as RP
+    what = a.what
+    if what == "add":
+        rec = RC.add(a.name, a.company, kind=a.kind, agency=a.agency or "",
+                     channel=a.channel, handle=a.handle or "",
+                     first_contact=a.first_contact or "", notes=a.notes or "",
+                     tags=(a.tags or "").split(",") if a.tags else None)
+        if rec.get("duplicate"):
+            print(f"Already tracked as #{rec['id']}: {rec['name']} @ {rec['company']} — not duplicated.")
+        else:
+            print(f"Added recruiter #{rec['id']}: {rec['name']} @ {rec['company']} [{rec['kind']}]")
+    elif what == "list":
+        recs = RC.list_recruiters(kind=a.kind, company=a.company, tag=a.tag,
+                                  include_blocked=a.include_blocked)
+        if a.json:
+            print(json.dumps(recs, indent=2, default=str))
+            return
+        if not recs:
+            print("No recruiters tracked yet. Add one with: python -m candid recruiter add --name NAME --company COMPANY")
+        else:
+            print(RC.render_list(recs))
+    elif what == "show":
+        rec = RC.get(a.id)
+        print(json.dumps(rec, indent=2, default=str))
+    elif what == "update":
+        rec = RC.update(a.id, name=a.name, company=a.company, kind=a.kind,
+                        agency=a.agency, channel=a.channel, handle=a.handle,
+                        first_contact=a.first_contact, notes=a.notes,
+                        tags=(a.tags.split(",") if a.tags else None))
+        print(f"Updated recruiter #{rec['id']}: {rec['name']} @ {rec['company']}")
+    elif what == "delete":
+        RC.delete(a.id)
+        print(f"Deleted recruiter #{a.id}.")
+    elif what == "block":
+        rec = RC.block(a.id, reason=a.reason or "")
+        print(f"Blocked #{rec['id']} ({rec['name']}). They are now on your do-not-engage list.")
+    elif what == "unblock":
+        rec = RC.unblock(a.id)
+        print(f"Unblocked #{rec['id']} ({rec['name']}).")
+    elif what == "touch":
+        t = RT.log_touch(a.name, a.channel, a.summary, date=a.date or None,
+                         role=a.role or "", company=a.company or "",
+                         replied=a.replied)
+        RP.touch(a.name, when=t["date"])
+        print(f"Logged {t['channel']} touch with {t['recruiter']} on {t['date']}.")
+    elif what == "replied":
+        t = RT.mark_replied(a.touch_id)
+        RP.touch(t["recruiter"], when=t["date"])
+        print(f"Marked touch #{t['id']} with {t['recruiter']} as replied.")
+    elif what == "thread":
+        touches = RT.thread(a.name)
+        if not touches:
+            print(f"No touches logged for {a.name} yet.")
+            return
+        for t in touches:
+            print(f"[{t['date']}] {t['channel']}: {t['summary']}")
+    elif what == "score":
+        card = RS.scorecard(a.name)
+        print(f"{card['recruiter']} — worth replying: {card['worth_replying']:.0f}/100")
+        print(f"  response rate: {_fmt_rate(card['response_rate'])} "
+              f"({card['replies']}/{card['total_touches']} replies)")
+        print(f"  kind: {card['kind'] or 'unknown'}, "
+              f"days since last touch: {card['days_since_last_touch'] if card['days_since_last_touch'] is not None else 'n/a'}")
+    elif what == "rank":
+        ranked = RS.rank_recruiters(limit=a.limit if a.limit and a.limit > 0 else None)
+        if not ranked:
+            print("No recruiters tracked yet.")
+            return
+        for i, card in enumerate(ranked, 1):
+            print(f"{i}. {card['recruiter']} — {card['worth_replying']:.0f}/100 "
+                  f"(response {_fmt_rate(card['response_rate'])}, {card['total_touches']} touches)")
+    elif what == "agency-vs-inhouse":
+        comp = RS.agency_vs_inhouse()
+        for kind in ("inhouse", "agency"):
+            g = comp[kind]
+            print(f"{kind}: {g['count']} recruiter(s), "
+                  f"avg response {_fmt_rate(g['avg_response_rate'])}, "
+                  f"avg worth score {g['avg_worth_replying']:.0f}/100")
+    elif what == "link":
+        RP.link(a.name, a.app_id)
+        print(f"Linked {a.name} to application #{a.app_id}.")
+    elif what == "unlink":
+        RP.unlink(a.name, a.app_id)
+        print(f"Unlinked {a.name} from application #{a.app_id}.")
+    elif what == "funnel":
+        f = RP.recruiter_funnel(a.name)
+        print(f"Funnel for {a.name} ({f['total']} linked application(s)):")
+        for status, n in f["counts"].items():
+            if n:
+                print(f"  {status}: {n}")
+        print(f"  response rate: {f['response_rate']:.1f}%, "
+              f"interview rate: {f['interview_rate']:.1f}%, "
+              f"offer rate: {f['offer_rate']:.1f}%")
+    elif what == "stale":
+        stale = RP.stale_threads(days=a.days)
+        if not stale:
+            print(f"No stale recruiter threads (>{a.days} days, no active applications).")
+            return
+        for s in stale:
+            age = f"{s['days_since_touch']} days" if s['days_since_touch'] is not None else "never touched"
+            print(f"- {s['recruiter']}: last touch {age}")
+            print(f"  suggestion: {s['suggestion']}")
+    elif what == "draft":
+        prof = _profile()
+        name = prof.get("name") or "Your Name"
+        d = RP.reply_draft(a.name, a.kind, name, role=a.role or "the role",
+                           company=a.company or "the company",
+                           summary=a.summary or "available on request",
+                           interest=a.interest or "my background",
+                           availability=a.availability or "weekday afternoons")
+        print(d["subject"] + "\n\n" + d["body"])
+        print(f"\n*Timing: {d['timing']}*")
+    elif what == "dupes":
+        groups = RT.same_role_pitches(a.role, a.company)
+        if not groups:
+            print(f"No double-submission risk for {a.role} @ {a.company}.")
+            return
+        for g in groups:
+            print(f"⚠️  {g['role']} @ {g['company']} pitched by: {', '.join(g['recruiters'])}")
+    elif what == "from-gmail":
+        from email.utils import parseaddr
+        from candid import gmail as G
+        msgs = G.parse_mbox(a.file)[:a.max]
+        shaped = []
+        for m in msgs:
+            nm, em = parseaddr(m.get("from", "") or "")
+            shaped.append({"from_name": nm, "from_email": em,
+                           "subject": m.get("subject", ""),
+                           "snippet": m.get("snippet", ""),
+                           "date": m.get("date", "")})
+        props = RT.propose_from_gmail(shaped)
+        if not props:
+            print("No recruiter proposals found in that mbox.")
+            return
+        for p in props:
+            guess = (f" (company guess via {p['company_source']}, unconfirmed)"
+                     if p.get("company_guess") else " (company unknown)")
+            print(f"- {p['name']} <{p['email']}> — {p['company'] or '?'}{guess}")
+        print("\nReview each proposal, then save with:")
+        print('  python -m candid recruiter add --name "NAME" --company "COMPANY" --kind inhouse|agency')
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1073,118 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    s = _sub(sub, "recruiter", "Recruiter relationship manager: track recruiters, response rates, and outreach.", [
+        "python -m candid recruiter add --name \"Priya Shah\" --company Acme --kind inhouse",
+        "python -m candid recruiter rank",
+        "python -m candid recruiter stale --days 14",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "add", "Add a recruiter profile.", [
+        "python -m candid recruiter add --name \"Priya Shah\" --company Acme --kind inhouse",
+        "python -m candid recruiter add --name \"Bob Lee\" --company Acme --kind agency --agency \"TechTalent\" --channel linkedin",
+    ])
+    t.add_argument("--name", required=True); t.add_argument("--company", required=True)
+    t.add_argument("--kind", default="inhouse", choices=["inhouse", "agency"])
+    t.add_argument("--agency", default=""); t.add_argument("--channel", default="email")
+    t.add_argument("--handle", default=""); t.add_argument("--first-contact", default="")
+    t.add_argument("--notes", default=""); t.add_argument("--tags", default="")
+    t = _sub(rs, "list", "List recruiters (blocked ones hidden unless --include-blocked).", [
+        "python -m candid recruiter list",
+        "python -m candid recruiter list --kind agency --json",
+    ])
+    t.add_argument("--kind", default=None, choices=["inhouse", "agency"])
+    t.add_argument("--company", default=None); t.add_argument("--tag", default=None)
+    t.add_argument("--include-blocked", action="store_true")
+    t.add_argument("--json", action="store_true")
+    t = _sub(rs, "show", "Show a recruiter profile.", [
+        "python -m candid recruiter show 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(rs, "update", "Update a recruiter profile.", [
+        "python -m candid recruiter update 1 --notes \"prefers email over LinkedIn\"",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--name", default=None); t.add_argument("--company", default=None)
+    t.add_argument("--kind", default=None, choices=["inhouse", "agency"])
+    t.add_argument("--agency", default=None); t.add_argument("--channel", default=None)
+    t.add_argument("--handle", default=None); t.add_argument("--first-contact", default=None)
+    t.add_argument("--notes", default=None); t.add_argument("--tags", default=None)
+    t = _sub(rs, "delete", "Delete a recruiter profile.", [
+        "python -m candid recruiter delete 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(rs, "block", "Put a recruiter on your do-not-engage list.", [
+        "python -m candid recruiter block 2 --reason \"spammy mass outreach\"",
+    ])
+    t.add_argument("id", type=int); t.add_argument("--reason", default="")
+    t = _sub(rs, "unblock", "Remove a recruiter from the do-not-engage list.", [
+        "python -m candid recruiter unblock 2",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(rs, "touch", "Log an interaction with a recruiter.", [
+        "python -m candid recruiter touch --name \"Priya Shah\" --channel email --summary \"sent intro, asked about the ML role\"",
+    ])
+    t.add_argument("--name", required=True); t.add_argument("--channel", default="email")
+    t.add_argument("--summary", required=True); t.add_argument("--date", default=None)
+    t.add_argument("--role", default=""); t.add_argument("--company", default="")
+    t.add_argument("--replied", action="store_true",
+                   help="Mark that the recruiter replied to this touch")
+    t = _sub(rs, "replied", "Mark an existing touch as replied (feeds response-rate analytics).", [
+        "python -m candid recruiter replied 3",
+    ])
+    t.add_argument("touch_id", type=int)
+    t = _sub(rs, "thread", "Show the touch history with a recruiter.", [
+        "python -m candid recruiter thread --name \"Priya Shah\"",
+    ])
+    t.add_argument("--name", required=True)
+    t = _sub(rs, "score", "Show a recruiter's scorecard: response rate, recency, worth-replying score.", [
+        "python -m candid recruiter score --name \"Priya Shah\"",
+    ])
+    t.add_argument("--name", required=True)
+    t = _sub(rs, "rank", "Rank all recruiters by worth-replying score.", [
+        "python -m candid recruiter rank --limit 10",
+    ])
+    t.add_argument("--limit", type=int, default=0)
+    t = _sub(rs, "agency-vs-inhouse", "Compare agency vs in-house recruiter performance.", [
+        "python -m candid recruiter agency-vs-inhouse",
+    ])
+    t = _sub(rs, "link", "Link a recruiter to a tracked application.", [
+        "python -m candid recruiter link --name \"Priya Shah\" --app-id 3",
+    ])
+    t.add_argument("--name", required=True); t.add_argument("--app-id", type=int, required=True)
+    t = _sub(rs, "unlink", "Unlink a recruiter from a tracked application.", [
+        "python -m candid recruiter unlink --name \"Priya Shah\" --app-id 3",
+    ])
+    t.add_argument("--name", required=True); t.add_argument("--app-id", type=int, required=True)
+    t = _sub(rs, "funnel", "Funnel stats for applications a recruiter sourced.", [
+        "python -m candid recruiter funnel --name \"Priya Shah\"",
+    ])
+    t.add_argument("--name", required=True)
+    t = _sub(rs, "stale", "Flag recruiter threads with no recent touch and no active application.", [
+        "python -m candid recruiter stale --days 14",
+    ])
+    t.add_argument("--days", type=int, default=14)
+    t = _sub(rs, "draft", "Draft a reply to a recruiter (copy-paste; nothing is sent).", [
+        "python -m candid recruiter draft --name \"Priya Shah\" --kind interested --role \"ML Engineer\" --company Acme",
+    ])
+    t.add_argument("--name", required=True)
+    t.add_argument("--kind", required=True,
+                   choices=["interested", "not_interested", "need_details", "schedule_call"])
+    t.add_argument("--role", default="the role"); t.add_argument("--company", default="the company")
+    t.add_argument("--summary", default="available on request")
+    t.add_argument("--interest", default="my background")
+    t.add_argument("--availability", default="weekday afternoons")
+    t = _sub(rs, "dupes", "Check if two recruiters pitched the same role (double-submission guard).", [
+        "python -m candid recruiter dupes --role \"ML Engineer\" --company Acme",
+    ])
+    t.add_argument("--role", required=True); t.add_argument("--company", required=True)
+    t = _sub(rs, "from-gmail", "Propose recruiter profiles from a Gmail Takeout mbox (guesses labeled; nothing saved automatically).", [
+        "python -m candid recruiter from-gmail --file ~/Downloads/takeout.mbox",
+    ])
+    t.add_argument("--file", required=True, help="Path to the Gmail Takeout .mbox file")
+    t.add_argument("--max", type=int, default=500, help="Max messages to scan (default: 500)")
+    s.set_defaults(func=cmd_recruiter)
 
     return p
 
