@@ -1,0 +1,6 @@
+# Files included in source distributions.
+# Kept so the offline docs always ship in any future sdist/wheel:
+# the bundled docs (candid/data/docs/*, used by the `docs` command and
+# candid.docs_bundle) and the contributor guides under docs/.
+recursive-include candid/data/docs *
+recursive-include docs *

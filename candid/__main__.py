@@ -32,10 +32,11 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "docs",
 ]
 
 SUBCOMMANDS = {
+    "docs": ["list", "show", "search", "command", "export", "version", "check"],
     "profile": ["show"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
@@ -55,7 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "DocsError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -484,6 +485,11 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_docs(a):
+    from candid import docs_cli
+    docs_cli.handle(a)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +924,63 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # docs (offline documentation bundle)
+    s = _sub(sub, "docs", "Read the offline documentation bundle.", [
+        "python -m candid docs list",
+        "python -m candid docs show matching",
+        "python -m candid docs search \"salary negotiation\"",
+        "python -m candid docs export --format html --out candid-docs.html",
+    ])
+    d = _nested(s)
+
+    p_list = _sub(d, "list", "List all doc topics.", [
+        "python -m candid docs list",
+        "python -m candid docs list --json",
+    ])
+    p_list.add_argument("--json", action="store_true",
+                        help="Print topics as JSON")
+    p_show = _sub(d, "show", "Show a doc topic.", [
+        "python -m candid docs show matching",
+        "python -m candid docs show glossary --raw",
+    ])
+    p_show.add_argument("topic", help="Topic slug (see `docs list`)")
+    p_show.add_argument("--raw", action="store_true",
+                        help="Print raw markdown instead of plain text")
+    p_search = _sub(d, "search", "Full-text search the docs.", [
+        "python -m candid docs search \"salary negotiation\"",
+        "python -m candid docs search ats --limit 5 --json",
+    ])
+    p_search.add_argument("query", nargs="+", help="Search terms")
+    p_search.add_argument("--limit", type=int, default=10,
+                          help="Max results (default: 10)")
+    p_search.add_argument("--json", action="store_true",
+                          help="Print results as JSON")
+    p_cmd = _sub(d, "command", "Show a command reference page.", [
+        "python -m candid docs command match",
+        "python -m candid docs command mock --raw",
+    ])
+    p_cmd.add_argument("name", help="Command name (see `docs list`)")
+    p_cmd.add_argument("--raw", action="store_true",
+                       help="Print raw markdown instead of plain text")
+    p_exp = _sub(d, "export", "Export the docs bundle to a file.", [
+        "python -m candid docs export --format txt --out candid-docs.txt",
+        "python -m candid docs export --format html --out candid-docs.html",
+    ])
+    p_exp.add_argument("--format", choices=["txt", "html"], default="txt",
+                       help="Export format (default: txt)")
+    p_exp.add_argument("--out", required=True,
+                       help="Output file path")
+    _sub(d, "version", "Show docs bundle and package versions.", [
+        "python -m candid docs version",
+    ])
+    p_check = _sub(d, "check", "Check docs coverage and links.", [
+        "python -m candid docs check",
+        "python -m candid docs check --json",
+    ])
+    p_check.add_argument("--json", action="store_true",
+                         help="Print problems as JSON")
+    s.set_defaults(func=cmd_docs)
 
     return p
 
