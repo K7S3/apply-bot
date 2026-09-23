@@ -11,6 +11,8 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid crypto init        # set a passphrase for at-rest encryption
+    python -m candid unlock            # start an unlocked session
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -24,6 +26,7 @@ import re
 import sys
 
 from candid import __version__
+from candid import atrest, crypto, encbackup, lock
 
 # ---------------------------------------------------------------------------
 # command inventory (kept in sync with build_parser below)
@@ -33,6 +36,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
+    "crypto", "lock", "unlock",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +52,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "crypto": ["init", "change", "verify", "migrate", "backup", "restore",
+               "status", "audit"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +61,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "CryptoError", "LockError",
     "ValueError",
 }
 
@@ -72,6 +79,8 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "CryptoError": "python -m candid crypto --help",
+    "LockError": "python -m candid unlock",
 }
 
 
@@ -919,6 +928,22 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
+    # crypto (passphrase encryption for data at rest; handlers live in the
+    # worker modules and wire their own funcs via set_defaults)
+    s = _sub(sub, "crypto", "Passphrase encryption: init / migrate / backup / status.", [
+        "python -m candid crypto init",
+        "python -m candid unlock",
+        "python -m candid crypto migrate",
+        "python -m candid crypto status",
+    ])
+    cs = _nested(s, dest="action")
+    crypto.register_crypto_commands(cs)
+    atrest.register_atrest_commands(cs)
+    encbackup.register_encbackup_commands(cs)
+
+    # lock / unlock are top-level session commands (registered by worker B)
+    lock.register_lock_commands(sub)
+
     return p
 
 
@@ -936,6 +961,11 @@ def _next_command(args, etype: str) -> str:
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
+        # A locked session blocks data commands; the crypto/lock/unlock
+        # commands themselves must stay reachable so the user can unlock.
+        # No keystore yet -> require_unlocked() is a no-op.
+        if getattr(args, "cmd", None) not in ("crypto", "lock", "unlock"):
+            lock.require_unlocked()
         args.func(args)
     except SystemExit as e:
         # sys.exit("message") from helpers → friendly error + next step

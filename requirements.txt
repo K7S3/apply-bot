@@ -6,3 +6,4 @@
 # runs on the standard library alone.
 
 pypdf>=3.0.0  # optional: PDF resume parsing
+cryptography>=42.0.0  # optional: passphrase encryption at rest

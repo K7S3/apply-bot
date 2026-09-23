@@ -65,6 +65,8 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `crypto` | Passphrase encryption for data at rest (AES-256-GCM, local only): `init` / `change` / `verify` the passphrase, `migrate` files to/from encryption, encrypted `backup` / `restore`, `status` and an `audit` log. Needs the optional `cryptography` package. See [docs/encryption.md](docs/encryption.md). |
+| `lock` / `unlock` | Session lock: `unlock` caches the passphrase for a timed session (default 30 min, `lock_timeout_minutes`), `lock` forgets it now. While locked, data commands refuse to run. |
 
 ## Job-source coverage (honest)
 

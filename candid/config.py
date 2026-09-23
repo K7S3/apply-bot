@@ -43,6 +43,13 @@ PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
 GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
 
+# --- config defaults -----------------------------------------------------------
+# Default values for user-configurable settings. A later worker may merge
+# these with an on-disk config file; until then these are the effective values.
+CONFIG_DEFAULTS: dict = {
+    "lock_timeout_minutes": 30,
+}
+
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"
 

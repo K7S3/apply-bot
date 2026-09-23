@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from candid import config as C
+from candid.atrest import read_protected, write_protected
 
 
 class TrackerError(Exception):
@@ -22,7 +23,7 @@ def _load(path: str | Path | None = None) -> list[dict]:
     if not p.exists():
         return []
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(read_protected(p).decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise TrackerError(f"Tracker file {p} is not valid JSON: {exc}") from exc
     if not isinstance(data, list):
@@ -34,7 +35,8 @@ def _save(apps: list[dict], path: str | Path | None = None) -> Path:
     p = Path(path) if path else C.TRACKER_PATH
     C.ensure_data_dirs()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(apps, indent=2), encoding="utf-8")
+    # Plain write when no keystore exists; encrypted at rest otherwise.
+    write_protected(p, json.dumps(apps, indent=2).encode("utf-8"))
     return p
 
 

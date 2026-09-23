@@ -29,6 +29,7 @@ import re
 from pathlib import Path
 
 from candid import config as C
+from candid.atrest import read_protected, write_protected
 
 SECTION_HEADERS = [
     "experience", "work experience", "employment", "professional experience",
@@ -529,7 +530,9 @@ def onboard(resume_path: str | Path | None = None,
     C.ensure_data_dirs()
     dest = Path(out_path) if out_path else C.PROFILE_PATH
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    # write_protected is a plain write when no keystore exists, and encrypts
+    # transparently with the session passphrase when one does.
+    write_protected(dest, json.dumps(profile, indent=2).encode("utf-8"))
     return profile
 
 
@@ -543,7 +546,7 @@ def load_profile(path: str | Path | None = None) -> dict:
             "    python -m candid onboard --resume your_resume.pdf"
         )
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return json.loads(read_protected(p).decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise OnboardError(f"Profile file {p} is not valid JSON: {exc}") from exc
 
