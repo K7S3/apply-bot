@@ -260,7 +260,10 @@ def focus_allows(command: str, focus: bool, session_over: bool) -> tuple[bool, s
 # ---------------------------------------------------------------------------
 
 def _new_id() -> str:
-    return "p" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Microsecond resolution: two sessions created within the same wall-clock
+    # second still get distinct ids (session files and the index upsert by id,
+    # so same-second ids would silently overwrite each other).
+    return "p" + datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def new_session(problem: dict, minutes: float, focus: bool = True,
