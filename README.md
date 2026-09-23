@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `culture` | Company culture decoder: aggregate culture profile cards and A/B comparisons from sources you already have, with every claim labeled by source and honest "no verified data" fallbacks. Subcommands: `profile`, `compare`, `values` (extract/store values from pasted text), `prep-questions` (behavioral questions targeting each value, labeled as generated), `workstyle` / `benefits` / `flags` (work-style signals, benefits, and red/green flags parsed from JDs, quote-backed), `process` (interview-process stages from your debriefs, prep bank, and tracker notes), `stability` / `trajectory` (layoff filings, LCA volume, posting velocity; directional only). No network, no scraping, never fabricates. |
 
 ## Job-source coverage (honest)
 

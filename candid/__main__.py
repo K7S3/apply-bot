@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "culture",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,9 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "culture": ["profile", "compare", "values", "prep-questions",
+                "workstyle", "benefits", "flags", "process",
+                "stability", "trajectory"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "CultureError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -484,6 +487,70 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_culture(a):
+    from candid import culture as CL
+    what = a.what
+    use_json = bool(getattr(a, "json", False))
+    if what == "profile":
+        card = CL.profile_card(a.company)
+        if use_json:
+            print(json.dumps(card, indent=2, default=str))
+        else:
+            print(CL.render_card(card))
+    elif what == "compare":
+        result = CL.compare(a.a, a.b)
+        if use_json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(CL.render_compare(result))
+    elif what == "values":
+        text = None
+        if getattr(a, "from_file", ""):
+            with open(a.from_file, encoding="utf-8") as f:
+                text = f.read()
+        elif getattr(a, "text", ""):
+            text = a.text
+        if text is not None:
+            vals = CL.extract_and_store_values(a.company, text)
+            print(f"Stored {len(vals)} value(s) for {a.company}.")
+        vals = CL.stored_values(a.company)
+        if use_json:
+            print(json.dumps(vals, indent=2, default=str))
+        else:
+            print(CL.render_values(vals, a.company))
+    elif what == "prep-questions":
+        questions = CL.prep_questions_for(a.company)
+        if use_json:
+            print(json.dumps(questions, indent=2, default=str))
+        else:
+            print(CL.render_questions(questions, a.company))
+    elif what in ("workstyle", "benefits", "flags"):
+        res = CL.jd_signals_for(a.company)
+        if res is None:
+            print(f"No JD culture data for {a.company} "
+                  "(culture_signals module not available).")
+        elif use_json:
+            print(json.dumps(res, indent=2, default=str))
+        else:
+            print(CL.render_jd_section(res, what))
+    elif what == "process":
+        prof = CL.process_profile_for(a.company)
+        if use_json:
+            print(json.dumps(prof, indent=2, default=str))
+        else:
+            print(CL.render_process(prof, a.company))
+    elif what in ("stability", "trajectory"):
+        signals, note = CL.stability_signals_for(a.company, what)
+        if use_json:
+            print(json.dumps({"company": a.company, "kind": what,
+                              "signals": signals, "note": note},
+                             indent=2, default=str))
+        else:
+            print(CL.render_signals(signals, f"{a.company}: {what}"))
+            if note:
+                print(f"note: {note}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +985,72 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # culture
+    s = _sub(sub, "culture", "Company culture decoder: values, workstyle, process.", [
+        "python -m candid culture profile --company Acme",
+        "python -m candid culture compare --a Acme --b Globex",
+        "python -m candid culture values --company Acme --text \"We value transparency.\"",
+    ])
+    cs = _nested(s)
+    t = _sub(cs, "profile", "Merged culture profile card for a company.", [
+        "python -m candid culture profile --company Acme",
+        "python -m candid culture profile --company Acme --json",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--json", action="store_true",
+                   help="Print the profile card as JSON (for scripting)")
+    t = _sub(cs, "compare", "Compare culture signals of two companies.", [
+        "python -m candid culture compare --a Acme --b Globex",
+        "python -m candid culture compare --a Acme --b Globex --json",
+    ])
+    t.add_argument("--a", required=True, help="First company")
+    t.add_argument("--b", required=True, help="Second company")
+    t.add_argument("--json", action="store_true",
+                   help="Print the comparison as JSON (for scripting)")
+    t = _sub(cs, "values", "Extract/store company values, or show stored ones.", [
+        "python -m candid culture values --company Acme --text \"We value transparency and ownership.\"",
+        "python -m candid culture values --company Acme --from-file values.txt",
+        "python -m candid culture values --company Acme",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--from-file", default="",
+                   help="Text file to extract values from")
+    t.add_argument("--text", default="", help="Text to extract values from")
+    t.add_argument("--json", action="store_true",
+                   help="Print the stored values as JSON (for scripting)")
+    t = _sub(cs, "prep-questions", "Interview questions targeting the company's stored values.", [
+        "python -m candid culture prep-questions --company Acme",
+        "python -m candid culture prep-questions --company Acme --json",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--json", action="store_true",
+                   help="Print the questions as JSON (for scripting)")
+    for _sec in ("workstyle", "benefits", "flags"):
+        t = _sub(cs, _sec,
+                 f"{_sec.capitalize()} signals mined from the company's job postings.", [
+                     f"python -m candid culture {_sec} --company Acme",
+                     f"python -m candid culture {_sec} --company Acme --json",
+                 ])
+        t.add_argument("--company", required=True)
+        t.add_argument("--json", action="store_true",
+                       help="Print the raw JD signals as JSON (for scripting)")
+    t = _sub(cs, "process", "Interview process profile for a company.", [
+        "python -m candid culture process --company Acme",
+        "python -m candid culture process --company Acme --json",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--json", action="store_true",
+                   help="Print the process profile as JSON (for scripting)")
+    for _sec in ("stability", "trajectory"):
+        t = _sub(cs, _sec, f"Company {_sec} signals.", [
+            f"python -m candid culture {_sec} --company Acme",
+            f"python -m candid culture {_sec} --company Acme --json",
+        ])
+        t.add_argument("--company", required=True)
+        t.add_argument("--json", action="store_true",
+                       help="Print the signals as JSON (for scripting)")
+    s.set_defaults(func=cmd_culture)
 
     return p
 
