@@ -33,6 +33,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
+    "crashlog", "bug-report", "diagnostics",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "crashlog": ["list", "show", "stats", "clear"],
+    "bug-report": [],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "BugReportError",
     "ValueError",
 }
 
@@ -72,6 +76,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "BugReportError": "python -m candid crashlog --help",
 }
 
 
@@ -484,6 +489,297 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+# ---------------------------------------------------------------------------
+# crash log / bug reports (local-first, opt-in sharing)
+# ---------------------------------------------------------------------------
+
+def _crashlog():
+    """Import candid.crashlog, or exit with a friendly error if unavailable."""
+    try:
+        from candid import crashlog as CL
+    except ImportError:
+        sys.exit("The crashlog module is not available in this build.\n"
+                 "Next: run `python -m candid --help`.")
+    return CL
+
+
+def _bugreport():
+    """Import candid.bugreport, or exit with a friendly error if unavailable."""
+    try:
+        from candid import bugreport as B
+    except ImportError:
+        sys.exit("The bugreport module is not available in this build.\n"
+                 "Next: run `python -m candid --help`.")
+    return B
+
+
+def _rec_time(rec: dict) -> str:
+    """Crash timestamp; supports both field-name variants."""
+    return str(rec.get("time") or rec.get("ts") or "?")
+
+
+def _rec_hash(rec: dict) -> str:
+    """Dedupe hash; supports both field-name variants."""
+    return str(rec.get("hash") or rec.get("traceback_hash") or "")
+
+
+def _rec_msg(rec: dict) -> str:
+    """Exception message; supports both field-name variants."""
+    return str(rec.get("message") or rec.get("exc_msg") or "")
+
+
+def _find_crash(CL, ref: str) -> dict:
+    """Find one crash record by id (or prefix) or hash prefix.
+
+    Friendly error when nothing matches or the reference is ambiguous.
+    """
+    records = CL.read_crashes(limit=10_000_000)
+    matches = [r for r in records
+               if str(r.get("id", "")).startswith(ref)
+               or _rec_hash(r).startswith(ref)]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        sys.exit(f"{ref!r} matches {len(matches)} crashes — be more specific.\n"
+                 "Next: run `python -m candid crashlog list`.")
+    sys.exit(f"No crash found for {ref!r}.\n"
+             "Next: run `python -m candid crashlog list`.")
+
+
+def _latest_crash_id(CL):
+    """Id of the most recent crash record; friendly BugReportError if empty."""
+    records = CL.read_crashes(limit=10_000_000)
+    if not records:
+        raise _bugreport().BugReportError(
+            "No crashes recorded — nothing to build a report from.\n"
+            "Next: run `python -m candid crashlog list`.")
+    latest = max(records,
+                 key=lambda r: (_rec_time(r), str(r.get("id", ""))))
+    return latest.get("id")
+
+
+def _render_crash(rec: dict) -> str:
+    lines = [
+        f"Crash #{rec.get('id', '?')}",
+        f"  time:      {_rec_time(rec)}",
+        f"  command:   {rec.get('command', '?')}",
+        f"  exception: {rec.get('exc_type', '?')}",
+        f"  hash:      {_rec_hash(rec) or '?'}",
+    ]
+    if _rec_msg(rec):
+        lines.append(f"  message:   {_rec_msg(rec)}")
+    tb = rec.get("traceback")
+    frames = rec.get("frames")
+    if tb or frames:
+        lines += ["", "Traceback (redacted at write time):"]
+        if tb:
+            lines.append(str(tb))
+        elif isinstance(frames, list):
+            for f in frames:
+                if isinstance(f, dict):
+                    lines.append(f"  - {f.get('file', '?')}:{f.get('line', '?')} "
+                                 f"in {f.get('func', '?')} ({f.get('module', '?')})")
+                else:
+                    lines.append(f"  - {f}")
+    return "\n".join(lines)
+
+
+def _render_crash_stats(CL) -> str:
+    from collections import Counter
+    records = CL.read_crashes(limit=10_000_000)
+    lines = [f"Total crashes recorded: {len(records)}"]
+    if not records:
+        return lines[0]
+    by_id = {str(r.get("id")): r for r in records}
+    groups = CL.group_crashes()
+    if isinstance(groups, dict):  # {hash: info} form
+        norm = [{"hash": h, **(v if isinstance(v, dict) else {"count": v})}
+                for h, v in groups.items()]
+    else:  # [{hash, count, exc_type, ...}] form
+        norm = list(groups or [])
+    norm.sort(key=lambda g: g.get("count", 0), reverse=True)
+    lines.append("\nBy crash signature (hash):")
+    for g in norm:
+        cmd = g.get("command", "")
+        if not cmd and g.get("sample_id") is not None:
+            sample = by_id.get(str(g["sample_id"]), {})
+            cmd = sample.get("command", "")
+        lines.append(f"  {_rec_hash(g)[:8]:<10} "
+                     f"x{g.get('count', '?'):<4} "
+                     f"{g.get('exc_type', '')}"
+                     + (f" in '{cmd}'" if cmd else ""))
+    lines.append("\nTop exception types:")
+    for exc, n in Counter(r.get("exc_type", "?") for r in records).most_common(5):
+        lines.append(f"  {exc:<28} x{n}")
+    return "\n".join(lines)
+
+
+def cmd_crashlog(a):
+    CL = _crashlog()
+    if a.what == "list":
+        records = CL.read_crashes(limit=a.limit or 20)
+        if a.json:
+            print(json.dumps(records, indent=2, default=str))
+            return
+        if not records:
+            print("No crashes recorded. The log is empty.")
+            return
+        print(f"{'ID':<10} {'Time':<26} {'Command':<30} {'Exception':<24} Hash")
+        for rec in records:
+            print(f"{str(rec.get('id', '?'))[:8]:<10} "
+                  f"{_rec_time(rec)[:25]:<26} "
+                  f"{str(rec.get('command', '?'))[:30]:<30} "
+                  f"{str(rec.get('exc_type', '?')):<24} "
+                  f"{_rec_hash(rec)[:8]}")
+        print(f"\n{len(records)} crash(es) shown — "
+              "run `python -m candid crashlog show <id>` for full detail.")
+    elif a.what == "show":
+        print(_render_crash(_find_crash(CL, a.ref)))
+    elif a.what == "stats":
+        print(_render_crash_stats(CL))
+    elif a.what == "clear":
+        records = CL.read_crashes(limit=10_000_000)
+        if not records:
+            print("Crash log is already empty.")
+            return
+        if not a.yes:
+            try:
+                ans = input(f"Clear {len(records)} crash record(s)? [y/N] ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nAborted — crash log untouched.")
+                return
+            if ans.strip().lower() not in ("y", "yes"):
+                print("Aborted — crash log untouched.")
+                return
+        CL.clear_last_crash()
+        clear_log = getattr(CL, "clear_log", None)
+        if callable(clear_log):
+            clear_log()
+        else:
+            from candid import config as C
+            paths = [C.CRASH_LOG_PATH] + [
+                C.CRASH_LOG_PATH.with_name(
+                    f"{C.CRASH_LOG_PATH.name}.{i}")
+                for i in range(1, getattr(C, "CRASH_LOG_KEEP", 5) + 1)
+            ]
+            try:
+                for p in paths:
+                    p.unlink(missing_ok=True)
+            except OSError as e:
+                sys.exit(f"Could not clear the crash log: {e}\n"
+                         "Next: run `python -m candid crashlog --help`.")
+        print(f"Cleared {len(records)} crash record(s).")
+
+
+def _consent_opted_in(B) -> bool:
+    """True when bug-report sharing is opted in.
+
+    Handles get_consent() -> True/False/None as well as consent_status()
+    returning a dict or a human-readable string.
+    """
+    try:
+        st = B.get_consent()
+        if st is not None:
+            return bool(st)
+    except AttributeError:
+        pass
+    try:
+        st = B.consent_status()
+    except AttributeError:
+        return False
+    if isinstance(st, dict):
+        return bool(st.get("opted_in", st.get("opt_in", False)))
+    if isinstance(st, str):
+        return "OPTED IN" in st.upper()
+    return bool(st)
+
+
+def _default_report_path(crash_id) -> str:
+    from candid import config as C
+    d = C.DATA_DIR / "bug_reports"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / f"bug-report-{crash_id}.md")
+
+
+def cmd_bug_report(a):
+    B = _bugreport()
+    if a.status:
+        try:
+            status = B.consent_status()
+        except AttributeError:
+            status = None
+        if isinstance(status, str):
+            print(status)
+        else:
+            opted = _consent_opted_in(B)
+            print("Bug-report sharing consent: "
+                  + ("OPTED IN" if opted else "not opted in"))
+        print("Nothing leaves your machine unless you paste a report yourself; "
+              "opt-in only unlocks generating the shareable file.")
+        return
+    if a.opt_in:
+        B.set_consent(True)
+        print("Opted in: `bug-report` can now generate a shareable file. "
+              "Nothing is sent anywhere automatically.")
+        return
+    if a.opt_out:
+        B.set_consent(False)
+        print("Opted out: shareable-file generation is disabled.")
+        return
+    CL = _crashlog()
+    crash_id = a.id or _latest_crash_id(CL)
+    rec = _find_crash(CL, str(crash_id))
+    built = B.build_report(rec.get("id"), include_diagnostics=True)
+    if isinstance(built, (tuple, list)) and len(built) == 2:
+        md, audit = built  # (report markdown, redaction audit)
+    else:
+        md, audit = built, None
+    saved = B.save_report(md, a.out or _default_report_path(rec.get("id")))
+    preview = md.splitlines()[:40]
+    print("\n".join(preview))
+    if len(md.splitlines()) > 40:
+        print("\n... (preview of 40 lines; the full report is in the file)")
+    print(f"\nSaved bug report to {saved}")
+    if a.show_redactions:
+        print("\n--- redaction audit ---")
+        if audit:
+            print(audit)
+        else:
+            print("The report's redaction audit is included in the report "
+                  "itself (see the 'Redaction audit' section).")
+    if _consent_opted_in(B):
+        prep = getattr(B, "prepare_shareable", None)
+        if callable(prep):
+            try:
+                shareable = prep(rec.get("id"))
+                if isinstance(shareable, (tuple, list)) and len(shareable) == 2:
+                    path, instructions = shareable
+                    print(f"\nShareable file (opt-in enabled): {path}")
+                    print(instructions)
+                else:
+                    print(f"\nShareable file (opt-in enabled): {shareable}")
+                print("Nothing was sent anywhere — share it manually if you choose.")
+            except Exception as e:
+                etype = type(e).__name__
+                if etype in _EXPECTED_ERRORS:
+                    sys.stderr.write(f"Note: could not prepare the shareable file: {e}\n")
+                else:
+                    print(f"Note: could not prepare the shareable file ({e}).")
+
+
+def cmd_diagnostics(a):
+    B = _bugreport()
+    diag = B.build_diagnostics()
+    if a.json:
+        print(json.dumps(diag, indent=2, default=str))
+        return
+    if isinstance(diag, dict):
+        for k, v in diag.items():
+            print(f"{k}: {v}")
+    else:
+        print(diag)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -919,6 +1215,69 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
+    # crashlog
+    s = _sub(sub, "crashlog", "Inspect the local crash log (redacted, never sent).", [
+        "python -m candid crashlog list",
+        "python -m candid crashlog show 3",
+        "python -m candid crashlog stats",
+        "python -m candid crashlog clear",
+    ])
+    cs = _nested(s)
+    t = _sub(cs, "list", "List recent crash records.", [
+        "python -m candid crashlog list",
+        "python -m candid crashlog list --limit 5 --json",
+    ])
+    t.add_argument("--limit", type=int, default=20,
+                   help="Max records to show (default: 20)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the records as JSON (for scripting)")
+    t = _sub(cs, "show", "Show the full detail of one crash.", [
+        "python -m candid crashlog show 3",
+        "python -m candid crashlog show a1b2c3d4",
+    ])
+    t.add_argument("ref", help="Crash id or hash prefix (see `crashlog list`)")
+    t = _sub(cs, "stats", "Crash totals, grouped by signature and exception type.", [
+        "python -m candid crashlog stats",
+    ])
+    t = _sub(cs, "clear", "Clear the crash log and the last-crash marker.", [
+        "python -m candid crashlog clear",
+        "python -m candid crashlog clear --yes   # skip the confirmation prompt",
+    ])
+    t.add_argument("--yes", action="store_true",
+                   help="Skip the confirmation prompt")
+    s.set_defaults(func=cmd_crashlog)
+
+    # bug-report
+    s = _sub(sub, "bug-report", "Build a redacted bug report from a crash.", [
+        "python -m candid bug-report",
+        "python -m candid bug-report --id 3 --out /tmp/report.md",
+        "python -m candid bug-report --show-redactions",
+        "python -m candid bug-report --status",
+        "python -m candid bug-report --opt-in",
+    ])
+    s.add_argument("--id", default=None,
+                   help="Crash id or hash prefix (default: the latest crash)")
+    s.add_argument("--out", default=None,
+                   help="Output path (default: candid_data/bug_reports/bug-report-<id>.md)")
+    s.add_argument("--show-redactions", action="store_true",
+                   help="Print the redaction audit for the report")
+    s.add_argument("--opt-in", action="store_true",
+                   help="Opt in to generating a shareable report file")
+    s.add_argument("--opt-out", action="store_true",
+                   help="Opt out of generating a shareable report file")
+    s.add_argument("--status", action="store_true",
+                   help="Show the current sharing-consent state")
+    s.set_defaults(func=cmd_bug_report)
+
+    # diagnostics
+    s = _sub(sub, "diagnostics", "Print the redacted diagnostics bundle.", [
+        "python -m candid diagnostics",
+        "python -m candid diagnostics --json",
+    ])
+    s.add_argument("--json", action="store_true",
+                   help="Print the diagnostics bundle as JSON (for scripting)")
+    s.set_defaults(func=cmd_diagnostics)
+
     return p
 
 
@@ -933,8 +1292,41 @@ def _next_command(args, etype: str) -> str:
     return "python -m candid --help"
 
 
+def _maybe_show_last_crash_note():
+    """After a crash, the next CLI run prints a one-line pointer to the log.
+
+    Best-effort: a missing/broken crashlog module must never break the CLI.
+    """
+    try:
+        from candid import crashlog as CL
+    except ImportError:
+        return
+    try:
+        rec = CL.check_last_crash()
+    except Exception:
+        return
+    if not rec:
+        return
+    sys.stderr.write(
+        f"Note: candid crashed during the previous run "
+        f"({rec.get('exc_type', '?')} in '{rec.get('command', '?')}'). "
+        f"Run 'candid crashlog show {rec.get('id', '?')}' or "
+        f"'candid bug-report' to inspect.\n")
+    try:
+        CL.clear_last_crash()
+    except Exception:
+        pass
+
+
 def main(argv=None):
+    # Best-effort crash hook: never let it break the CLI itself.
+    try:
+        from candid import crashlog as _CL
+        _CL.install_crash_hook()
+    except Exception:
+        pass
     args = build_parser().parse_args(argv)
+    _maybe_show_last_crash_note()
     try:
         args.func(args)
     except SystemExit as e:

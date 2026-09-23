@@ -65,6 +65,9 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `crashlog` | Inspect the local crash log: `list` / `show` / `stats` / `clear`. Records are redacted before they're written and never leave your machine. See [docs/crash-log.md](docs/crash-log.md). |
+| `bug-report` | Build a redacted Markdown bug report from a crash (`--id`, `--out`, `--show-redactions`); manage sharing consent with `--opt-in` / `--opt-out` / `--status`. Nothing is ever sent anywhere — sharing is a manual paste by you. |
+| `diagnostics` | Print the redacted diagnostics bundle (Python, platform, redacted paths). `--json` for scripting. |
 
 ## Job-source coverage (honest)
 
@@ -132,8 +135,10 @@ Rules that hold for every source:
 
 Everything candid learns about you lives in `candid_data/` (git-ignored):
 `profile.json`, `tracker.json`, `offers.json`, `salary.db`, prep packs,
-tailored output, mock sessions, and `gmail_proposals.json` (pending Gmail
-import proposals). Delete the folder and you're forgotten — including every
+tailored output, mock sessions, `gmail_proposals.json` (pending Gmail
+import proposals), `crash.log` + `.last_crash` (redacted local crash log,
+see [docs/crash-log.md](docs/crash-log.md)) and `bug_reports/` (reports you
+generated yourself). Delete the folder and you're forgotten — including every
 proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 

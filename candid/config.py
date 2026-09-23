@@ -43,6 +43,14 @@ PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
 GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
 
+# --- crash log (local, opt-in sharing) ---------------------------------------
+CRASH_LOG_PATH = DATA_DIR / "crash.log"
+CRASH_LAST_PATH = DATA_DIR / ".last_crash"
+CONSENT_PATH = CONFIG_DIR / "consent.json"
+CRASH_LOG_MAX_BYTES = 1_000_000
+CRASH_LOG_KEEP = 5
+CRASH_LOG_MAX_AGE_DAYS = 90
+
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"
 
