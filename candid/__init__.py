@@ -9,6 +9,8 @@ Modules:
     salary    salary intelligence (pay ranges + DOL LCA data)
     prep      interview prep packs (questions, deep-dives, mock, checklist)
     prep_concepts  concept explainer library used by prep
+    panel     panel interview prep: per-interviewer briefs, question
+              expectations, mocks, story-consistency, debrief, readiness
     followup  thank-you / recruiter nudge drafts
     offer     offer comparison and total-comp normalization
     negotiate recruiter scripts, counter drafts, BATNA framing
@@ -26,4 +28,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"

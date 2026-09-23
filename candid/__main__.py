@@ -5,6 +5,7 @@
     python -m candid tailor resume --jd jd.txt --company X --role Y
     python -m candid track add --company X --role Y
     python -m candid prep --company X --role Y
+    python -m candid panel brief --panel P1   # per-interviewer panel prep
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
     python -m candid dashboard            # local web UI (127.0.0.1 only)
@@ -30,7 +31,7 @@ from candid import __version__
 # ---------------------------------------------------------------------------
 
 COMMANDS = [
-    "onboard", "profile", "match", "tailor", "track", "prep",
+    "onboard", "profile", "match", "tailor", "track", "prep", "panel",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
@@ -39,6 +40,9 @@ SUBCOMMANDS = {
     "profile": ["show"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
+    "panel": ["create", "list", "show", "remove", "add-round", "archetypes",
+              "brief", "questions", "ask", "plan", "mock", "research",
+              "log", "consistency", "debrief", "readiness"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
@@ -52,7 +56,7 @@ SUBCOMMANDS = {
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
-    "OnboardError", "MatchError", "TrackerError", "PrepError",
+    "OnboardError", "MatchError", "TrackerError", "PrepError", "PanelError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
@@ -64,6 +68,7 @@ _NEXT_COMMAND = {
     "MatchError": "python -m candid match --help",
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
+    "PanelError": "python -m candid panel --help",
     "OfferError": "python -m candid offer --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
@@ -278,6 +283,98 @@ def cmd_prep(a):
     print(markdown[:3000])
     if len(markdown) > 3000:
         print(f"\n... ({len(markdown) - 3000} more chars in the file)")
+
+
+def cmd_panel(a):
+    from candid import panel as P
+
+    def _panel_profile():
+        try:
+            return _profile()
+        except Exception:
+            return {}
+
+    if a.what == "create":
+        panel = P.create_panel(a.company, a.role, a.rounds, app_id=a.app_id)
+        print(f"Created panel {panel['id']}: {panel['role']} @ {panel['company']} "
+              f"({len(panel['rounds'])} rounds)")
+        print(P.render_panel_detail(panel))
+        print(f"\nNext: python -m candid panel brief --panel {panel['id']}")
+    elif a.what == "list":
+        print(P.render_panels(P.list_panels()))
+    elif a.what == "show":
+        print(P.render_panel_detail(P.get_panel(a.panel)))
+    elif a.what == "remove":
+        P.remove_panel(a.panel)
+        print(f"Removed panel {a.panel}.")
+    elif a.what == "add-round":
+        panel = P.add_round(a.panel, a.name, a.archetype,
+                            minutes=a.minutes, title=a.title or "")
+        r = panel["rounds"][-1]
+        print(f"Added round {len(panel['rounds'])} to {panel['id']}: "
+              f"{r['name']} ({r['archetype']}, {r['duration_min']} min)")
+    elif a.what == "archetypes":
+        if a.name:
+            arch = P.ARCHETYPES.get(a.name)
+            if not arch:
+                raise P.PanelError(
+                    f"Unknown archetype '{a.name}'. "
+                    f"Valid: {', '.join(sorted(P.ARCHETYPES))}.")
+            print(f"## {arch['label']}\n\n{arch['description']}\n")
+            print("Evaluates: " + "; ".join(arch["evaluates"]))
+        else:
+            for key in P.DEFAULT_LOOP_ORDER:
+                arch = P.ARCHETYPES[key]
+                print(f"{key:<18} {arch['label']:<34} {arch['description'][:60]}")
+    elif a.what == "brief":
+        panel = P.get_panel(a.panel)
+        md = P.brief_panel(panel)
+        if a.export:
+            path = P.export_brief(panel)
+            print(f"Brief sheet exported to {path}\n")
+        print(md[:4000])
+        if len(md) > 4000 and not a.export:
+            print(f"\n... ({len(md) - 4000} more chars; use --export for the full sheet)")
+    elif a.what == "questions":
+        print(P.render_questions(P.get_panel(a.panel), round_no=a.round))
+    elif a.what == "ask":
+        print(P.render_ask(P.get_panel(a.panel), round_no=a.round))
+    elif a.what == "plan":
+        print(P.render_plan(P.get_panel(a.panel), start=a.start,
+                            break_min=a.break_min))
+    elif a.what == "mock":
+        panel = P.get_panel(a.panel)
+        if a.score:
+            session = P.score_mock(panel, a.round, a.score)
+            print(f"Scored round {a.round} mock: "
+                  f"{session['total']}/{5 * len(P.MOCK_RUBRIC)}")
+            for s in session["score"]:
+                print(f"  {s['criterion']}: {s['score']}/5")
+        else:
+            rnd = P._get_round(panel, a.round)
+            session = P.mock_round(panel, a.round, profile=_panel_profile())
+            print(P.render_mock(session, rnd))
+    elif a.what == "research":
+        panel = P.get_panel(a.panel)
+        if a.background:
+            P.set_background(panel, a.round, a.background)
+            rnd = P._get_round(panel, a.round)
+            print(f"Recorded background for round {a.round} ({rnd['name']}).")
+        else:
+            if not a.round:
+                raise P.PanelError("--round is required (or pass --background to record).")
+            print(P.render_research(panel, round_no=a.round))
+    elif a.what == "log":
+        panel = P.get_panel(a.panel)
+        P.log_note(panel, a.round, a.note, signal=a.signal)
+        print(f"Logged to panel {panel['id']} round {a.round}.")
+    elif a.what == "consistency":
+        print(P.render_consistency(P.get_panel(a.panel)))
+    elif a.what == "debrief":
+        print(P.debrief_panel(P.get_panel(a.panel),
+                              profile=_panel_profile(), drafts=a.drafts))
+    elif a.what == "readiness":
+        print(P.render_readiness(P.get_panel(a.panel)))
 
 
 def cmd_followup(a):
@@ -918,6 +1015,104 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # panel
+    s = _sub(sub, "panel", "Panel interview prep: per-interviewer briefs, question expectations, mocks.", [
+        "python -m candid panel create --company \"Acme\" --role \"Data Scientist\" --rounds \"Priya Nair:hiring_manager:45, Sam Rao:data_scientist:60\"",
+        "python -m candid panel brief --panel P1 --export",
+        "python -m candid panel mock --panel P1 --round 2",
+        "python -m candid panel readiness --panel P1",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "create", "Define an interview loop: interviewers, archetypes, durations.", [
+        "python -m candid panel create --company \"Acme\" --role \"Data Scientist\" --rounds \"Priya Nair:hiring_manager:45, Sam Rao:data_scientist:60, Jo:bar_raiser:45\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--role", required=True)
+    t.add_argument("--rounds", required=True,
+                   help="Comma-separated Name:archetype[:minutes]. Archetypes: see `panel archetypes`.")
+    t.add_argument("--app-id", type=int, default=None, help="Link to a tracker entry")
+    t = _sub(ps, "list", "List panels.", ["python -m candid panel list"])
+    t = _sub(ps, "show", "Show a panel's rounds.", ["python -m candid panel show --panel P1"])
+    t.add_argument("--panel", required=True)
+    t = _sub(ps, "remove", "Delete a panel.", ["python -m candid panel remove --panel P1"])
+    t.add_argument("--panel", required=True)
+    t = _sub(ps, "add-round", "Append a round to a panel.", [
+        "python -m candid panel add-round --panel P1 --name \"Alex Kim\" --archetype engineer --minutes 60",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--name", required=True, help="Interviewer name")
+    t.add_argument("--archetype", required=True, help="See `panel archetypes`")
+    t.add_argument("--minutes", type=int, default=45)
+    t.add_argument("--title", default="", help="Interviewer's job title (optional)")
+    t = _sub(ps, "archetypes", "List interviewer archetypes and what each evaluates.", [
+        "python -m candid panel archetypes",
+        "python -m candid panel archetypes --name bar_raiser",
+    ])
+    t.add_argument("--name", default=None, help="Show detail for one archetype")
+    t = _sub(ps, "brief", "Who's-who brief sheet: what each interviewer evaluates, red flags, prep tips.", [
+        "python -m candid panel brief --panel P1",
+        "python -m candid panel brief --panel P1 --export",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--export", action="store_true", help="Save the full sheet as Markdown")
+    t = _sub(ps, "questions", "Per-interviewer question expectations (archetype + general bank).", [
+        "python -m candid panel questions --panel P1",
+        "python -m candid panel questions --panel P1 --round 2",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--round", type=int, default=None)
+    t = _sub(ps, "ask", "Smart questions to ask each interviewer, tailored to their role.", [
+        "python -m candid panel ask --panel P1",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--round", type=int, default=None)
+    t = _sub(ps, "plan", "Interview-day timeline: round order, durations, breaks.", [
+        "python -m candid panel plan --panel P1",
+        "python -m candid panel plan --panel P1 --start 09:30 --break-min 10",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--start", default="10:00", help="Day start HH:MM (default 10:00)")
+    t.add_argument("--break-min", type=int, default=15, help="Minutes between rounds (default 15)")
+    t = _sub(ps, "mock", "Per-interviewer mock round (deterministic); --score records self-scores.", [
+        "python -m candid panel mock --panel P1 --round 2",
+        "python -m candid panel mock --panel P1 --round 2 --score 4 3 5 4",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--round", type=int, required=True)
+    t.add_argument("--score", type=int, nargs="*", default=None,
+                   help="Self-scores 1-5, one per rubric criterion")
+    t = _sub(ps, "research", "Interviewer-research checklist; --background records findings.", [
+        "python -m candid panel research --panel P1 --round 2",
+        "python -m candid panel research --panel P1 --round 2 --background \"Eng manager, ex-Stripe, owns ML platform\"",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--round", type=int, default=None)
+    t.add_argument("--background", default=None, help="What you found (from your own sources)")
+    t = _sub(ps, "log", "Log what you told an interviewer (metrics, claims, signals).", [
+        "python -m candid panel log --panel P1 --round 2 --note \"said 40% latency cut on ranking\"",
+        "python -m candid panel log --panel P1 --round 2 --signal strong --note \"great rapport, deep dive on A/B testing\"",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--round", type=int, required=True)
+    t.add_argument("--note", required=True)
+    t.add_argument("--signal", default=None, choices=["strong", "mixed", "weak"])
+    t = _sub(ps, "consistency", "Scan round logs for conflicting numbers/claims.", [
+        "python -m candid panel consistency --panel P1",
+    ])
+    t.add_argument("--panel", required=True)
+    t = _sub(ps, "debrief", "Consolidate per-round notes into a panel debrief.", [
+        "python -m candid panel debrief --panel P1",
+        "python -m candid panel debrief --panel P1 --drafts",
+    ])
+    t.add_argument("--panel", required=True)
+    t.add_argument("--drafts", action="store_true",
+                   help="Also draft per-interviewer thank-you outlines")
+    t = _sub(ps, "readiness", "Readiness score: prep completion per round.", [
+        "python -m candid panel readiness --panel P1",
+    ])
+    t.add_argument("--panel", required=True)
+    s.set_defaults(func=cmd_panel)
 
     return p
 

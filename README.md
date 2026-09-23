@@ -38,6 +38,13 @@ python -m candid tailor cover-letter --jd samples/candid/sample_jd.txt \
 python -m candid track add --company "Acme Corp" --role "Senior Data Scientist"
 python -m candid track update 1 --status selected_for_interview
 python -m candid prep --company "Capital One" --role "Senior Data Scientist" --app-id 1
+
+# 5. Facing a panel? Prep per interviewer, not generically
+python -m candid panel create --company "Acme Corp" --role "Senior Data Scientist" \
+    --rounds "Priya Nair:hiring_manager:45, Sam Rao:data_scientist:60, Jo:bar_raiser:45"
+python -m candid panel brief --panel P1 --export   # who's-who brief sheet
+python -m candid panel mock --panel P1 --round 2   # mock in that interviewer's persona
+python -m candid panel readiness --panel P1        # readiness score per round
 ```
 
 All commands are `python -m candid <command> --help`. No accounts, no keys.
@@ -58,6 +65,7 @@ one ends with the exact next command to run.
 | `track` | Application tracker: add / list / update / stats / search / export-csv, with funnel + response/interview/offer rates and per-status next-action hints. Re-adding an existing company+role returns the existing record instead of duplicating. |
 | `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
+| `panel` | Panel interview prep: define the loop (interviewers, archetypes, durations), then get a who's-who brief sheet per interviewer, role-based question expectations, smart questions to ask each interviewer, an interview-day timeline, deterministic per-interviewer mocks with self-score rubrics, a story-consistency log that flags conflicting numbers across rounds, export-only interviewer research, a consolidated debrief with thank-you draft hooks, and a readiness score. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
