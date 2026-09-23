@@ -24,6 +24,9 @@ Usage:
 Pass the gaps list from `match.score_match(jd)["gaps"]` (via --gaps in a
 future CLI flag, or programmatically) to prioritize weak areas.
 
+Pass track="security" (CLI: `prep --track security`) to prepend a Security
+track section with sampled security questions and concept pointers.
+
 The pack is saved to candid_data/prep_packs/ and linked to the tracker entry.
 """
 
@@ -239,14 +242,81 @@ def _comp_talking_points(company: str, role: str, location: str) -> str:
     ])
 
 
+def _security_concept_pointers(n: int) -> list[str]:
+    """First n security concept slugs, or [] if the module is unavailable."""
+    try:
+        from candid import security_concepts as SC
+    except ImportError:
+        return []
+    names_fn = getattr(SC, "names", None)
+    if callable(names_fn):
+        try:
+            return [str(s) for s in names_fn()][:n]
+        except Exception:
+            pass
+    bank = getattr(SC, "SECURITY_CONCEPTS", None)
+    if isinstance(bank, dict):
+        return [str(s) for s in bank][:n]
+    return []
+
+
+def _security_track_lines() -> list[str]:
+    """Security-track add-on lines for prep packs.
+
+    5 sampled security questions (deterministic category mix) plus pointers
+    to 3 security concepts. Returns [] when the security modules are not
+    available, so the pack still builds.
+    """
+    try:
+        from candid import security_questions as SQ
+    except ImportError:
+        return []
+    bank = [q for q in (getattr(SQ, "SECURITY_QUESTIONS", None) or [])
+            if isinstance(q, dict) and q.get("q")]
+    if not bank:
+        return []
+    by_cat: dict[str, list[dict]] = {}
+    for q in bank:
+        by_cat.setdefault(str(q.get("category") or "general"), []).append(q)
+    cats = sorted(by_cat)
+    picked: list[dict] = []
+    i = 0
+    while len(picked) < 5 and any(by_cat[c] for c in cats):
+        bucket = by_cat[cats[i % len(cats)]]
+        if bucket:
+            picked.append(bucket.pop(0))
+        i += 1
+    lines = [
+        "## Security track",
+        "",
+        "_Security-engineer interview track._",
+        "",
+        "### Sample security questions",
+        "",
+    ]
+    for num, q in enumerate(picked, 1):
+        cat = q.get("category") or ""
+        lines.append(f"{num}. {q['q']}" + (f" _[{cat}]_" if cat else ""))
+    concepts = _security_concept_pointers(3)
+    if concepts:
+        lines += ["", "### Concepts to review", ""]
+        for slug in concepts:
+            lines.append(f"- `{slug}` - `python -m candid security concepts {slug}`")
+    lines += [""]
+    return lines
+
+
 def build_pack(profile: dict, company: str, role: str, jd: str = "",
                app_id: int | None = None, location: str = "",
-               gaps: list[str] | None = None) -> tuple[str, Path]:
+               gaps: list[str] | None = None,
+               track: str | None = None) -> tuple[str, Path]:
     """Build the prep pack markdown. Returns (markdown, saved_path).
 
     gaps: optional list of match-gap strings (from
     ``match.score_match(jd)["gaps"]``). Gap-related concept deep-dives and
     mock questions are prioritized when provided.
+    track: optional interview track add-on. ``"security"`` prepends a
+    Security track section (sampled security questions + concept pointers).
     """
     gaps = [str(g) for g in (gaps or []) if str(g).strip()]
     gap_cats = _gap_categories(gaps)
@@ -287,6 +357,8 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
         f"*Generated {date.today().isoformat()} · role family: {family.replace('_', ' ')}*",
         "",
     ]
+    if track == "security":
+        lines += _security_track_lines()
     if gaps:
         lines += [
             "## Priority focus (from your match gaps)",

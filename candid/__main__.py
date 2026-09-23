@@ -6,6 +6,7 @@
     python -m candid track add --company X --role Y
     python -m candid prep --company X --role Y
     python -m candid mock coding
+    python -m candid security questions --category appsec
     python -m candid salary lookup --company X --title Y
     python -m candid dashboard            # local web UI (127.0.0.1 only)
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib.util
 import json
 import re
 import sys
@@ -32,7 +34,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "security",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +50,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "security": ["questions", "concepts", "threat-model", "design-drill",
+                 "incidents", "mock", "gaps", "stories", "loop"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -124,6 +128,15 @@ def _nested(parser, dest="what"):
     return parser.add_subparsers(dest=dest, required=True,
                                  title="subcommands", metavar="<subcommand>",
                                  parser_class=CandidParser)
+
+
+def _has_module(name: str) -> bool:
+    """True if candid.<name> exists.
+
+    The security-track modules land independently, so the security command
+    only wires subcommands whose module file is present.
+    """
+    return importlib.util.find_spec(f"candid.{name}") is not None
 
 
 JD_HELP = ("JD text, file path, URL, or - to read the JD from stdin "
@@ -273,7 +286,8 @@ def cmd_prep(a):
     from candid import prep as P
     jd = _jd_text(a) if a.jd else ""
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
-                                  app_id=a.app_id, location=a.location or "")
+                                  app_id=a.app_id, location=a.location or "",
+                                  track=a.track)
     print(f"Prep pack saved to {path}\n")
     print(markdown[:3000])
     if len(markdown) > 3000:
@@ -486,6 +500,137 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def _render_sec_questions(qs: list[dict]) -> str:
+    lines = []
+    for i, q in enumerate(qs, 1):
+        lines.append(f"{i}. [{q.get('category', '?')}] {q['q']}")
+        src = q.get("source", "")
+        reported = f" (reported {q['reported']})" if q.get("reported") else ""
+        if src:
+            lines.append(f"   Source: {src}{reported}")
+        if q.get("url"):
+            lines.append(f"   {q['url']}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _render_sec_incident(inc: dict) -> str:
+    lines = [f"# {inc['title']} ({inc['year']})",
+             f"Incident id: `{inc['id']}`", "",
+             inc["summary"], "",
+             "## Root cause", "", inc["root_cause"], "", "## Lessons", ""]
+    for lesson in inc.get("lessons", []):
+        lines.append(f"- {lesson}")
+    if inc.get("interview_framing"):
+        lines += ["", "## Interview framing", "", inc["interview_framing"]]
+    if inc.get("sources"):
+        lines += ["", "## Sources", ""]
+        for s in inc["sources"]:
+            lines.append(f"- {s.get('label', '')}: {s.get('url', '')}".rstrip(": "))
+    return "\n".join(lines)
+
+
+def cmd_security(a):
+    what = a.what
+    if what == "questions":
+        from candid import security_questions as SQ
+        if a.category:
+            qs = SQ.by_category(a.category)  # ValueError on unknown category
+        elif a.search:
+            qs = SQ.search(a.search)
+        else:
+            qs = list(SQ.SECURITY_QUESTIONS)
+        if a.json:
+            print(json.dumps(qs, indent=2, default=str))
+        else:
+            print(f"{len(qs)} security questions"
+                  + (f" in '{a.category}'" if a.category else "")
+                  + (f" matching '{a.search}'" if a.search else ""))
+            print()
+            print(_render_sec_questions(qs))
+    elif what == "concepts":
+        from candid import security_concepts as SC
+        if a.list:
+            for slug in SC.names():
+                print(f"{slug}: {SC.get(slug).get('title', '')}")
+        else:
+            try:
+                c = SC.get(a.name)
+            except KeyError:
+                sys.exit(f"Unknown security concept {a.name!r}. "
+                         "Run `python -m candid security concepts --list` to see them all.")
+            print(f"# {c.get('title', a.name)}\n")
+            if c.get("summary"):
+                print(c["summary"] + "\n")
+            for pt in c.get("key_points", []):
+                print(f"- {pt}")
+            if c.get("interview_angles"):
+                print("\nInterview angles:")
+                for ang in c["interview_angles"]:
+                    print(f"  * {ang}")
+            if c.get("related_categories"):
+                print("\nRelated categories: " + ", ".join(c["related_categories"]))
+    elif what == "threat-model":
+        from candid import security_threat as ST
+        if a.list:
+            for s in ST.SCENARIOS:
+                print(f"{s['id']}: {s['title']}")
+        else:
+            ST.run_drill(scenario_id=a.scenario)  # ValueError on unknown id
+    elif what == "design-drill":
+        from candid import security_design as SD
+        if a.list:
+            for d in SD.DRILLS:
+                print(f"{d['id']}: {d['title']}")
+        else:
+            SD.run_drill(drill_id=a.drill)  # ValueError on unknown id
+    elif what == "incidents":
+        from candid import security_incidents as SI
+        if a.list or not a.search:
+            for inc in SI.list_incidents():
+                print(f"{inc['id']} ({inc['year']}): {inc['title']}")
+        else:
+            results = SI.search(a.search)
+            if not results:
+                print(f"No incidents matching '{a.search}'.")
+            for inc in results:
+                print(_render_sec_incident(inc))
+                print()
+    elif what == "mock":
+        from candid import security_mock as SM
+        SM.run_mock(n=a.n, category=a.category)
+    elif what == "gaps":
+        from candid import security_gaps as SG
+        SG.run_assessment()
+    elif what == "stories":
+        from candid import security_star as SS
+        if a.list or not a.prompt:
+            for p in SS.PROMPTS:
+                print(f"{p['id']} [{p.get('competency', '')}]: {p['prompt']}")
+        else:
+            pr = SS.get_prompt(a.prompt)  # ValueError on unknown id
+            print(f"# {pr['prompt']}\n")
+            print(f"Competency: {pr.get('competency', '')}\n")
+            for part, hint in (pr.get("scaffolding") or {}).items():
+                print(f"## {part.title()}\n{hint}\n")
+    elif what == "loop":
+        from candid import security_loop as SL
+        if a.list or not a.type:
+            for slug in SL.loop_names():
+                print(f"{slug}: {SL.get_loop(slug).get('label', '')}")
+        else:
+            loop = SL.get_loop(a.type)  # ValueError on unknown slug
+            print(f"# {loop.get('label', a.type)} interview loop\n")
+            for rnd in loop.get("rounds", []):
+                print(f"## {rnd.get('name', '')}")
+                print(f"{rnd.get('focus', '')}")
+                for tip in rnd.get("tips", []):
+                    print(f"  - {tip}")
+                print()
+            if loop.get("notes"):
+                print(loop["notes"])
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -619,6 +764,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--track", default=None, choices=["security"],
+                   help="Interview track add-on (e.g. --track security adds "
+                        "security questions + concept pointers to the pack)")
     s.set_defaults(func=cmd_prep)
 
     # followup
@@ -918,6 +1066,87 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # security (security-engineer interview track; subcommands appear only
+    # when their module file is present, since workers land independently)
+    s = _sub(sub, "security", "Security-engineer interview track.", [
+        "python -m candid security questions --category appsec",
+        "python -m candid security concepts --list",
+        "python -m candid security threat-model --list",
+        "python -m candid security mock -n 3",
+    ])
+    ss = _nested(s)
+    if _has_module("security_questions"):
+        t = _sub(ss, "questions", "Browse the researched security question bank.", [
+            "python -m candid security questions",
+            "python -m candid security questions --category appsec",
+            "python -m candid security questions --search ssrf --json",
+        ])
+        t.add_argument("--category", default=None,
+                       help="Filter by category (e.g. appsec, cloudsec, crypto)")
+        t.add_argument("--search", default=None, metavar="KEYWORD",
+                       help="Case-insensitive search over question text")
+        t.add_argument("--json", action="store_true", help="Print as JSON")
+    if _has_module("security_concepts"):
+        t = _sub(ss, "concepts", "Security concept deep-dives.", [
+            "python -m candid security concepts --list",
+            "python -m candid security concepts owasp-top-10",
+        ])
+        t.add_argument("name", nargs="?", default=None,
+                       help="Concept slug (see --list)")
+        t.add_argument("--list", action="store_true", help="List all concepts")
+    if _has_module("security_threat"):
+        t = _sub(ss, "threat-model", "Interactive STRIDE threat-modeling drill.", [
+            "python -m candid security threat-model --list",
+            "python -m candid security threat-model --scenario file-upload-service",
+        ])
+        t.add_argument("--scenario", default=None, metavar="ID",
+                       help="Scenario id (see --list); omitted = pick interactively")
+        t.add_argument("--list", action="store_true", help="List all scenarios")
+    if _has_module("security_design"):
+        t = _sub(ss, "design-drill", "Secure system-design drill with checklist scoring.", [
+            "python -m candid security design-drill --list",
+            "python -m candid security design-drill --drill secure-auth-saas",
+        ])
+        t.add_argument("--drill", default=None, metavar="ID",
+                       help="Drill id (see --list); omitted = pick interactively")
+        t.add_argument("--list", action="store_true", help="List all drills")
+    if _has_module("security_incidents"):
+        t = _sub(ss, "incidents", "Real-world security incident case studies.", [
+            "python -m candid security incidents --list",
+            "python -m candid security incidents --search ransomware",
+        ])
+        t.add_argument("--search", default=None, metavar="KEYWORD",
+                       help="Search incident case studies")
+        t.add_argument("--list", action="store_true", help="List all incidents")
+    if _has_module("security_mock"):
+        t = _sub(ss, "mock", "Scored security mock interview (interactive).", [
+            "python -m candid security mock",
+            "python -m candid security mock -n 3 --category crypto",
+        ])
+        t.add_argument("-n", type=int, default=5, help="Number of questions (default: 5)")
+        t.add_argument("--category", default=None, help="Question category filter")
+    if _has_module("security_gaps"):
+        t = _sub(ss, "gaps", "Interactive skill-gap assessment and study plan.", [
+            "python -m candid security gaps",
+        ])
+    if _has_module("security_star"):
+        t = _sub(ss, "stories", "STAR story prompts for behavioral rounds.", [
+            "python -m candid security stories --list",
+            "python -m candid security stories --prompt found-vulnerability",
+        ])
+        t.add_argument("--prompt", default=None, metavar="ID",
+                       help="Prompt id (see --list)")
+        t.add_argument("--list", action="store_true", help="List all prompts")
+    if _has_module("security_loop"):
+        t = _sub(ss, "loop", "Interview-loop guides by company type.", [
+            "python -m candid security loop --list",
+            "python -m candid security loop startup",
+        ])
+        t.add_argument("type", nargs="?", default=None,
+                       help="Loop type (see --list)")
+        t.add_argument("--list", action="store_true", help="List all loop types")
+    s.set_defaults(func=cmd_security)
 
     return p
 
