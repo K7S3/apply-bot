@@ -64,7 +64,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError",
+    "PatternsError", "AlumniError",
     "ValueError",
     "TrackError", "ValueError",
 }
@@ -756,6 +756,106 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def _alumni_profile():
+    """Profile for alumni features — optional; features degrade gracefully."""
+    from candid import profile as P
+    try:
+        return P.load_profile()
+    except P.OnboardError:
+        return {}
+
+
+def cmd_alumni(a):
+    from candid import alumni as A
+    net = A.load_network()
+    if a.what == "import":
+        src = a.csv or a.zip
+        if not src:
+            sys.exit("Give --csv <Connections.csv> or --zip <LinkedIn export>.zip.")
+        res = A.import_connections(src, replace=a.replace)
+        print(f"✅ Imported {res['added']} new, updated {res['updated']} "
+              f"(total {res['total']} contacts).")
+        if not A.load_network()["contacts"]:
+            print("Tip: enrich with schools/past jobs: "
+                  "`python -m candid alumni enrich --csv schools.csv`")
+    elif a.what == "enrich":
+        rows = A.parse_enrichment_csv(a.csv)
+        res = A.enrich_contacts(rows)
+        print(f"✅ Enriched {res['matched']} contact(s) with {res['facts_added']} "
+              f"fact(s) ({res['unmatched']} name(s) not found in network).")
+    elif a.what == "overlap":
+        prof = _alumni_profile()
+        if a.json:
+            print(json.dumps({
+                "schools": [{"contact": h["contact"]["name"], "schools": h["schools"]}
+                            for h in A.school_overlap(net, prof)],
+                "companies": [{"contact": h["contact"]["name"],
+                                "companies": h["companies"]}
+                               for h in A.company_overlap(net, prof)],
+            }, indent=2))
+            return
+        if not a.companies:
+            print(A.render_overlap("School overlap", A.school_overlap(net, prof),
+                                   "schools"))
+        if not a.schools:
+            so = A.school_overlap(net, prof)
+            if so and not a.companies:
+                print()
+            print(A.render_overlap("Company overlap", A.company_overlap(net, prof),
+                                   "companies"))
+        if not prof.get("education") and not prof.get("experience"):
+            print("\nNote: no profile found — onboard first (`python -m candid "
+                  "onboard`) so school/company overlap has something to match.")
+    elif a.what == "warm-path":
+        wp = A.warm_paths(net, _alumni_profile(), a.company, a.role or "",
+                          limit=a.limit)
+        if a.json:
+            print(json.dumps(wp, indent=2, default=str))
+        else:
+            print(A.render_warm_paths(wp))
+    elif a.what == "prioritize":
+        targets = [(a.company, a.role or "")] if a.company else None
+        queue = A.prioritize(net, _alumni_profile(), targets=targets,
+                             limit=a.limit)
+        if a.json:
+            print(json.dumps(
+                [{**e, "contact": e["contact"]["name"]} for e in queue],
+                indent=2, default=str))
+        else:
+            print(A.render_queue(queue))
+    elif a.what == "draft":
+        c = A.find_contact(net, a.name)
+        print(A.draft_outreach(c, _alumni_profile(), kind=a.kind,
+                               target_company=a.company or "",
+                               target_role=a.role or ""))
+    elif a.what == "coverage":
+        if not a.company:
+            sys.exit("Give at least one --company (repeatable).")
+        cov = A.coverage(net, _alumni_profile(), a.company)
+        if a.json:
+            print(json.dumps(cov, indent=2, default=str))
+        else:
+            print(A.render_coverage(cov))
+    elif a.what == "log":
+        rec = A.log_interaction(a.name, a.kind, a.note or "", a.date or "")
+        print(f"✅ Logged {rec['kind']} with {rec['name']} on {rec['date']}.")
+    elif a.what == "freshness":
+        queue = A.freshness(net, _alumni_profile(),
+                            stale_days=a.stale_days, quiet_days=a.quiet_days)
+        if a.json:
+            print(json.dumps(
+                [{**e, "contact": e["contact"]["name"]} for e in queue],
+                indent=2, default=str))
+        else:
+            print(A.render_freshness(queue))
+    elif a.what == "stats":
+        s = A.stats(net)
+        if a.json:
+            print(json.dumps(s, indent=2, default=str))
+        else:
+            print(A.render_stats(s))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -1441,6 +1541,88 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # alumni
+    s = _sub(sub, "alumni", "Map your alumni network for warm outreach.", [
+        "python -m candid alumni import --csv Connections.csv",
+        "python -m candid alumni warm-path --company Stripe --role \"ML Engineer\"",
+        "python -m candid alumni prioritize --company Stripe --role \"ML Engineer\"",
+    ])
+    als = _nested(s)
+    t = _sub(als, "import", "Import LinkedIn Connections.csv or export ZIP.", [
+        "python -m candid alumni import --csv Connections.csv",
+        "python -m candid alumni import --zip LinkedIn-export.zip",
+        "python -m candid alumni import --csv samples/candid/sample_connections.csv",
+    ])
+    t.add_argument("--csv", default="", help="Path to Connections.csv")
+    t.add_argument("--zip", default="", help="Path to LinkedIn export .zip")
+    t.add_argument("--replace", action="store_true",
+                   help="Replace the network instead of merging")
+    t = _sub(als, "enrich", "Add schools/past jobs per contact from a CSV.", [
+        "python -m candid alumni enrich --csv schools.csv",
+        "python -m candid alumni enrich --csv samples/candid/sample_enrichment.csv",
+    ])
+    t.add_argument("--csv", required=True,
+                   help="CSV with name,school,grad_year,prev_company,start_year,end_year,notes")
+    t = _sub(als, "overlap", "Contacts sharing your schools/employers.", [
+        "python -m candid alumni overlap",
+        "python -m candid alumni overlap --schools",
+        "python -m candid alumni overlap --json",
+    ])
+    t.add_argument("--schools", action="store_true", help="Only school overlap")
+    t.add_argument("--companies", action="store_true", help="Only company overlap")
+    t.add_argument("--json", action="store_true")
+    t = _sub(als, "warm-path", "Ranked warm routes into a target company.", [
+        "python -m candid alumni warm-path --company Stripe",
+        "python -m candid alumni warm-path --company Stripe --role \"ML Engineer\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--role", default="")
+    t.add_argument("--limit", type=int, default=10)
+    t.add_argument("--json", action="store_true")
+    t = _sub(als, "prioritize", "Ranked outreach queue with tiers.", [
+        "python -m candid alumni prioritize",
+        "python -m candid alumni prioritize --company Stripe --role \"ML Engineer\"",
+    ])
+    t.add_argument("--company", default="", help="Target company")
+    t.add_argument("--role", default="", help="Target role")
+    t.add_argument("--limit", type=int, default=25)
+    t.add_argument("--json", action="store_true")
+    t = _sub(als, "draft", "Draft a warm outreach message.", [
+        "python -m candid alumni draft --name \"David Kim\" --kind referral --company Stripe --role \"ML Engineer\"",
+        "python -m candid alumni draft --name \"Grace Liu\" --kind reconnect",
+    ])
+    t.add_argument("--name", required=True, help="Contact name")
+    t.add_argument("--kind", default="referral",
+                   choices=["referral", "info-chat", "reconnect"])
+    t.add_argument("--company", default="")
+    t.add_argument("--role", default="")
+    t = _sub(als, "coverage", "Warm-contact coverage vs target companies.", [
+        "python -m candid alumni coverage --company Stripe --company OpenAI",
+    ])
+    t.add_argument("--company", action="append", default=[],
+                   help="Target company (repeatable)")
+    t.add_argument("--json", action="store_true")
+    t = _sub(als, "log", "Log an interaction with a contact.", [
+        "python -m candid alumni log --name \"David Kim\" --kind coffee --note \"great chat about ML platform\"",
+    ])
+    t.add_argument("--name", required=True)
+    t.add_argument("--kind", default="coffee",
+                   choices=["met", "emailed", "called", "coffee", "messaged", "other"])
+    t.add_argument("--note", default="")
+    t.add_argument("--date", default="", help="YYYY-MM-DD (default: today)")
+    t = _sub(als, "freshness", "Stale contacts needing re-engagement.", [
+        "python -m candid alumni freshness",
+        "python -m candid alumni freshness --stale-days 180 --quiet-days 90",
+    ])
+    t.add_argument("--stale-days", type=int, default=365)
+    t.add_argument("--quiet-days", type=int, default=180)
+    t.add_argument("--json", action="store_true")
+    t = _sub(als, "stats", "Network overview.", [
+        "python -m candid alumni stats",
+    ])
+    t.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_alumni)
 
     return p
 

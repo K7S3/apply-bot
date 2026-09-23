@@ -14,6 +14,9 @@ Modules:
     followup  thank-you / recruiter nudge drafts
     offer     offer comparison and total-comp normalization
     negotiate recruiter scripts, counter drafts, BATNA framing
+    alumni    alumni network mapper: Connections.csv import, school/company
+              overlap, warm-path finder, outreach queue, drafts, coverage,
+              freshness (all local, all deterministic)
     mock      interactive mock interviews (coding judge, AI interviewer,
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
@@ -30,4 +33,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
