@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -31,7 +32,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "negotiate", "negoseq", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -42,6 +43,9 @@ SUBCOMMANDS = {
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
+    "negoseq": ["plan", "draft", "timing", "batna", "anchor", "pushback",
+                "accept", "decline", "tradeoffs", "package", "call", "track",
+                "export"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
@@ -55,7 +59,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "NegoseqError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -324,6 +328,104 @@ def cmd_negotiate(a):
                               base_ask_reason=a.base_ask, second_item=a.second_item,
                               second_ask_reason=a.second_ask or "",
                               target_summary=a.target or "", call_time=a.call_time))
+
+
+def _profile_name():
+    try:
+        return _profile().get("name") or ""
+    except Exception:
+        return ""
+
+
+def cmd_negoseq(a):
+    from candid import negoseq as NQ
+    if a.what == "plan":
+        print(NQ.render_plan(a.company, a.role, a.offer_date,
+                             deadline=a.deadline, tone=a.tone,
+                             batna_kind=a.batna, name=_profile_name()))
+    elif a.what == "draft":
+        d = NQ.draft_email(a.step, a.tone, name=_profile_name(),
+                           recruiter=a.person or "", role=a.role or "",
+                           company=a.company or "", target_summary=a.target or "",
+                           market_note=a.market or "", call_time=a.call_time or "",
+                           deadline=a.deadline or "", later_date=a.later or "",
+                           terms_summary=a.terms or "", start_date=a.start or "",
+                           decline_reason=a.reason or "")
+        print(f"Subject: {d['subject']}\n\n{d['body']}")
+    elif a.what == "timing":
+        for p in NQ.timing_plan(a.offer_date, a.deadline):
+            print(f"{p['send_on']}  {p['step']}: {p['why']}")
+    elif a.what == "batna":
+        r = NQ.batna_points(a.kind, a.detail or "")
+        print(f"BATNA strength: {r['strength']}\n")
+        for p in r["points"]:
+            print(f"- {p}")
+        print()
+        for c in r["cautions"]:
+            print(f"- DO NOT: {c}")
+    elif a.what == "anchor":
+        r = NQ.anchor_ask(a.target, a.low, a.high, a.walkaway)
+        print(f"Target {_fmt_money(a.target)} -> first ask {_fmt_money(r['ask'])} "
+              f"(room to concede: {_fmt_money(r['concession_room'])})")
+        for n in r["notes"]:
+            print(f"- {n}")
+    elif a.what == "pushback":
+        r = NQ.pushback_reply(a.kind, deadline=a.deadline or "Friday",
+                              later_date=a.later or "next Wednesday",
+                              review_months=a.review_months or "6",
+                              reason=a.reason or "the scope",
+                              target_summary=a.target or "our target number")
+        print(f"Tactic: {r['tactic']}\n\n{r['reply']}")
+    elif a.what == "accept":
+        d = NQ.draft_email("accept", a.tone, name=_profile_name(),
+                           recruiter=a.person or "", role=a.role or "",
+                           company=a.company or "",
+                           terms_summary=a.terms or "", start_date=a.start or "")
+        print(f"Subject: {d['subject']}\n\n{d['body']}")
+    elif a.what == "decline":
+        d = NQ.draft_email("decline", a.tone, name=_profile_name(),
+                           recruiter=a.person or "", role=a.role or "",
+                           company=a.company or "", decline_reason=a.reason or "")
+        print(f"Subject: {d['subject']}\n\n{d['body']}")
+    elif a.what == "tradeoffs":
+        pr = [p.strip() for p in a.priorities.split(",") if p.strip()] or None
+        for m in NQ.tradeoff_menu(pr):
+            print(f"{m['key']:12} {m['label']}: {m['note']}")
+    elif a.what == "package":
+        levers = dict(kv.split("=", 1) for kv in (a.set or []))
+        print(NQ.package_ask(levers))
+    elif a.what == "call":
+        print(NQ.call_script(recruiter=a.person or "there", role=a.role or "",
+                             company=a.company or "",
+                             target_summary=a.target or "",
+                             batna_kind=a.batna, voicemail=a.voicemail))
+    elif a.what == "track":
+        if a.op == "start":
+            rec = NQ.start_sequence(a.company, a.role, a.offer_date,
+                                    deadline=a.deadline, tone=a.tone,
+                                    batna_kind=a.batna)
+            print(f"Started sequence #{rec['id']}: {rec['role']} @ {rec['company']}")
+            print(NQ.render_status(rec["id"]))
+        elif a.op == "log":
+            NQ.log_email(a.seq_id, a.step, a.status)
+            print(f"Logged {a.step} -> {a.status} on sequence #{a.seq_id}")
+        elif a.op == "status":
+            print(NQ.render_status(a.seq_id))
+        elif a.op == "list":
+            for s in NQ.list_sequences():
+                print(f"#{s['id']}: {s['role']} @ {s['company']} "
+                      f"(offer {s['offer_date']}, deadline {s['deadline'] or 'none'})")
+    elif a.what == "export":
+        md = NQ.render_plan(a.company, a.role, a.offer_date,
+                            deadline=a.deadline, tone=a.tone,
+                            batna_kind=a.batna,
+                            name=_profile_name())
+        Path(a.out).write_text(md)
+        print(f"Wrote negotiation plan to {a.out}")
+
+
+def _fmt_money(n):
+    return f"${n:,.0f}"
 
 
 def cmd_salary(a):
@@ -718,6 +820,114 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--second-ask", default=""); t.add_argument("--target", default="")
     t.add_argument("--call-time", default="tomorrow")
     s.set_defaults(func=cmd_negotiate)
+
+    # negoseq
+    s = _sub(sub, "negoseq", "Negotiation email sequence builder: timed multi-step email drafts.", [
+        "python -m candid negoseq plan --company Acme --role \"Data Scientist\" --offer-date 2026-09-22",
+        "python -m candid negoseq draft --step counter --tone warm --company Acme --role SWE",
+        "python -m candid negoseq timing --offer-date 2026-09-22 --deadline 2026-09-30",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "plan", "Render the full sequence plan (steps, timing, drafts).", [
+        "python -m candid negoseq plan --company Acme --role SWE --offer-date 2026-09-22 --deadline 2026-09-30",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--offer-date", required=True); t.add_argument("--deadline", default=None)
+    t.add_argument("--tone", default="professional", choices=["warm", "professional", "assertive"])
+    t.add_argument("--batna", default="search_only",
+        choices=["competing_offer", "current_role", "other_finals", "search_only", "none"])
+    t = _sub(ns, "draft", "Draft one sequence email.", [
+        "python -m candid negoseq draft --step counter --tone assertive --company Acme --role SWE",
+    ])
+    t.add_argument("--step", required=True,
+        choices=["counter", "nudge", "call_request", "deadline_reply", "accept", "decline"])
+    t.add_argument("--tone", default="professional", choices=["warm", "professional", "assertive"])
+    t.add_argument("--person", default=""); t.add_argument("--role", default="")
+    t.add_argument("--company", default=""); t.add_argument("--target", default="")
+    t.add_argument("--market", default=""); t.add_argument("--call-time", default="")
+    t.add_argument("--deadline", default=""); t.add_argument("--later", default="")
+    t.add_argument("--terms", default=""); t.add_argument("--start", default="")
+    t.add_argument("--reason", default="")
+    t = _sub(ns, "timing", "Show recommended send dates for each step.", [
+        "python -m candid negoseq timing --offer-date 2026-09-22 --deadline 2026-09-30",
+    ])
+    t.add_argument("--offer-date", required=True); t.add_argument("--deadline", default=None)
+    t = _sub(ns, "batna", "BATNA-aware talking points.", [
+        "python -m candid negoseq batna --kind competing_offer --detail \"Offer B at $210k total\"",
+    ])
+    t.add_argument("--kind", required=True,
+        choices=["competing_offer", "current_role", "other_finals", "search_only", "none"])
+    t.add_argument("--detail", default="")
+    t = _sub(ns, "anchor", "Compute a first-ask anchor from target and market band.", [
+        "python -m candid negoseq anchor --target 180000 --low 170000 --high 200000 --walkaway 175000",
+    ])
+    t.add_argument("--target", type=float, required=True); t.add_argument("--low", type=float, required=True)
+    t.add_argument("--high", type=float, required=True); t.add_argument("--walkaway", type=float, required=True)
+    t = _sub(ns, "pushback", "Reply draft for a common recruiter pushback.", [
+        "python -m candid negoseq pushback --kind band_max",
+    ])
+    t.add_argument("--kind", required=True,
+        choices=["band_max", "need_approval", "firm_deadline", "budget_freeze",
+                 "other_candidate", "verbal_only"])
+    t.add_argument("--deadline", default=""); t.add_argument("--later", default="")
+    t.add_argument("--review-months", default=""); t.add_argument("--reason", default="")
+    t.add_argument("--target", default="")
+    t = _sub(ns, "accept", "Draft the acceptance email.", [
+        "python -m candid negoseq accept --person Jane --role SWE --company Acme",
+    ])
+    t.add_argument("--person", default=""); t.add_argument("--role", required=True)
+    t.add_argument("--company", required=True); t.add_argument("--tone", default="professional",
+        choices=["warm", "professional", "assertive"])
+    t.add_argument("--terms", default=""); t.add_argument("--start", default="")
+    t = _sub(ns, "decline", "Draft the gracious decline email.", [
+        "python -m candid negoseq decline --person Jane --role SWE --company Acme",
+    ])
+    t.add_argument("--person", default=""); t.add_argument("--role", required=True)
+    t.add_argument("--company", required=True); t.add_argument("--tone", default="professional",
+        choices=["warm", "professional", "assertive"])
+    t.add_argument("--reason", default="")
+    t = _sub(ns, "tradeoffs", "Multi-lever tradeoff menu.", [
+        "python -m candid negoseq tradeoffs --priorities base,equity",
+    ])
+    t.add_argument("--priorities", default="",
+        help="Comma-separated lever keys, most important first")
+    t = _sub(ns, "package", "Compose a full package ask from lever=value pairs.", [
+        "python -m candid negoseq package --set base=$190k --set sign_on=$25k",
+    ])
+    t.add_argument("--set", action="append", default=[], help="lever=value pairs")
+    t = _sub(ns, "call", "Call script (or --voicemail) for the negotiation call.", [
+        "python -m candid negoseq call --person Jane --role SWE --company Acme",
+    ])
+    t.add_argument("--person", default=""); t.add_argument("--role", default="")
+    t.add_argument("--company", default=""); t.add_argument("--target", default="")
+    t.add_argument("--batna", default="search_only",
+        choices=["competing_offer", "current_role", "other_finals", "search_only", "none"])
+    t.add_argument("--voicemail", action="store_true")
+    t = _sub(ns, "track", "Track a negotiation sequence: start/log/status/list.", [
+        "python -m candid negoseq track --op start --company Acme --role SWE --offer-date 2026-09-22",
+        "python -m candid negoseq track --op log --seq-id 1 --step counter --status sent",
+        "python -m candid negoseq track --op status --seq-id 1",
+    ])
+    t.add_argument("--op", required=True, choices=["start", "log", "status", "list"])
+    t.add_argument("--company", default=""); t.add_argument("--role", default="")
+    t.add_argument("--offer-date", default=""); t.add_argument("--deadline", default=None)
+    t.add_argument("--tone", default="professional", choices=["warm", "professional", "assertive"])
+    t.add_argument("--batna", default="search_only",
+        choices=["competing_offer", "current_role", "other_finals", "search_only", "none"])
+    t.add_argument("--seq-id", type=int, default=0)
+    t.add_argument("--step", default="counter")
+    t.add_argument("--status", default="sent",
+        choices=["planned", "sent", "replied", "done", "skipped"])
+    t = _sub(ns, "export", "Write the full plan to a markdown file.", [
+        "python -m candid negoseq export --company Acme --role SWE --offer-date 2026-09-22 --out plan.md",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--offer-date", required=True); t.add_argument("--deadline", default=None)
+    t.add_argument("--tone", default="professional", choices=["warm", "professional", "assertive"])
+    t.add_argument("--batna", default="search_only",
+        choices=["competing_offer", "current_role", "other_finals", "search_only", "none"])
+    t.add_argument("--out", required=True)
+    s.set_defaults(func=cmd_negoseq)
 
     # salary
     s = _sub(sub, "salary", "Salary intelligence database.", [
