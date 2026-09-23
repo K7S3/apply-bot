@@ -15,6 +15,9 @@ Modules:
     mock      interactive mock interviews (coding judge, AI interviewer,
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
+    whiteboard  whiteboard practice mode: timed system-design drills,
+              describe-your-diagram narration, component checklists,
+              rubric feedback, follow-up bank, session history
     jobs      curated job discovery → tracker pipeline
 
 Everything runs locally and deterministically, except the ``mock ai``
@@ -26,4 +29,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

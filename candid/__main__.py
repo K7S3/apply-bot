@@ -31,8 +31,8 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "followup", "offer", "negotiate", "salary", "mock", "whiteboard",
+    "jobs", "dashboard", "import", "gmail", "linkedin",
 ]
 
 SUBCOMMANDS = {
@@ -45,6 +45,8 @@ SUBCOMMANDS = {
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
+    "whiteboard": ["drills", "plan", "narrate", "components", "outline",
+                   "feedback", "drill", "followups", "history", "rubric"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
@@ -54,6 +56,7 @@ SUBCOMMANDS = {
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
+    "WhiteboardError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
 }
@@ -68,6 +71,7 @@ _NEXT_COMMAND = {
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
+    "WhiteboardError": "python -m candid whiteboard --help",
     "GmailError": "python -m candid gmail --help",
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
@@ -391,6 +395,69 @@ def cmd_mock(a):
         M.behavioral_session(theme=a.theme, ai_feedback=a.ai)
     elif a.what == "design":
         M.design_session(level=a.level, ai_feedback=a.ai)
+
+
+def cmd_whiteboard(a):
+    from candid import whiteboard as W
+    if a.what == "drills":
+        drills = W.list_drills(difficulty=a.difficulty, topic=a.topic)
+        if not drills:
+            print("No drills match. Try without filters.")
+            return
+        if a.json:
+            print(W.drills_json(drills))
+        else:
+            print(W.render_drills(drills))
+    elif a.what == "plan":
+        print(W.render_plan(W.plan_drill(a.drill, minutes=a.minutes)))
+    elif a.what == "narrate":
+        notes = None
+        if a.notes_file:
+            try:
+                notes = json.loads(open(a.notes_file, encoding="utf-8").read())
+            except (OSError, json.JSONDecodeError) as e:
+                sys.exit(f"Cannot read notes file {a.notes_file}: {e}")
+            if not isinstance(notes, dict):
+                sys.exit(f"Notes file {a.notes_file} must be a JSON object of section -> text.")
+        W.narrate(a.drill, notes=notes, save=not a.no_save)
+    elif a.what == "components":
+        if a.check:
+            result = W.check_components(a.drill, a.check, session_id=a.session)
+            print(f"Coverage: {result['coverage_pct']}% "
+                  f"({len(result['checked'])}/{len(result['checked']) + len(result['missed'])})")
+            if result["missed"]:
+                print("Missed: " + ", ".join(result["missed"]))
+            if result.get("session_id"):
+                print(f"Saved to session {result['session_id']}.")
+        else:
+            print(W.render_checklist(a.drill))
+    elif a.what == "outline":
+        print(W.render_outline(W.reference_outline(a.drill)))
+    elif a.what == "feedback":
+        ratings = {"clarity": a.clarity, "completeness": a.completeness,
+                   "depth": a.depth, "communication": a.communication}
+        session = W.attach_feedback(a.session, ratings, notes=a.notes or "")
+        print(W.render_feedback(session["feedback"]))
+        print(f"\nSaved to session {a.session}.")
+    elif a.what == "drill":
+        W.run_drill(a.drill, minutes=a.minutes, wait=not a.no_wait)
+    elif a.what == "followups":
+        if a.quiz:
+            W.quiz_followup(a.drill, answer=a.answer)
+        else:
+            fups = W.list_followups(a.drill)
+            drill = W.get_drill(a.drill)
+            print(f"### Follow-up questions — {drill['title']}\n")
+            for i, f in enumerate(fups, 1):
+                print(f"{i}. {f['q']}\n   Why they ask: {f['why']}\n")
+    elif a.what == "history":
+        sessions = W.session_history(drill_id=a.drill)
+        if a.json:
+            print(json.dumps(sessions, indent=2))
+        else:
+            print(W.render_history(sessions, W.drill_stats()))
+    elif a.what == "rubric":
+        print(W.render_rubric())
 
 
 def cmd_jobs(a):
@@ -798,6 +865,82 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
+
+    # whiteboard
+    s = _sub(sub, "whiteboard", "Whiteboard practice mode: system-design drills, narration, feedback.", [
+        "python -m candid whiteboard drills --difficulty hard",
+        "python -m candid whiteboard plan --drill chat-system --minutes 45",
+        "python -m candid whiteboard drill --drill url-shortener",
+        "python -m candid whiteboard narrate --drill url-shortener",
+        "python -m candid whiteboard feedback --session wb20260922-001 --clarity 4 --completeness 3 --depth 4 --communication 5",
+    ])
+    ws = _nested(s)
+    t = _sub(ws, "drills", "List the whiteboard drill bank.", [
+        "python -m candid whiteboard drills",
+        "python -m candid whiteboard drills --difficulty hard --topic caching",
+        "python -m candid whiteboard drills --json",
+    ])
+    t.add_argument("--difficulty", default=None, help="easy|medium|hard")
+    t.add_argument("--topic", default=None, help="filter by topic substring")
+    t.add_argument("--json", action="store_true", help="machine-readable output")
+    t = _sub(ws, "plan", "Timed phase plan for a drill.", [
+        "python -m candid whiteboard plan --drill chat-system",
+        "python -m candid whiteboard plan --drill kv-store --minutes 30",
+    ])
+    t.add_argument("--drill", required=True, help="drill id, e.g. chat-system")
+    t.add_argument("--minutes", type=int, default=45, help="total minutes (default 45)")
+    t = _sub(ws, "narrate", "Describe-your-diagram flow: guided narration checkpoints.", [
+        "python -m candid whiteboard narrate --drill url-shortener",
+        "python -m candid whiteboard narrate --drill url-shortener --notes-file notes.json",
+    ])
+    t.add_argument("--drill", required=True)
+    t.add_argument("--notes-file", default=None,
+                   help="JSON object of section -> text (non-interactive)")
+    t.add_argument("--no-save", action="store_true", help="do not save a session record")
+    t = _sub(ws, "components", "Expected-component checklist with coverage scoring.", [
+        "python -m candid whiteboard components --drill news-feed",
+        "python -m candid whiteboard components --drill news-feed --check cache 'fanout service'",
+    ])
+    t.add_argument("--drill", required=True)
+    t.add_argument("--check", nargs="*", default=None,
+                   help="components you covered (prefix matching allowed)")
+    t.add_argument("--session", default=None, help="attach the result to a session id")
+    t = _sub(ws, "outline", "Reference outline for post-session self-comparison.", [
+        "python -m candid whiteboard outline --drill ticket-booking",
+    ])
+    t.add_argument("--drill", required=True)
+    t = _sub(ws, "feedback", "Structured rubric feedback on a session.", [
+        "python -m candid whiteboard feedback --session wb20260922-001 --clarity 4 --completeness 3 --depth 4 --communication 5",
+    ])
+    t.add_argument("--session", required=True, help="session id from narrate/drill")
+    for dim in ("clarity", "completeness", "depth", "communication"):
+        t.add_argument(f"--{dim}", type=int, required=True, help="self-rating 1-5")
+    t.add_argument("--notes", default="", help="free-text notes for the session")
+    t = _sub(ws, "drill", "Timed practice run with phase prompts.", [
+        "python -m candid whiteboard drill --drill url-shortener",
+        "python -m candid whiteboard drill --drill chat-system --minutes 30 --no-wait",
+    ])
+    t.add_argument("--drill", required=True)
+    t.add_argument("--minutes", type=int, default=45)
+    t.add_argument("--no-wait", action="store_true",
+                   help="do not pause between phases (scripting)")
+    t = _sub(ws, "followups", "Follow-up question bank per drill (+ quiz mode).", [
+        "python -m candid whiteboard followups --drill kv-store",
+        "python -m candid whiteboard followups --drill kv-store --quiz",
+    ])
+    t.add_argument("--drill", required=True)
+    t.add_argument("--quiz", action="store_true", help="ask one follow-up and capture your answer")
+    t.add_argument("--answer", default=None, help="answer text (non-interactive quiz)")
+    t = _sub(ws, "history", "Session history, per-drill best scores, rubric trends.", [
+        "python -m candid whiteboard history",
+        "python -m candid whiteboard history --drill url-shortener --json",
+    ])
+    t.add_argument("--drill", default=None, help="filter to one drill id")
+    t.add_argument("--json", action="store_true", help="machine-readable output")
+    t = _sub(ws, "rubric", "Print the whiteboard evaluation rubric.", [
+        "python -m candid whiteboard rubric",
+    ])
+    s.set_defaults(func=cmd_whiteboard)
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
