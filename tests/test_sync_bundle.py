@@ -23,11 +23,25 @@ from candid.sync.bundle import (  # noqa: E402
 )
 from candid.sync.errors import SyncError  # noqa: E402
 
+# Rebind config dirs explicitly: in a shared pytest process another test
+# module may import candid first, which would make the env vars above too
+# late (config binds them at import time). All sync modules read
+# config.DATA_DIR / config.CONFIG_DIR dynamically, so rebinding the module
+# attributes keeps these tests hermetic in any run order.
+from candid import config as _config  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
 DATA = "/tmp/candid-test-sync-a"
+CONFIG_DIR = "/tmp/candid-test-sync-a-config"
 
 
 @pytest.fixture(autouse=True)
 def fresh_data_dir():
+    # Hermetic config: rebind for this test, restore afterwards so no other
+    # test module sees our tmp dirs (all sync modules read config dynamically).
+    old_data, old_cfg = _config.DATA_DIR, _config.CONFIG_DIR
+    _config.DATA_DIR = _Path(DATA)
+    _config.CONFIG_DIR = _Path(CONFIG_DIR)
     shutil.rmtree(DATA, ignore_errors=True)
     os.makedirs(DATA, exist_ok=True)
     # Sample data: tracker, profile, and a prep_packs dir with nesting.
@@ -37,6 +51,7 @@ def fresh_data_dir():
     open(f"{DATA}/prep_packs/pack1.md", "w").write("# pack 1")
     open(f"{DATA}/prep_packs/sub/pack2.md", "w").write("# pack 2")
     yield
+    _config.DATA_DIR, _config.CONFIG_DIR = old_data, old_cfg
     # Leave the tree for the last test's introspection; next run cleans it.
 
 

@@ -19,13 +19,19 @@ os.environ["CANDID_CONFIG_DIR"] = "/tmp/candid-test-sync-b-config"
 import pytest
 
 from candid import config
+
+DATA = Path("/tmp/candid-test-sync-b")
+CONFIG_DIR = Path("/tmp/candid-test-sync-b-config")
 from candid.sync import importer, manifest
 from candid.sync.base import load_base
 from candid.sync.errors import SyncError
 from candid.sync.machine import get_machine_id
 
-DATA = Path(config.DATA_DIR)
-MACHINE = get_machine_id()
+def _machine() -> str:
+    """This machine's id, read lazily so the fixture's config rebind applies."""
+    return get_machine_id()
+
+
 BUNDLE_NO = 0
 
 
@@ -90,8 +96,14 @@ def _tree_snapshot() -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def clean_data():
+    # Hermetic config: rebind for this test, restore afterwards (all sync
+    # modules read config.DATA_DIR / CONFIG_DIR dynamically).
+    old_data, old_cfg = config.DATA_DIR, config.CONFIG_DIR
+    config.DATA_DIR = DATA
+    config.CONFIG_DIR = CONFIG_DIR
     _fresh_data_dir()
     yield
+    config.DATA_DIR, config.CONFIG_DIR = old_data, old_cfg
 
 
 def test_preview_reports_new_changed_unchanged_and_writes_nothing():
@@ -216,16 +228,23 @@ def test_peer_targeted_bundle_for_other_machine_refused():
 
 
 def test_peer_targeted_bundle_for_us_is_accepted():
-    bundle = _make_bundle({"tracker.json": b'{"new": true}'}, peer_id=MACHINE)
+    bundle = _make_bundle({"tracker.json": b'{"new": true}'}, peer_id=_machine())
     result = importer.import_bundle(bundle)
     assert result["applied"] == ["tracker.json"]
     assert (DATA / "tracker.json").read_bytes() == b'{"new": true}'
 
 
-def test_merge_mode_without_engine_raises_friendly_error():
-    bundle = _make_bundle({"tracker.json": b"{}"})
-    with pytest.raises(SyncError, match="merge engine not available in this build"):
-        importer.import_bundle(bundle, mode="merge")
+def test_merge_mode_delegates_to_engine():
+    # In the integrated tree the merge engine exists, so merge mode delegates
+    # to it instead of raising the "not available" error.
+    from candid.sync import base as base_mod
+
+    _write_local("tracker.json", b"[]")
+    base_mod.update_last(base_mod.snapshot_current(["tracker"]))
+    bundle = _make_bundle({"tracker.json": b"[]"})
+    result = importer.import_bundle(bundle, mode="merge")
+    assert "applied" in result and "conflicts" in result
+    assert result["conflicts"] == []
 
 
 def test_unknown_mode_raises():

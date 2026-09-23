@@ -32,9 +32,15 @@ candid.config.CONFIG_DIR = Path("/tmp/candid-test-sync-e-config")
 def clean_state():
     import shutil
 
+    # Hermetic config: rebind for this test, restore afterwards (all sync
+    # modules read config.DATA_DIR / CONFIG_DIR dynamically).
+    old_data, old_cfg = candid.config.DATA_DIR, candid.config.CONFIG_DIR
+    candid.config.DATA_DIR = DATA_DIR
+    candid.config.CONFIG_DIR = Path("/tmp/candid-test-sync-e-config")
     shutil.rmtree(DATA_DIR / "sync", ignore_errors=True)
     yield
     shutil.rmtree(DATA_DIR / "sync", ignore_errors=True)
+    candid.config.DATA_DIR, candid.config.CONFIG_DIR = old_data, old_cfg
 
 
 def make_pairing_file(tmp_path, name="other-machine", machine_id="m-peer"):

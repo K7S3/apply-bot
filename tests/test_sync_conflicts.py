@@ -24,12 +24,21 @@ from candid.sync.errors import SyncError
 
 @pytest.fixture(autouse=True)
 def clean_dirs():
-    for var in ("CANDID_DATA_DIR", "CANDID_CONFIG_DIR"):
-        root = Path(os.environ[var])
+    # Hermetic config: rebind for this test, restore afterwards (all sync
+    # modules read config.DATA_DIR / CONFIG_DIR dynamically). NOTE: clean
+    # the rebound literal dirs, NOT os.environ (env vars are process-global
+    # and last-import-wins, so they may point at another module's dirs).
+    old_data, old_cfg = config.DATA_DIR, config.CONFIG_DIR
+    data_dir = Path("/tmp/candid-test-sync-c")
+    cfg_dir = Path("/tmp/candid-test-sync-c-config")
+    config.DATA_DIR = data_dir
+    config.CONFIG_DIR = cfg_dir
+    for root in (data_dir, cfg_dir):
         if root.exists():
             shutil.rmtree(root)
         root.mkdir(parents=True, exist_ok=True)
     yield
+    config.DATA_DIR, config.CONFIG_DIR = old_data, old_cfg
 
 
 def data_path(rel: str) -> Path:
