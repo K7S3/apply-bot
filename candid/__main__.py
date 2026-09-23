@@ -6,6 +6,7 @@
     python -m candid track add --company X --role Y
     python -m candid prep --company X --role Y
     python -m candid mock coding
+    python -m candid sre drill
     python -m candid salary lookup --company X --title Y
     python -m candid dashboard            # local web UI (127.0.0.1 only)
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
@@ -31,7 +32,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "negotiate", "salary", "mock", "sre", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -45,6 +46,9 @@ SUBCOMMANDS = {
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
+    "sre": ["questions", "deepdive", "drill", "warroom", "playbook",
+            "postmortem", "iac-review", "stories", "cheatsheet", "quiz",
+            "ladder"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
@@ -798,6 +802,53 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
+
+    # sre track (DevOps/SRE): questions, drills, playbooks, guides.
+    s = _sub(sub, "sre", "DevOps/SRE interview track: questions, drills, playbooks, guides.", [
+        "python -m candid sre questions --category kubernetes",
+        "python -m candid sre deepdive slos",
+        "python -m candid sre drill --list",
+        "python -m candid sre playbook disk-full",
+        "python -m candid sre cheatsheet kubectl",
+        "python -m candid sre ladder --level L5",
+    ])
+    sre_sub = _nested(s, dest="sre_cmd")
+    from candid import sre_questions as _SQ
+    from candid import sre_drills as _SD
+    from candid import sre_runbooks as _SR
+    from candid import sre_guides as _SG
+    for _m in (_SQ, _SD, _SR, _SG):
+        _m.register(sre_sub)
+    # Every subcommand needs an examples epilog (see test_cli_ux.py).
+    _SRE_EXAMPLES = {
+        "questions": ["python -m candid sre questions --category kubernetes",
+                      "python -m candid sre questions --list-categories"],
+        "deepdive": ["python -m candid sre deepdive slos",
+                     "python -m candid sre deepdive slos --save"],
+        "drill": ["python -m candid sre drill --list",
+                  "python -m candid sre drill --scenario latency-spike --auto"],
+        "warroom": ["python -m candid sre warroom --scenario bad-deploy",
+                    "python -m candid sre warroom --scenario dns-outage --use-ai"],
+        "playbook": ["python -m candid sre playbook disk-full",
+                     "python -m candid sre playbook tls-expiry --export tls.md"],
+        "postmortem": ["python -m candid sre postmortem",
+                       "python -m candid sre postmortem --from-notes notes.txt"],
+        "iac-review": ["python -m candid sre iac-review --answers",
+                       "python -m candid sre iac-review --difficulty easy"],
+        "stories": ["python -m candid sre stories",
+                    "python -m candid sre stories --list"],
+        "cheatsheet": ["python -m candid sre cheatsheet kubectl",
+                       "python -m candid sre cheatsheet prometheus"],
+        "quiz": ["python -m candid sre quiz --tool terraform",
+                 "python -m candid sre quiz"],
+        "ladder": ["python -m candid sre ladder",
+                   "python -m candid sre ladder --level L5"],
+    }
+    for _name, _p in sre_sub.choices.items():
+        if "examples:" not in (_p.epilog or ""):
+            _p.epilog = _examples(*_SRE_EXAMPLES.get(
+                _name, [f"python -m candid sre {_name} --help"]))
+            _p.formatter_class = argparse.RawDescriptionHelpFormatter
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
