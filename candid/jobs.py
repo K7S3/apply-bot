@@ -38,6 +38,24 @@ MAX_PER_SOURCE = 100
 DEFAULT_LIMIT = 15
 
 
+def _gems_module():
+    """Import candid.gems lazily; None when it isn't importable yet.
+
+    jobs.py must keep working when gems.py is absent (e.g. partial
+    checkouts), so every gems touch goes through this lookup. Checks
+    sys.modules first so tests can block/fake the import reliably.
+    """
+    import sys
+    if "candid.gems" in sys.modules:
+        # None in sys.modules is the classic import-block sentinel.
+        return sys.modules["candid.gems"]
+    try:
+        from candid import gems as G
+        return G
+    except ImportError:
+        return None
+
+
 class JobsError(Exception):
     """Raised for curation failures."""
 
@@ -263,18 +281,28 @@ def _fresh_enough(job: dict, days: int | None, now: datetime) -> bool:
 def filter_jobs(jobs: list[dict], role: str, location: str = "",
                 remote: bool = False, level: str | None = None,
                 limit: int = DEFAULT_LIMIT, days: int | None = None,
-                exclude_ids: set[str] | None = None) -> list[dict]:
+                exclude_ids: set[str] | None = None,
+                exclude_megacorps: bool = False) -> list[dict]:
     """Filter + rank raw adapter output for the requested role.
 
     ``days``: keep only jobs posted within the last N days (jobs with
     unparseable/missing dates are kept). ``exclude_ids``: skip jobs whose
     ``source_id`` (or ``id``) is in the set (dashboard dismiss support).
-    Cross-source dupes (same normalized title+company) are collapsed,
-    keeping the highest-relevance copy.
+    ``exclude_megacorps``: drop postings from megacorp employers (detected
+    via ``candid.gems.is_megacorp`` on this batch). Needs gems.py; when it
+    is absent the flag is a no-op. Cross-source dupes (same normalized
+    title+company) are collapsed, keeping the highest-relevance copy.
     """
     role_terms = _tokens(role) - {"a", "the", "and", "for"}
     role_phrases = tuple(_role_phrases(role))
     excluded = set(exclude_ids or ())
+    if exclude_megacorps:
+        G = _gems_module()
+        if G is not None:
+            batch = list(jobs)
+            mega = {id(j) for j in batch
+                    if G.is_megacorp(j.get("company", ""), batch)}
+            jobs = [j for j in batch if id(j) not in mega]
     now = datetime.now()
     best: dict[tuple[str, str], tuple[float, dict]] = {}
     for job in jobs:
@@ -352,14 +380,18 @@ def _tracked_keys() -> set[tuple[str, str]]:
 def curate(profile: dict, role: str, location: str = "", remote: bool = False,
            level: str | None = None, limit: int = DEFAULT_LIMIT,
            sources: list[str] | None = None, days: int | None = None,
-           min_score: float = 0) -> dict:
+           min_score: float = 0, exclude_megacorps: bool = False) -> dict:
     """Run one curation pass.
 
     Returns {fetched, candidates, added, skipped, skipped_low_score, errors}.
     ``days`` filters to postings from the last N days (unparseable dates are
     kept). ``min_score`` gates tracker writes: jobs scoring below it are NOT
     added — they are stashed in jobs.json under ``skipped_low_score`` so a
-    lower threshold can pick them up later.
+    lower threshold can pick them up later. ``exclude_megacorps`` drops
+    postings from megacorp employers (via candid.gems.is_megacorp on the
+    fetched batch; no-op when gems.py is absent). Every job added to the
+    tracker also gets its gem_score() result stashed in job_meta.json under
+    the ``gem`` key (when gems.py is available).
     """
     from candid import tracker as T
     from candid import salary as S
@@ -377,10 +409,12 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
         except JobsError as e:
             errors.append(str(e))
 
-    candidates = filter_jobs(raw, role, location, remote, level, limit, days=days)
+    candidates = filter_jobs(raw, role, location, remote, level, limit,
+                             days=days, exclude_megacorps=exclude_megacorps)
     state = _load_state()
     seen: dict = state.get("seen", {})
     tracked = _tracked_keys()
+    G = _gems_module()
 
     added, skipped, low_score = [], [], []
     for job in candidates:
@@ -419,7 +453,16 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
         T.update(rec["id"], notes=notes)
         rec.update({"source": job["source"], "source_url": job["url"],
                     "match_score": scored["score"], "jd_text": job["description"][:4000]})
-        _stash_job_meta(rec["id"], rec)
+        stash_meta = dict(rec)
+        if G is not None:
+            # hidden-gem score for the dashboard panel; batch-relative
+            # signals use the same candidate list the job was ranked from.
+            # Gem scoring must never break curation — it is advisory.
+            try:
+                stash_meta["gem"] = G.gem_score(job, profile, candidates)
+            except Exception:
+                pass
+        _stash_job_meta(rec["id"], stash_meta)
         seen[job["source_id"]] = rec["id"]
         tracked.add(_norm_key(job["title"], job["company"]))
         added.append({**job, **scored, "app_id": rec["id"]})
@@ -442,7 +485,9 @@ def _stash_job_meta(app_id: int, meta: dict) -> None:
     """Keep curation metadata (url, score, jd text) alongside the tracker record.
 
     Stored in candid_data/job_meta.json keyed by tracker id — the tracker
-    JSON stays human-editable while the verbose payload lives here.
+    JSON stays human-editable while the verbose payload lives here. When the
+    caller passes a ``gem`` entry (the gem_score() result from curation),
+    it is stored under the same key.
     """
     from candid import tracker as T
     path = C.DATA_DIR / "job_meta.json"
@@ -452,8 +497,11 @@ def _stash_job_meta(app_id: int, meta: dict) -> None:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             data = {}
-    data[str(app_id)] = {k: meta.get(k) for k in
-                         ("source", "source_url", "match_score", "jd_text")}
+    entry = {k: meta.get(k) for k in
+             ("source", "source_url", "match_score", "jd_text")}
+    if "gem" in meta:
+        entry["gem"] = meta["gem"]
+    data[str(app_id)] = entry
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
@@ -470,10 +518,11 @@ def get_job_meta(app_id: int) -> dict:
 def refresh(profile: dict, role: str, location: str = "", remote: bool = False,
             level: str | None = None, limit: int = DEFAULT_LIMIT,
             sources: Optional[List[str]] = None, days: int | None = None,
-            min_score: float = 0) -> dict:
+            min_score: float = 0, exclude_megacorps: bool = False) -> dict:
     """Re-run curation; the result's ``added`` holds only genuinely new jobs."""
     return curate(profile, role, location, remote, level, limit, sources=sources,
-                  days=days, min_score=min_score)
+                  days=days, min_score=min_score,
+                  exclude_megacorps=exclude_megacorps)
 
 
 def render_curated(result: dict) -> str:

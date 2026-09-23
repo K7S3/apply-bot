@@ -135,6 +135,10 @@
   <pre class="report hidden" id="curateOut"></pre>
   <div class="cards" id="jobsCards" style="margin-top:12px"></div></section>
 
+<!-- 3b. hidden gems -->
+<section id="sec-gems"><h2>Hidden gems <span class="sub" style="color:var(--muted);font-weight:400">(high fit, low competition)</span></h2>
+  <div class="cards" id="gemsCards"></div></section>
+
 <!-- 4. prep -->
 <section id="sec-prep"><h2>Interview prep</h2><div id="prepList"></div></section>
 
@@ -188,7 +192,7 @@
 <script>
 "use strict";
 /* candid dashboard UI — vanilla JS, no dependencies, works offline.
-   Sections: overview, nudges, apps, jobs, prep, import, lab, salary. */
+   Sections: overview, nudges, apps, jobs, gems, prep, import, lab, salary. */
 const $=id=>document.getElementById(id);
 const api={
   get:p=>fetch(p).then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;}),
@@ -341,6 +345,27 @@ async function loadJobs(){
   });
 }
 
+/* ---------- 3b. hidden gems: top 5 from stored curation state ---------- */
+async function loadGems(){
+  let gems=[];
+  try{gems=await api.get("/api/gems");}catch(err){gems=[];}
+  const w=$("gemsCards"); w.innerHTML="";
+  if(!gems.length){w.innerHTML='<div style="color:var(--muted)">No hidden gems yet. Run a curation above — jobs with a strong profile fit and low-competition signals get flagged as gems.</div>';return;}
+  for(const g of gems){
+    const d=document.createElement("div"); d.className="card";
+    const fit=g.fit_score==null?"":` · fit ${g.fit_score}/100`;
+    const tag=g.sleeper?'<span style="color:var(--muted);font-size:12px">sleeper pick</span> ':"";
+    d.innerHTML=`<h3>${esc(g.role)} @ ${esc(g.company)}</h3>
+      <div>${tag}<span class="scorebadge ${scoreClass(g.gem_score)}">💎 ${g.gem_score??"—"}/100</span>
+      <span style="color:var(--muted);font-size:13px;margin-left:8px">${fit}</span></div>
+      <div class="meta">${esc(g.reason||"")}</div>
+      <div class="actions">
+        ${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener"><button class="ghost">Apply ↗</button></a>`:""}
+      </div>`;
+    w.appendChild(d);
+  }
+}
+
 $("btnCurate").onclick=async()=>{
   const role=$("cRole").value.trim();
   if(!role){alert("Enter a role first (e.g. Data Scientist).");return;}
@@ -351,7 +376,7 @@ $("btnCurate").onclick=async()=>{
       limit:parseInt($("cLimit").value)||15,sources:null});
     o.textContent=r.summary;
   }catch(err){o.textContent="Error: "+err.message;}
-  loadJobs(); loadOverview();
+  loadJobs(); loadGems(); loadOverview();
 };
 
 /* ---------- 4. prep cards ---------- */
@@ -491,7 +516,7 @@ $("btnSalary").onclick=async()=>{
 
 /* ---------- boot ---------- */
 renderChips();
-loadOverview(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
+loadOverview(); loadApps(); loadJobs(); loadGems(); loadPrep(); loadImportGuides();
 </script>
 </body>
 </html>

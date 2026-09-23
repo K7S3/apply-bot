@@ -172,6 +172,40 @@ def curated_jobs() -> list[dict]:
     return out
 
 
+def top_gems(limit: int = 5) -> list[dict]:
+    """Top hidden gems from stored curation state — for the dashboard panel.
+
+    Reads the ``gem`` payload that jobs.curate() stashes into job_meta.json
+    (never re-scores here, so this works even when candid.gems is absent —
+    jobs stashed before gems existed simply don't appear). Sorted by
+    gem_score, top ``limit`` returned.
+    """
+    from candid import tracker as T, jobs as J
+    gems = []
+    for a in T.list_apps(status="saved"):
+        meta = J.get_job_meta(a["id"])
+        gem = meta.get("gem") or {}
+        score = gem.get("gem_score")
+        if score is None:
+            continue
+        reasons = gem.get("reasons") or []
+        gems.append({
+            "app_id": a["id"],
+            "company": a["company"],
+            "role": a["role"],
+            "gem_score": score,
+            "fit_score": gem.get("fit_score"),
+            "reason": reasons[0] if reasons else "",
+            "sleeper": bool(gem.get("sleeper")),
+            "megacorp": bool(gem.get("megacorp")),
+            "url": meta.get("source_url") or a.get("jd_link") or "",
+            "date_added": a.get("date_added", ""),
+        })
+    gems.sort(key=lambda g: (-(g["gem_score"] or 0),
+                             g["company"].lower(), g["role"].lower()))
+    return gems[:max(0, limit)]
+
+
 def run_curate(role: str, location: str = "", remote: bool = False,
                level: str | None = None, limit: int = 15,
                sources: list | None = None) -> dict:
@@ -512,6 +546,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     query=qs.get("q", [""])[0]))
             elif path == "/api/jobs":
                 _send_json(self, curated_jobs())
+            elif path == "/api/gems":
+                _send_json(self, top_gems())
             elif path == "/api/prep-status":
                 _send_json(self, prep_status())
             elif path == "/api/nudges":

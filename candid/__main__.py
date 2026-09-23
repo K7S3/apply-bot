@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "negotiate", "salary", "mock", "jobs", "gems",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -45,7 +45,8 @@ SUBCOMMANDS = {
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
-    "jobs": ["curate", "refresh", "list"],
+    "jobs": ["curate", "refresh", "list", "gems", "why-gem"],
+    "gems": ["employers"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
 }
@@ -405,7 +406,8 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    exclude_megacorps=getattr(a, "exclude_megacorps", False))
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -425,6 +427,324 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+    elif a.what == "gems":
+        _cmd_jobs_gems(a)
+    elif a.what == "why-gem":
+        _cmd_jobs_why_gem(a)
+
+
+# ---------------------------------------------------------------------------
+# hidden-gem detector (candid.gems) — CLI wiring only
+# ---------------------------------------------------------------------------
+#
+# The scoring core lives in candid/gems.py (owned by another worker). This
+# module talks to it through a defensive lookup so the CLI keeps working even
+# if gems.py is momentarily incomplete: missing functions fall back to neutral
+# stubs instead of crashing.
+
+def _gems_module():
+    """Import candid.gems lazily; None if the module is not importable yet.
+
+    Checks sys.modules first so tests can inject a fake gems module without
+    tripping over the ``candid.gems`` attribute set by an earlier real import.
+    """
+    import sys
+    mod = sys.modules.get("candid.gems")
+    if mod is not None:
+        return mod
+    try:
+        from candid import gems as G
+        return G
+    except ImportError:
+        return None
+
+
+def _gem_score_fallback(job, profile=None, all_jobs=None):
+    return {"gem_score": 0.0, "fit_score": 0.0, "signals": {},
+            "reasons": [], "sleeper": False, "megacorp": False}
+
+
+def _top_gems_fallback(jobs, profile=None, limit=15, exclude_megacorps=False,
+                       min_fit=0.0):
+    return [{**j, "_gem": _gem_score_fallback(j, profile)} for j in jobs[:limit]]
+
+
+def _employer_ranking_fallback(jobs):
+    return []
+
+
+def _gem_fn(name, fallback):
+    G = _gems_module()
+    return getattr(G, name, fallback) if G is not None else fallback
+
+
+_SIGNAL_EXPLANATIONS = {
+    # real signals from candid.gems
+    "freshness": "Posting recency — newer postings tend to have less applicant pile-up.",
+    "repost_rarity": "Whether the job is reposted across many sources — less reposting means less competition.",
+    "company_volume": "The employer's posting volume — lower volume can mean a more focused hire.",
+    "source_niche": "How niche the job board/source is — niche sources draw fewer applicants.",
+    "salary_opacity": "Pay disclosure in the posting — transparent pay usually signals a serious, funded role.",
+    "remote_pool": "Remote-friendliness — remote roles draw wider applicant pools, which the score accounts for.",
+    # generic names the scoring core may also use
+    "applicant_ratio": "Estimated applicants per opening — lower means less competition.",
+    "posting_velocity": "How fast the employer is posting new roles — faster can mean a hiring surge.",
+    "salary_transparency": "Whether the posting discloses pay — transparent pay usually signals a serious, funded role.",
+    "growth_hiring": "Headcount growth signals (funding, expansion) behind the posting.",
+    "obscure_employer": "How under-the-radar the employer is — lesser-known names get fewer applicants.",
+    "remote": "Remote-friendly roles draw wider pools; the gem score accounts for that.",
+    "recency": "How fresh the posting is — newer postings have less pile-up.",
+    "fit": "How well the role matches your profile (skills, seniority, title).",
+}
+
+
+def _curated_jobs() -> list:
+    """Rebuild the curated job pool from tracker (status=saved) + jobs state.
+
+    No network calls — everything comes from locally stored curation data.
+    """
+    from candid import jobs as J
+    from candid import tracker as T
+    state = J._load_state()
+    seen = state.get("seen") or {}
+    sid_by_app = {v: k for k, v in seen.items()}
+    out = []
+    for app in T.list_apps(status="saved"):
+        meta = J.get_job_meta(app["id"])
+        desc = meta.get("jd_text") or ""
+        out.append({
+            "title": app.get("role", ""),
+            "company": app.get("company", ""),
+            "description": desc,
+            "location": app.get("location", "") or "",
+            "url": meta.get("source_url") or app.get("jd_link") or "",
+            "source": meta.get("source", "") or "",
+            "source_id": sid_by_app.get(app["id"], "") or "",
+            "match_score": meta.get("match_score", 0) or 0,
+            "app_id": app["id"],
+            "remote": ("remote" in (app.get("location", "") or "").lower()
+                       or "remote" in desc.lower()),
+        })
+    return out
+
+
+def _filter_gem_pool(jobs: list, role: str, location: str, remote: bool) -> list:
+    out = []
+    for j in jobs:
+        if role and role.lower() not in (j.get("title") or "").lower():
+            continue
+        if location:
+            loc = j.get("location") or ""
+            if loc and location.lower() not in loc.lower():
+                continue
+            # jobs without stored location pass the filter (can't disprove)
+        if remote and not (j.get("remote") or
+                           "remote" in (j.get("location") or "").lower()):
+            continue
+        out.append(j)
+    return out
+
+
+def _profile_or_none():
+    """Load the user profile; None (with a hint) when onboarding is missing."""
+    from candid import profile as P
+    try:
+        return P.load_profile()
+    except Exception:
+        return None
+
+
+def _gem_json(job: dict) -> dict:
+    gem = job.get("_gem") or {}
+    return {
+        "title": job.get("title", ""),
+        "company": job.get("company", ""),
+        "location": job.get("location", ""),
+        "url": job.get("url", ""),
+        "source": job.get("source", ""),
+        "source_id": job.get("source_id", ""),
+        "match_score": job.get("match_score", 0),
+        "gem_score": gem.get("gem_score", 0),
+        "fit_score": gem.get("fit_score", 0),
+        "sleeper": bool(gem.get("sleeper")),
+        "megacorp": bool(gem.get("megacorp")),
+        "signals": gem.get("signals") or {},
+        "reasons": gem.get("reasons") or [],
+    }
+
+
+def _fmt_score(v) -> str:
+    """Format a score that may legitimately be None (e.g. fit without profile)."""
+    return f"{v:.0f}" if isinstance(v, (int, float)) else "—"
+
+
+def _render_gems(gems: list) -> str:
+    lines = [f"{'#':<3}{'Gem':<6}{'Fit':<6}{'Company':<24}{'Title':<32}Why it's a gem"]
+    for i, job in enumerate(gems, 1):
+        gem = job.get("_gem") or {}
+        reasons = gem.get("reasons") or []
+        why = "; ".join(str(r) for r in reasons[:2]) or "—"
+        flag = " [sleeper]" if gem.get("sleeper") else ""
+        if gem.get("megacorp"):
+            flag += " [megacorp]"
+        lines.append(f"{i:<3}{_fmt_score(gem.get('gem_score')):<6}"
+                     f"{_fmt_score(gem.get('fit_score')):<6}"
+                     f"{str(job.get('company', ''))[:23]:<24}"
+                     f"{str(job.get('title', ''))[:31]:<32}"
+                     f"{why[:60]}{flag}")
+    return "\n".join(lines)
+
+
+def _cmd_jobs_gems(a):
+    pool = _curated_jobs()
+    if not pool:
+        print("No curated jobs yet — there is nothing to rank.\n"
+              "Next: run `python -m candid jobs curate --role \"Your Title\"` "
+              "to build your curated pipeline first.")
+        return
+    pool = _filter_gem_pool(pool, a.role or "", a.location or "", a.remote)
+    if not pool:
+        print("No curated jobs match those filters.\n"
+              "Next: loosen --role / --location / --remote and run "
+              "`python -m candid jobs gems` again.")
+        return
+    profile = _profile_or_none()
+    if profile is None:
+        note = ("Note: no profile found — gem scoring runs without fit personalization.\n"
+                "      Run `python -m candid onboard --resume your_resume.pdf` to personalize.")
+        if a.json:
+            sys.stderr.write(note + "\n")  # keep stdout pure JSON
+        else:
+            print(note + "\n")
+    top_gems = _gem_fn("top_gems", _top_gems_fallback)
+    gems = top_gems(pool, profile=profile, limit=a.limit,
+                    exclude_megacorps=a.no_megacorps,
+                    min_fit=a.min_fit or 0.0)
+    if not gems:
+        if a.json:
+            print("[]")
+            return
+        print("No hidden gems in this pool right now.\n"
+              "Next: lower --min-fit, drop --no-megacorps, or curate more jobs.")
+        return
+    if a.json:
+        print(json.dumps([_gem_json(g) for g in gems], indent=2, default=str))
+        return
+    print(_render_gems(gems))
+
+
+def _render_why(job: dict, gem: dict) -> str:
+    lines = [
+        f"Why \"{job.get('title', '')}\" at {job.get('company', '')} is a hidden gem",
+        f"Gem score: {_fmt_score(gem.get('gem_score'))}/100"
+        f"   Fit: {_fmt_score(gem.get('fit_score'))}/100"
+        f"   Sleeper: {'yes' if gem.get('sleeper') else 'no'}"
+        f"   Megacorp: {'yes' if gem.get('megacorp') else 'no'}",
+        "",
+        "Signals:",
+    ]
+    signals = gem.get("signals") or {}
+    if isinstance(signals, dict):
+        items = signals.items()
+    elif isinstance(signals, (list, tuple)):
+        items = ((s.get("name", "?"), s.get("value", "?")) if isinstance(s, dict)
+                 else (str(s), "") for s in signals)
+    else:
+        items = ()
+    any_sig = False
+    for name, value in items:
+        any_sig = True
+        expl = _SIGNAL_EXPLANATIONS.get(str(name),
+                                        "Signal contribution to the gem score.")
+        lines.append(f"  {name:<20}{value}\n      {expl}")
+    if not any_sig:
+        lines.append("  (no signal detail available)")
+    reasons = gem.get("reasons") or []
+    lines.append("")
+    lines.append("Why this is a gem:")
+    if reasons:
+        for r in reasons:
+            lines.append(f"  - {r}")
+    else:
+        lines.append("  (no reasons recorded)")
+    if job.get("url"):
+        lines.append("")
+        lines.append(f"Apply: {job['url']}")
+    return "\n".join(lines)
+
+
+def _cmd_jobs_why_gem(a):
+    pool = _curated_jobs()
+    if not pool:
+        print("No curated jobs yet — there is nothing to explain.\n"
+              "Next: run `python -m candid jobs curate --role \"Your Title\"` first.")
+        return
+    target = (a.target or "").strip()
+    job = None
+    if target.isdigit():
+        idx = int(target)
+        if 1 <= idx <= len(pool):
+            job = pool[idx - 1]
+    else:
+        tl = target.lower()
+        for j in pool:
+            if (j.get("source_id") or "").lower() == tl:
+                job = j
+                break
+    if job is None:
+        sys.exit(f"No curated job {target!r}: the curated pool has "
+                 f"{len(pool)} job(s).\n"
+                 "Next: run `python -m candid jobs list` for the 1-based index, "
+                 "or `python -m candid jobs gems` for the ranking.")
+    profile = _profile_or_none()
+    gem_score = _gem_fn("gem_score", _gem_score_fallback)
+    gem = gem_score(job, profile=profile, all_jobs=pool)
+    if a.json:
+        print(json.dumps({"job": {"title": job.get("title", ""),
+                                  "company": job.get("company", ""),
+                                  "location": job.get("location", ""),
+                                  "url": job.get("url", ""),
+                                  "source": job.get("source", ""),
+                                  "source_id": job.get("source_id", ""),
+                                  "match_score": job.get("match_score", 0)},
+                          "gem": gem}, indent=2, default=str))
+        return
+    print(_render_why(job, gem))
+
+
+def _render_employers(ranking: list) -> str:
+    lines = [f"{'#':<3}{'Employer':<26}{'Postings':<10}{'Obscurity':<11}"
+             f"{'Median $':<12}{'Velocity':<10}Gem score"]
+    for i, e in enumerate(ranking, 1):
+        med = e.get("median_salary_usd")
+        med_s = f"${med:,.0f}" if isinstance(med, (int, float)) and med else "—"
+        lines.append(f"{i:<3}{str(e.get('company', ''))[:25]:<26}"
+                     f"{e.get('postings', 0):<10}"
+                     f"{e.get('obscurity', 0):<11.2f}"
+                     f"{med_s:<12}"
+                     f"{str(e.get('velocity', ''))[:9]:<10}"
+                     f"{e.get('gem_employer_score', 0):.0f}")
+    return "\n".join(lines)
+
+
+def cmd_gems(a):
+    pool = _curated_jobs()
+    if not pool:
+        print("No curated jobs yet — there is nothing to rank.\n"
+              "Next: run `python -m candid jobs curate --role \"Your Title\"` "
+              "to build your curated pipeline first.")
+        return
+    employer_ranking = _gem_fn("employer_ranking", _employer_ranking_fallback)
+    ranking = employer_ranking(pool) or []
+    ranking = ranking[:a.limit or 15]
+    if not ranking:
+        print("Not enough employer signal in the curated pool to rank anyone yet.\n"
+              "Next: curate more jobs with `python -m candid jobs curate --role \"Your Title\"`.")
+        return
+    if a.json:
+        print(json.dumps(ranking, indent=2, default=str))
+        return
+    print(_render_employers(ranking))
 
 
 def cmd_dashboard(a):
@@ -804,6 +1124,7 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid jobs curate --role \"Data Scientist\" --location \"New York\" --remote",
         "python -m candid jobs refresh --role \"ML Engineer\" --limit 10",
         "python -m candid jobs list",
+        "python -m candid jobs gems --no-megacorps",
     ])
     js = _nested(s)
     t = _sub(js, "curate", "Discover jobs, score them, save the best as 'saved'.", [
@@ -821,6 +1142,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--exclude-megacorps", action="store_true",
+                   help="Drop megacorp/high-volume employers from curation")
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
@@ -835,13 +1158,60 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    t.add_argument("--exclude-megacorps", action="store_true",
+                   help="Drop megacorp/high-volume employers from curation")
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",
         "python -m candid jobs list --json   # machine-readable output",
     ])
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
+    t = _sub(js, "gems", "Rank curated jobs as hidden gems (high fit, low competition).", [
+        "python -m candid jobs gems",
+        "python -m candid jobs gems --role \"ML Engineer\" --remote --limit 10",
+        "python -m candid jobs gems --no-megacorps --min-fit 50 --json",
+    ])
+    t.add_argument("--role", default="",
+                   help="Only rank jobs whose title contains this (case-insensitive)")
+    t.add_argument("--location", default="",
+                   help="Only rank jobs matching this location (case-insensitive)")
+    t.add_argument("--remote", action="store_true",
+                   help="Only rank remote-friendly jobs")
+    t.add_argument("--limit", type=int, default=15,
+                   help="Max gems to show (default 15)")
+    t.add_argument("--no-megacorps", action="store_true",
+                   help="Exclude megacorp employers from the ranking")
+    t.add_argument("--min-fit", type=float, default=0.0,
+                   help="Only rank jobs with fit score >= N (default 0 = off)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the gem ranking as JSON (for scripting)")
+    t = _sub(js, "why-gem", "Explain the gem signals for one curated job.", [
+        "python -m candid jobs why-gem 1",
+        "python -m candid jobs why-gem arbeitnow-12345 --json",
+    ])
+    t.add_argument("target",
+                   help="1-based index into the curated list (see `jobs list` order) "
+                        "or the job's source-id")
+    t.add_argument("--json", action="store_true",
+                   help="Print the signal breakdown as JSON (for scripting)")
     s.set_defaults(func=cmd_jobs)
+
+    # gems
+    s = _sub(sub, "gems", "Under-the-radar employer rankings from your curated jobs.", [
+        "python -m candid gems employers",
+        "python -m candid gems employers --limit 10",
+        "python -m candid gems employers --json   # machine-readable output",
+    ])
+    gs = _nested(s)
+    t = _sub(gs, "employers", "Rank under-the-radar employers in your curated pool.", [
+        "python -m candid gems employers",
+        "python -m candid gems employers --limit 10 --json",
+    ])
+    t.add_argument("--limit", type=int, default=15,
+                   help="Max employers to show (default 15)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the employer ranking as JSON (for scripting)")
+    s.set_defaults(func=cmd_gems)
 
     # dashboard
     s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 only).", [
