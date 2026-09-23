@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "em",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "em": ["drill", "hiring-loop"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "EMDrillsError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +73,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "EMDrillsError": "python -m candid em --help",
 }
 
 
@@ -484,6 +486,22 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_em(a):
+    from candid import em_drills as E
+    if a.what == "drill":
+        if a.list:
+            print(E.render_scenario_list())
+        elif a.ai:
+            E.ai_drill(a.scenario)
+        else:
+            E.run_drill(a.scenario)
+    elif a.what == "hiring-loop":
+        if a.list:
+            print(E.render_packet_list())
+        else:
+            E.run_hiring_loop(a.packet)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +936,32 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # em
+    s = _sub(sub, "em", "EM interview prep: leadership drills + hiring-loop simulator.", [
+        "python -m candid em drill --list",
+        "python -m candid em drill --scenario underperformer",
+        "python -m candid em drill --scenario postmortem --ai",
+        "python -m candid em hiring-loop",
+    ])
+    es = _nested(s)
+    t = _sub(es, "drill", "Interactive people-leadership scenario drill.", [
+        "python -m candid em drill --list",
+        "python -m candid em drill --scenario underperformer",
+        "python -m candid em drill --scenario conflict --ai",
+    ])
+    t.add_argument("--scenario", default=None,
+                   help="Scenario id (default: pick interactively)")
+    t.add_argument("--list", action="store_true", help="List available scenarios")
+    t.add_argument("--ai", action="store_true",
+                   help="AI counterpart via Gemini (falls back to local rubric offline)")
+    t = _sub(es, "hiring-loop", "Practice the hiring-manager round: debrief a candidate packet.", [
+        "python -m candid em hiring-loop --list",
+        "python -m candid em hiring-loop --packet maya",
+    ])
+    t.add_argument("--packet", default=None, help="Packet id (default: pick interactively)")
+    t.add_argument("--list", action="store_true", help="List candidate packets")
+    s.set_defaults(func=cmd_em)
 
     return p
 
