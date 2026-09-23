@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from pathlib import Path
 
 from candid import config as C
 from candid.match import _jd_skills, _extract_jd  # internal reuse
@@ -260,3 +261,26 @@ def build_cover_letter(profile: dict, jd: str, company: str, role: str,
         hook=hook, hook_sentence=f"What draws me to {company} is {hook}.",
         name=profile.get("name") or "Your Name",
     )
+
+
+def save_tailored(text: str, *, company: str = "", role: str = "",
+                  kind: str = "resume",
+                  out_path: str | Path | None = None) -> Path:
+    """Write tailored output text to a file. Returns the saved path.
+
+    Defaults to the active profile's tailored directory
+    (``config.tailored_dir()``); pass ``out_path`` to override.
+    """
+    dest = Path(out_path) if out_path else None
+    if dest is None:
+        C.ensure_data_dirs()
+        d = C.tailored_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        slug = f"{company}-{role}-{kind}".strip("-")
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in slug)[:60]
+        safe = safe.strip("_") or kind
+        dest = d / f"{date.today().isoformat()}_{safe}.md"
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(text, encoding="utf-8")
+    return dest

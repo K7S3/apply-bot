@@ -31,34 +31,224 @@ class DashboardError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# multi-profile support (batch-73)
+# ---------------------------------------------------------------------------
+
+ALL_PROFILES = "all"
+"""Reserved ``?profile=`` value: aggregate view across every profile."""
+
+
+def _profiles():
+    """Worker A's ``candid.profiles`` module, or None if unavailable.
+
+    Imported lazily so the dashboard keeps working (single-profile
+    fallback) in any merge order.
+    """
+    try:
+        from candid import profiles
+        return profiles
+    except ImportError:
+        return None
+
+
+def resolve_dashboard_profile(name: str | None) -> str:
+    """Resolve a ``?profile=`` query value to a profile name.
+
+    ``"all"`` selects the aggregate view; anything else is validated via
+    ``profiles.resolve()`` (order: explicit name > ``CANDID_PROFILE`` env
+    > current > default). Unknown names raise DashboardError — the HTTP
+    layer turns that into a clean 400, never a traceback.
+    """
+    if name in (None, ""):
+        name = None
+    if name == ALL_PROFILES:
+        return ALL_PROFILES
+    P = _profiles()
+    if P is None:
+        if name in (None, "default"):
+            return "default"
+        raise DashboardError(
+            f"Profile {name!r} requested, but multi-profile support is "
+            "not installed.")
+    try:
+        return P.resolve(name)
+    except Exception as e:  # ContextError — invalid or unknown name
+        raise DashboardError(f"Unknown profile {name!r}: {e}") from e
+
+
+def _profile_names() -> list[str]:
+    P = _profiles()
+    if P is None:
+        return ["default"]
+    try:
+        return P.list_profiles()
+    except Exception:
+        return ["default"]
+
+
+def _per_profile_path(helper: str, fallback: Path, profile_name: str) -> Path:
+    """Worker A's per-profile ``config`` path helper when present."""
+    fn = getattr(C, helper, None)
+    if callable(fn):
+        try:
+            return fn(profile=profile_name)
+        except Exception:
+            pass
+    return fallback
+
+
+def _tracker_path_for(profile_name: str) -> Path:
+    return _per_profile_path("tracker_path", C.TRACKER_PATH, profile_name)
+
+
+def _proposals_path_for(profile_name: str) -> Path:
+    return _per_profile_path("gmail_proposals_path", C.GMAIL_PROPOSALS_PATH,
+                             profile_name)
+
+
+def _onboard_path_for(profile_name: str) -> Path:
+    return _per_profile_path("profile_json_path", C.PROFILE_PATH,
+                             profile_name)
+
+
+def profile_payload(active: str) -> dict:
+    """Profile list + active profile, for the dashboard switcher UI."""
+    P = _profiles()
+    names = _profile_names()
+    infos: dict[str, dict] = {}
+    if P is not None:
+        for n in names:
+            try:
+                infos[n] = P.profile_info(n)
+            except Exception:
+                infos[n] = {"name": n}
+    else:
+        infos = {"default": {"name": "default", "target_role": None}}
+    return {"profiles": names, "active_profile": active,
+            "profile_info": infos}
+
+
+# ---------------------------------------------------------------------------
 # data functions (pure logic — testable without HTTP)
 # ---------------------------------------------------------------------------
 
-def overview() -> dict:
-    """Funnel stats, counts, nudges, integration status — one payload."""
-    from candid import tracker as T, nudges as N, gmail
+def _nudges_for(profile: str) -> list[dict]:
+    """Pending nudges for one profile, or all profiles labeled per profile."""
+    from candid import tracker as T, nudges as N
+    if profile == ALL_PROFILES:
+        out = []
+        for name in _profile_names():
+            for n in N.pending_nudges(T.list_apps(path=_tracker_path_for(name))):
+                out.append({**n, "profile": name})
+        return out
+    return N.pending_nudges(T.list_apps(path=_tracker_path_for(profile)))
+
+
+def _onboard_card(profile: str) -> dict:
+    """The onboarding profile card payload (per profile)."""
     from candid import profile as P
-    stats = T.stats()
     try:
-        prof = P.load_profile()
-        profile_info = {"has_profile": True, "name": prof.get("name", ""),
-                        "headline": prof.get("headline", "")}
+        prof = P.load_profile(path=_onboard_path_for(profile))
+        return {"has_profile": True, "name": prof.get("name", ""),
+                "headline": prof.get("headline", "")}
     except Exception:
-        profile_info = {"has_profile": False, "name": "", "headline": ""}
+        return {"has_profile": False, "name": "", "headline": ""}
+
+
+def overview(profile: str | None = None) -> dict:
+    """Funnel stats, counts, nudges, integration status — one payload.
+
+    ``profile`` is a resolved profile name, ``"all"`` for the aggregate
+    view (funnel counts summed across profiles, broken down per profile),
+    or ``None`` for the normally resolved profile.
+    """
+    from candid import tracker as T, gmail
+    active = resolve_dashboard_profile(profile)
+    if active == ALL_PROFILES:
+        return _aggregate_overview()
+    stats = T.stats(path=_tracker_path_for(active))
+    nudges = _nudges_for(active)
     return {
         "funnel": stats["counts"],
         "total": stats["total"],
         "response_rate": stats["response_rate"],
         "interview_rate": stats["interview_rate"],
         "offer_rate": stats["offer_rate"],
-        "nudges": N.pending_nudges(),
-        "nudge_count": len(N.pending_nudges()),
+        "nudges": nudges,
+        "nudge_count": len(nudges),
         # import model: candid never connects to accounts — the user exports
         # their own data and feeds it in. Only proposal counts are surfaced.
-        "gmail": {"pending_proposals": len(gmail.list_proposals(status="pending"))},
-        "gmail_pending_proposals": len(gmail.list_proposals(status="pending")),
-        "profile": profile_info,
-        "curated_count": len(curated_jobs()),
+        "gmail": {"pending_proposals": len(
+            gmail.list_proposals(status="pending",
+                                 path=_proposals_path_for(active)))},
+        "gmail_pending_proposals": len(
+            gmail.list_proposals(status="pending",
+                                 path=_proposals_path_for(active))),
+        "profile": _onboard_card(active),
+        "curated_count": len(curated_jobs(profile=active)),
+        # multi-profile switcher data
+        "aggregate": False,
+        **profile_payload(active),
+    }
+
+
+def _summed_rates(counts: dict) -> tuple[float, float, float]:
+    """Recompute funnel rates from summed counts (same formula as tracker)."""
+    base = (counts["applied"] + counts["selected_for_interview"]
+            + counts["rejected"] + counts["offer"])
+    if not base:
+        return 0.0, 0.0, 0.0
+    resp = sum(counts[s] for s in C.RESPONSE_STATUSES)
+    iv = counts["selected_for_interview"] + counts["offer"]
+    return (round(100 * resp / base, 1), round(100 * iv / base, 1),
+            round(100 * counts["offer"] / base, 1))
+
+
+def _aggregate_overview() -> dict:
+    """Combined tracker stats across all profiles.
+
+    Funnel counts are summed; each profile's own stats are included
+    labeled per profile in ``per_profile``.
+    """
+    from candid import tracker as T, gmail
+    per_profile = []
+    summed = {s: 0 for s in C.STATUSES}
+    nudges: list[dict] = []
+    curated = 0
+    for name in _profile_names():
+        stats = T.stats(path=_tracker_path_for(name))
+        for s, n in stats["counts"].items():
+            summed[s] = summed.get(s, 0) + n
+        per_profile.append({
+            "profile": name,
+            "total": stats["total"],
+            "funnel": stats["counts"],
+            "response_rate": stats["response_rate"],
+            "interview_rate": stats["interview_rate"],
+            "offer_rate": stats["offer_rate"],
+        })
+        nudges.extend({**n, "profile": name} for n in _nudges_for(name))
+        curated += len(curated_jobs(profile=name))
+    rr, ir, ofr = _summed_rates(summed)
+    proposals = sum(
+        len(gmail.list_proposals(status="pending",
+                                 path=_proposals_path_for(name)))
+        for name in _profile_names())
+    return {
+        "aggregate": True,
+        "funnel": summed,
+        "total": sum(p["total"] for p in per_profile),
+        "response_rate": rr,
+        "interview_rate": ir,
+        "offer_rate": ofr,
+        "per_profile": per_profile,
+        "nudges": nudges,
+        "nudge_count": len(nudges),
+        "gmail": {"pending_proposals": proposals},
+        "gmail_pending_proposals": proposals,
+        "profile": {"has_profile": False, "name": "", "headline": ""},
+        "curated_count": curated,
+        **profile_payload(ALL_PROFILES),
     }
 
 
@@ -128,47 +318,71 @@ def detect_source(filename: str) -> str | None:
     return None
 
 
-def list_apps_filtered(status: str | None = None, query: str = "") -> list[dict]:
+def list_apps_filtered(status: str | None = None, query: str = "",
+                        profile: str | None = None) -> list[dict]:
     from candid import config as C
     from candid import tracker as T
+    active = resolve_dashboard_profile(profile)
     if status and status not in C.STATUSES:
         return []  # unknown filter value → empty, not a 500
-    apps = T.list_apps(status=status or None)
+    if active == ALL_PROFILES:
+        out = []
+        for name in _profile_names():
+            for a in T.list_apps(status=status or None,
+                                 path=_tracker_path_for(name)):
+                out.append({**a, "profile": name})
+    else:
+        out = T.list_apps(status=status or None,
+                          path=_tracker_path_for(active))
     if query:
         ql = query.lower()
-        apps = [a for a in apps
-                if ql in a.get("company", "").lower()
-                or ql in a.get("role", "").lower()
-                or ql in a.get("notes", "").lower()]
-    return apps
+        out = [a for a in out
+               if ql in a.get("company", "").lower()
+               or ql in a.get("role", "").lower()
+               or ql in a.get("notes", "").lower()]
+    return out
 
 
-def curated_jobs() -> list[dict]:
+def curated_jobs(profile: str | None = None) -> list[dict]:
     """Saved jobs with match scores and apply links — structured.
 
     Jobs dismissed via POST /api/jobs/dismiss are filtered out here.
+    ``profile="all"`` combines every profile's saved jobs, labeled per
+    profile.
     """
     from candid import tracker as T, jobs as J
+    active = resolve_dashboard_profile(profile)
     dismissed = dismissed_ids()
     out = []
-    for a in T.list_apps(status="saved"):
-        if a["id"] in dismissed["app_ids"]:
-            continue
-        meta = J.get_job_meta(a["id"])
-        sid = _source_id_for_app(a["id"]) or meta.get("source_id") or ""
-        if sid and sid in dismissed["source_ids"]:
-            continue
-        out.append({
-            "app_id": a["id"],
-            "company": a["company"],
-            "role": a["role"],
-            "score": meta.get("match_score"),
-            "source": meta.get("source"),
-            "source_id": sid,
-            "url": meta.get("source_url") or a.get("jd_link") or "",
-            "date_added": a.get("date_added", ""),
-            "has_jd": bool(meta.get("jd_text")),
-        })
+
+    def collect(name: str, tag: bool) -> None:
+        for a in T.list_apps(status="saved", path=_tracker_path_for(name)):
+            if a["id"] in dismissed["app_ids"]:
+                continue
+            meta = J.get_job_meta(a["id"])
+            sid = _source_id_for_app(a["id"]) or meta.get("source_id") or ""
+            if sid and sid in dismissed["source_ids"]:
+                continue
+            rec = {
+                "app_id": a["id"],
+                "company": a["company"],
+                "role": a["role"],
+                "score": meta.get("match_score"),
+                "source": meta.get("source"),
+                "source_id": sid,
+                "url": meta.get("source_url") or a.get("jd_link") or "",
+                "date_added": a.get("date_added", ""),
+                "has_jd": bool(meta.get("jd_text")),
+            }
+            if tag:
+                rec["profile"] = name
+            out.append(rec)
+
+    if active == ALL_PROFILES:
+        for name in _profile_names():
+            collect(name, True)
+    else:
+        collect(active, False)
     return out
 
 
@@ -315,37 +529,54 @@ def run_tailor_diff(kind: str, company: str, role: str, jd: str,
     }
 
 
-def prep_status() -> list[dict]:
+def prep_status(profile: str | None = None) -> list[dict]:
     """Per-application interview-prep state (interview-stage apps only)."""
     from candid import tracker as T
+    active = resolve_dashboard_profile(profile)
     out = []
-    for a in T.list_apps():
-        if a.get("status") not in ("selected_for_interview", "offer"):
-            continue
-        pack = a.get("prep_pack", "")
-        has_pack = bool(pack) and Path(pack).exists()
-        out.append({
-            "app_id": a["id"],
-            "company": a["company"],
-            "role": a["role"],
-            "status": a["status"],
-            "has_pack": has_pack,
-            "pack_path": pack if has_pack else "",
-        })
+
+    def collect(name: str, tag: bool) -> None:
+        for a in T.list_apps(path=_tracker_path_for(name)):
+            if a.get("status") not in ("selected_for_interview", "offer"):
+                continue
+            pack = a.get("prep_pack", "")
+            has_pack = bool(pack) and Path(pack).exists()
+            rec = {
+                "app_id": a["id"],
+                "company": a["company"],
+                "role": a["role"],
+                "status": a["status"],
+                "has_pack": has_pack,
+                "pack_path": pack if has_pack else "",
+            }
+            if tag:
+                rec["profile"] = name
+            out.append(rec)
+
+    if active == ALL_PROFILES:
+        for name in _profile_names():
+            collect(name, True)
+    else:
+        collect(active, False)
     return out
 
 
 def run_prep(company: str, role: str, app_id: int | None = None,
-             jd: str = "", location: str = "") -> dict:
+             jd: str = "", location: str = "",
+             profile: str | None = None) -> dict:
     from candid import prep as P, profile as Prof, tracker as T
     if not company or not role:
         raise DashboardError("company and role are required.")
-    profile = Prof.load_profile()
-    markdown, path = P.build_pack(profile, company, role, jd=jd,
+    active = resolve_dashboard_profile(profile)
+    if active == ALL_PROFILES:
+        raise DashboardError("Build a prep pack for one profile at a time — "
+                             "pick a profile in the switcher first.")
+    onboard = Prof.load_profile(path=_onboard_path_for(active))
+    markdown, path = P.build_pack(onboard, company, role, jd=jd,
                                   app_id=app_id, location=location)
     if app_id:
-        T.update(app_id, prep_pack=str(path))
-    return {"path": str(path), "chars": len(markdown)}
+        T.update(app_id, prep_pack=str(path), path=_tracker_path_for(active))
+    return {"path": str(path), "chars": len(markdown), "profile": active}
 
 
 def run_match(jd: str, company: str = "", role: str = "",
@@ -359,38 +590,68 @@ def run_match(jd: str, company: str = "", role: str = "",
     return result
 
 
-def update_status(app_id: int, status: str) -> dict:
+def update_status(app_id: int, status: str,
+                  profile: str | None = None) -> dict:
     """Change an application's status from the dashboard."""
     from candid import config as C
     from candid import tracker as T
     if status not in C.STATUSES:
         raise DashboardError(f"Unknown status: {status!r}")
+    active = resolve_dashboard_profile(profile)
+    if active == ALL_PROFILES:
+        raise DashboardError("The aggregate view is read-only — pick one "
+                             "profile in the switcher to update an application.")
     try:
-        return T.update(app_id, status=status)
+        return T.update(app_id, status=status,
+                        path=_tracker_path_for(active))
     except T.TrackerError as e:
         raise DashboardError(str(e)) from e
 
 
-def proposal_list(status: str = "pending") -> list[dict]:
+def proposal_list(status: str = "pending",
+                  profile: str | None = None) -> list[dict]:
     """Pending Gmail proposals awaiting confirmation."""
     from candid import gmail
-    return gmail.list_proposals(status=status)
+    active = resolve_dashboard_profile(profile)
+    if active == ALL_PROFILES:
+        out = []
+        for name in _profile_names():
+            for p in gmail.list_proposals(
+                    status=status, path=_proposals_path_for(name)):
+                out.append({**p, "profile": name})
+        return out
+    return gmail.list_proposals(status=status,
+                                path=_proposals_path_for(active))
 
 
-def confirm_proposal(proposal_id: int) -> dict:
+def confirm_proposal(proposal_id: int,
+                     profile: str | None = None) -> dict:
     """Confirm a Gmail proposal → writes to the tracker."""
     from candid import gmail
+    active = resolve_dashboard_profile(profile)
+    if active == ALL_PROFILES:
+        raise DashboardError("Confirm a proposal from one profile's view — "
+                             "the aggregate view is read-only.")
     try:
-        return gmail.confirm_proposal(proposal_id)
+        return gmail.confirm_proposal(
+            proposal_id,
+            proposals_path=_proposals_path_for(active),
+            tracker_path=_tracker_path_for(active))
     except gmail.GmailError as e:
         raise DashboardError(str(e)) from e
 
 
-def reject_proposal(proposal_id: int) -> None:
+def reject_proposal(proposal_id: int,
+                    profile: str | None = None) -> None:
     """Dismiss a Gmail proposal."""
     from candid import gmail
+    active = resolve_dashboard_profile(profile)
+    if active == ALL_PROFILES:
+        raise DashboardError("Reject a proposal from one profile's view — "
+                             "the aggregate view is read-only.")
     try:
-        gmail.reject_proposal(proposal_id)
+        gmail.reject_proposal(proposal_id,
+                              path=_proposals_path_for(active))
     except gmail.GmailError as e:
         raise DashboardError(str(e)) from e
 
@@ -502,28 +763,36 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         path, qs = parsed.path, urllib.parse.parse_qs(parsed.query)
         log.debug("GET %s", self.path)
         try:
+            active = resolve_dashboard_profile(qs.get("profile", [None])[0])
+        except DashboardError as e:
+            _send_json(self, {"error": str(e)}, 400)
+            return
+        P = _profiles()
+        # scope this request only — cleared in the finally below
+        if P is not None and active != ALL_PROFILES:
+            P.set_request_profile(active)
+        try:
             if path == "/":
                 self._serve_html()
             elif path == "/api/overview":
-                _send_json(self, overview())
+                _send_json(self, overview(profile=active))
             elif path == "/api/apps":
                 _send_json(self, list_apps_filtered(
                     status=qs.get("status", [None])[0],
-                    query=qs.get("q", [""])[0]))
+                    query=qs.get("q", [""])[0], profile=active))
             elif path == "/api/jobs":
-                _send_json(self, curated_jobs())
+                _send_json(self, curated_jobs(profile=active))
             elif path == "/api/prep-status":
-                _send_json(self, prep_status())
+                _send_json(self, prep_status(profile=active))
             elif path == "/api/nudges":
-                from candid import nudges as N
-                _send_json(self, N.pending_nudges())
+                _send_json(self, _nudges_for(active))
             elif path == "/api/salary":
                 _send_json(self, salary_lookup(
                     qs.get("company", [""])[0], qs.get("title", [""])[0],
                     qs.get("location", [""])[0]))
             elif path == "/api/proposals":
                 _send_json(self, proposal_list(
-                    status=qs.get("status", [None])[0]))
+                    status=qs.get("status", [None])[0], profile=active))
             elif path == "/api/import-guides":
                 _send_json(self, import_guides())
             else:
@@ -535,12 +804,32 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             log.warning("GET %s -> 500: %s: %s", self.path,
                         type(e).__name__, e)
             _send_json(self, {"error": f"{type(e).__name__}: {e}"}, 500)
+        finally:
+            if P is not None:
+                P.clear_request_profile()
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        qs = urllib.parse.parse_qs(parsed.query)
         ctype = self.headers.get("Content-Type", "")
         log.debug("POST %s", self.path)
+        try:
+            active = resolve_dashboard_profile(qs.get("profile", [None])[0])
+        except DashboardError as e:
+            _send_json(self, {"error": str(e)}, 400)
+            return
+        P = _profiles()
+        # scope this request only — cleared in the finally below
+        if P is not None and active != ALL_PROFILES:
+            P.set_request_profile(active)
+        try:
+            self._route_post(path, qs, ctype, active)
+        finally:
+            if P is not None:
+                P.clear_request_profile()
+
+    def _route_post(self, path, qs, ctype, active):
         # file uploads bypass the JSON reader (it would consume rfile)
         if path == "/api/import" and "multipart/form-data" in ctype:
             try:
@@ -581,7 +870,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             if m:
                 try:
                     rec = update_status(int(m.group(1)),
-                                        body.get("status", ""))
+                                        body.get("status", ""),
+                                        profile=active)
                 except DashboardError as e:
                     code = 404 if "No application" in str(e) else 400
                     _send_json(self, {"error": str(e)}, code)
@@ -592,7 +882,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 _send_json(self, run_prep(
                     body.get("company", ""), body.get("role", ""),
                     app_id=body.get("app_id"), jd=body.get("jd", ""),
-                    location=body.get("location", "")))
+                    location=body.get("location", ""), profile=active))
                 return
             if path == "/api/match":
                 _send_json(self, run_match(
@@ -612,9 +902,9 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 pid, action = int(m.group(1)), m.group(2)
                 try:
                     if action == "confirm":
-                        _send_json(self, confirm_proposal(pid))
+                        _send_json(self, confirm_proposal(pid, profile=active))
                     else:
-                        reject_proposal(pid)
+                        reject_proposal(pid, profile=active)
                         _send_json(self, {"ok": True, "id": pid})
                 except DashboardError as e:
                     code = 404 if "No proposal" in str(e) else 400
@@ -659,7 +949,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             # map known domain errors to 400
             name = type(e).__name__
             if name in ("TrackerError", "PrepError", "GmailError", "OnboardError",
-                        "MatchError", "JobsError", "ValueError"):
+                        "MatchError", "JobsError", "ValueError", "ContextError"):
                 log.debug("POST %s -> 400: %s: %s", self.path, name, e)
                 _send_json(self, {"error": str(e)}, 400)
             else:

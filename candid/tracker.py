@@ -7,6 +7,7 @@ Statuses: saved, applied, selected_for_interview, rejected, offer, withdrawn.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -18,7 +19,7 @@ class TrackerError(Exception):
 
 
 def _load(path: str | Path | None = None) -> list[dict]:
-    p = Path(path) if path else C.TRACKER_PATH
+    p = Path(path) if path else C.tracker_path()
     if not p.exists():
         return []
     try:
@@ -31,7 +32,7 @@ def _load(path: str | Path | None = None) -> list[dict]:
 
 
 def _save(apps: list[dict], path: str | Path | None = None) -> Path:
-    p = Path(path) if path else C.TRACKER_PATH
+    p = Path(path) if path else C.tracker_path()
     C.ensure_data_dirs()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(apps, indent=2), encoding="utf-8")
@@ -42,6 +43,46 @@ def _next_id(apps: list[dict]) -> int:
     return max((a.get("id", 0) for a in apps), default=0) + 1
 
 
+def _warn_cross_profile_duplicate(company: str, role: str,
+                                  active_path: Path) -> None:
+    """Warn (stderr) if the same company+role is tracked under another profile.
+
+    Normalized comparison: case-insensitive, stripped. Never blocks the add.
+    Skips silently when per-profile support (candid.profiles) is unavailable.
+    """
+    key = (company.strip().lower(), role.strip().lower())
+    try:
+        from candid import profiles
+        names = list(profiles.list_profiles())
+    except Exception:
+        return
+    for name in names:
+        try:
+            p = C.tracker_path(profile=name)
+        except Exception:
+            continue
+        if p == active_path or not p.exists():
+            continue
+        try:
+            apps = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(apps, list):
+            continue
+        for a in apps:
+            if not isinstance(a, dict):
+                continue
+            other = (str(a.get("company", "")).strip().lower(),
+                     str(a.get("role", "")).strip().lower())
+            if other == key:
+                print(
+                    f"warning: '{company.strip()} / {role.strip()}' is already "
+                    f"tracked under profile '{name}'; adding here too.",
+                    file=sys.stderr,
+                )
+                return
+
+
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         notes: str = "", path: str | Path | None = None) -> dict:
     """Add an application. Returns the new record.
@@ -49,6 +90,10 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     If the same company+role is already tracked, returns the EXISTING
     record (a copy) with ``"duplicate": True`` instead of duplicating —
     no write happens. Check ``rec.get("duplicate")`` to tell the user.
+
+    When using the active profile's tracker (``path=None``), a
+    case-insensitive (company, role) match under a *different* profile
+    prints a warning to stderr but does not block the add.
     """
     if not company or not role:
         raise TrackerError("Both --company and --role are required to add an application.")
@@ -58,6 +103,8 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     for a in apps:
         if a["company"].lower() == company.lower() and a["role"].lower() == role.lower():
             return {**a, "duplicate": True}
+    if path is None:
+        _warn_cross_profile_duplicate(company, role, C.tracker_path())
     rec = {
         "id": _next_id(apps),
         "company": company.strip(),

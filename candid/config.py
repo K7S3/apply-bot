@@ -142,10 +142,90 @@ def skill_regex(alias: str) -> "re.Pattern[str]":
     return re.compile(esc)
 
 
-def ensure_data_dirs() -> None:
-    """Create the git-ignored user data directories if missing."""
-    for d in (DATA_DIR, PREP_PACKS_DIR, TAILOR_DIR):
+def ensure_data_dirs(profile: str | None = None) -> None:
+    """Create the git-ignored user data directories if missing.
+
+    When ``profile`` resolves to a non-default profile, that profile's
+    own data dir (plus its prep_packs/tailored dirs) is created instead.
+    The default call keeps the exact legacy behavior.
+    """
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    base = profiles.profile_dir(name)
+    base.mkdir(parents=True, exist_ok=True)
+    for d in (prep_packs_dir(profile=profile), tailored_dir(profile=profile)):
         d.mkdir(parents=True, exist_ok=True)
+
+
+def profile_json_path(profile: str | None = None) -> Path:
+    """Path to the profile.json for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return PROFILE_PATH
+    return profiles.profile_dir(name) / "profile.json"
+
+
+def tracker_path(profile: str | None = None) -> Path:
+    """Path to the tracker.json for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return TRACKER_PATH
+    return profiles.profile_dir(name) / "tracker.json"
+
+
+def offers_path(profile: str | None = None) -> Path:
+    """Path to the offers.json for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return OFFERS_PATH
+    return profiles.profile_dir(name) / "offers.json"
+
+
+def prep_packs_dir(profile: str | None = None) -> Path:
+    """Path to the prep_packs dir for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return PREP_PACKS_DIR
+    return profiles.profile_dir(name) / "prep_packs"
+
+
+def tailored_dir(profile: str | None = None) -> Path:
+    """Path to the tailored dir for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return TAILOR_DIR
+    return profiles.profile_dir(name) / "tailored"
+
+
+def salary_db_path(profile: str | None = None) -> Path:
+    """Path to the salary.db for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return SALARY_DB
+    return profiles.profile_dir(name) / "salary.db"
+
+
+def gmail_proposals_path(profile: str | None = None) -> Path:
+    """Path to the gmail_proposals.json for ``profile`` (default: resolved one)."""
+    from candid import profiles
+
+    name = profiles.active_profile() if profile is None else profiles.resolve(profile)
+    if name == profiles.DEFAULT_PROFILE:
+        return GMAIL_PROPOSALS_PATH
+    return profiles.profile_dir(name) / "gmail_proposals.json"
 
 
 def get_logger(name: str) -> logging.Logger:

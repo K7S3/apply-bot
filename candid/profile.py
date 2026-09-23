@@ -527,7 +527,7 @@ def onboard(resume_path: str | Path | None = None,
 
     profile = build_profile(texts, sources)
     C.ensure_data_dirs()
-    dest = Path(out_path) if out_path else C.PROFILE_PATH
+    dest = Path(out_path) if out_path else C.profile_json_path()
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(profile, indent=2), encoding="utf-8")
     return profile
@@ -535,7 +535,7 @@ def onboard(resume_path: str | Path | None = None,
 
 def load_profile(path: str | Path | None = None) -> dict:
     """Load the stored profile; raise a friendly error if onboarding is needed."""
-    p = Path(path) if path else C.PROFILE_PATH
+    p = Path(path) if path else C.profile_json_path()
     if not p.exists():
         raise OnboardError(
             f"No profile found at {p}.\n"

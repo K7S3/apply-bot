@@ -363,7 +363,8 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
     markdown = "\n".join(lines)
     C.ensure_data_dirs()
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in f"{company}-{role}")[:60]
-    out = C.PREP_PACKS_DIR / f"{date.today().isoformat()}_{safe}.md"
+    out = C.prep_packs_dir() / f"{date.today().isoformat()}_{safe}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(markdown, encoding="utf-8")
 
     if app_id is not None:

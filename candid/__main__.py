@@ -12,6 +12,12 @@
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
 
+Multi-profile usage (run the same commands under different contexts):
+    python -m candid context create mle --target-role "ML Engineer"
+    python -m candid --profile mle track list   # --profile comes before the subcommand
+    python -m candid context use mle            # make 'mle' the default profile
+    python -m candid track list --all-profiles  # aggregate across every profile
+
 Run `python -m candid <command> --help` for details on each command.
 """
 
@@ -30,13 +36,15 @@ from candid import __version__
 # ---------------------------------------------------------------------------
 
 COMMANDS = [
-    "onboard", "profile", "match", "tailor", "track", "prep",
+    "onboard", "profile", "context", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
 SUBCOMMANDS = {
     "profile": ["show"],
+    "context": ["list", "create", "use", "current", "rename",
+                "delete", "show", "export", "import"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
@@ -55,7 +63,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "ContextError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +80,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "ContextError": "python -m candid context --help",
 }
 
 
@@ -137,6 +146,17 @@ def _profile():
 
 def cmd_onboard(a):
     from candid import profile as P
+    if a.context:
+        profiles = _profiles()
+        try:
+            profiles.set_request_profile(a.context)
+        except profiles.ContextError:
+            # unknown profile -> create it, then onboard into it
+            if a.context not in profiles.list_profiles():
+                profiles.create_profile(a.context)
+                profiles.set_request_profile(a.context)
+            else:
+                raise
     prof = P.onboard(resume_path=a.resume, linkedin_path=a.linkedin, out_path=a.out)
     print("Profile saved.")
     print(P.profile_card(prof))
@@ -149,6 +169,75 @@ def cmd_onboard(a):
 def cmd_profile_show(a):
     from candid import profile as P
     print(P.profile_card(_profile()))
+
+
+def _profiles():
+    """Lazy import of the multi-profile API (candid/profiles.py)."""
+    try:
+        from candid import profiles as P
+        return P
+    except ImportError:
+        sys.exit("Error: multi-profile support is not available in this build "
+                 "(candid/profiles.py is missing).\n"
+                 "Next: run `python -m candid --help`.")
+
+
+def cmd_context(a):
+    """Manage multi-profile contexts (batch-73)."""
+    P = _profiles()
+    what = a.what
+    if what == "list":
+        names = P.list_profiles()
+        if not names:
+            print("No profiles yet. Create one with:")
+            print("  python -m candid context create <name>")
+            return
+        current = P.get_current()
+        for n in names:
+            marker = "  (current)" if n == current else ""
+            try:
+                info = P.profile_info(n)
+                role = (info or {}).get("target_role") if isinstance(info, dict) else None
+            except Exception:
+                role = None
+            suffix = f"  [target role: {role}]" if role else ""
+            print(f"{n}{marker}{suffix}")
+    elif what == "create":
+        if a.from_:
+            P.clone_profile(a.from_, a.name)
+            print(f"Created profile '{a.name}' (cloned from '{a.from_}').")
+        else:
+            P.create_profile(a.name, target_role=a.target_role)
+            print(f"Created profile '{a.name}'.")
+        print(f"Run it with: python -m candid --profile {a.name} <command>")
+    elif what == "use":
+        P.set_current(a.name)
+        print(f"Current profile is now '{a.name}'.")
+    elif what == "current":
+        print(P.get_current())
+    elif what == "rename":
+        P.rename_profile(a.old, a.new)
+        print(f"Renamed profile '{a.old}' -> '{a.new}'.")
+    elif what == "delete":
+        P.delete_profile(a.name, force=a.force)
+        print(f"Deleted profile '{a.name}'.")
+    elif what == "show":
+        info = P.profile_info(a.name)
+        if isinstance(info, dict):
+            order = ["name", "target_role", "is_current", "has_profile",
+                     "tracker_count", "data_dir"]
+            for key in order + [k for k in info if k not in order]:
+                if key in info:
+                    print(f"{key}: {info[key]}")
+        else:
+            print(info)
+    elif what == "export":
+        P.export_profile(a.name, a.file)
+        print(f"Exported profile '{a.name}' to {a.file}")
+    elif what == "import":
+        name = P.import_profile(a.file, a.name)
+        print(f"Imported profile as '{name}'.")
+        print(f"Run it with: python -m candid --profile {name} <command>")
 
 
 def _jd_text(a) -> str:
@@ -225,6 +314,18 @@ def cmd_tailor(a):
         print(out)
 
 
+def _for_each_profile(request_profile, fn):
+    """Run fn(name) once per profile (scoped to it), then restore the
+    original request profile afterwards (None = follow the current profile)."""
+    P = _profiles()
+    try:
+        for name in P.list_profiles():
+            P.set_request_profile(name)
+            fn(name)
+    finally:
+        P.set_request_profile(request_profile)
+
+
 def cmd_track(a):
     from candid import tracker as T
     if a.what == "add":
@@ -236,6 +337,28 @@ def cmd_track(a):
         else:
             print(f"Added application #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['status']}]")
     elif a.what == "list":
+        request_profile = getattr(a, "profile", None)
+        if a.all_profiles:
+            by_name = {}
+
+            def _collect(name, _by=by_name):
+                _by[name] = [
+                    {**app, "profile": name}
+                    for app in T.list_apps(status=a.status, company=a.company)
+                ]
+
+            _for_each_profile(request_profile, _collect)
+            rows = [r for group in by_name.values() for r in group]
+            if a.json:
+                print(json.dumps(rows, indent=2, default=str))
+            elif not rows:
+                print("No applications tracked in any profile yet.")
+            else:
+                print(f"{len(rows)} application(s) across all profiles")
+                for name, group in by_name.items():
+                    print(f"\n--- profile: {name} ({len(group)}) ---")
+                    print(T.render_list(group))
+            return
         apps = T.list_apps(status=a.status, company=a.company)
         if a.json:
             print(json.dumps(apps, indent=2, default=str))
@@ -257,6 +380,15 @@ def cmd_track(a):
         T.remove(a.id)
         print(f"Removed application #{a.id}.")
     elif a.what == "stats":
+        if a.all_profiles:
+            request_profile = getattr(a, "profile", None)
+
+            def _show(name):
+                print(f"\n=== profile: {name} ===")
+                print(T.render_stats(T.stats()))
+
+            _for_each_profile(request_profile, _show)
+            return
         print(T.render_stats(T.stats()))
     elif a.what == "search":
         results = T.search(a.query)
@@ -495,10 +627,19 @@ def build_parser() -> argparse.ArgumentParser:
                          "python -m candid match --jd jd.txt --company Acme --role \"Data Scientist\"",
                          "python -m candid jobs curate --role \"Data Scientist\" --remote",
                          "python -m candid dashboard",
+                         "",
+                         "multi-profile:",
+                         "python -m candid context create mle --target-role \"ML Engineer\"",
+                         "python -m candid --profile mle track list",
+                         "python -m candid track list --all-profiles",
                      ))
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {__version__}",
                    help="Show the candid version and exit.")
+    p.add_argument("--profile", metavar="NAME", default=None,
+                   help="Run under profile NAME (must come before the subcommand, "
+                        "e.g. `python -m candid --profile mle track list`). "
+                        "Defaults to the current profile; see `context use`.")
     sub = p.add_subparsers(dest="cmd", required=True,
                            title="commands", metavar="<command>",
                            parser_class=CandidParser)
@@ -512,6 +653,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--resume", help="Resume file (.pdf/.md/.txt)")
     s.add_argument("--linkedin", help="LinkedIn export file (.txt/.md)")
     s.add_argument("--out", help="Where to write profile.json (default: candid_data/)")
+    s.add_argument("--context", metavar="NAME", default=None,
+                   help="Onboard into profile NAME (created if it does not exist)")
     s.set_defaults(func=cmd_onboard)
 
     # profile
@@ -521,6 +664,65 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.add_argument("what", nargs="?", default="show", choices=["show"])
     s.set_defaults(func=cmd_profile_show)
+
+    # context (multi-profile management)
+    s = _sub(sub, "context", "Manage profiles (contexts): list, create, use, ...", [
+        "python -m candid context list",
+        "python -m candid context create mle --target-role \"ML Engineer\"",
+        "python -m candid context create ds --from mle   # clone an existing profile",
+        "python -m candid context use mle",
+        "python -m candid context current",
+        "python -m candid --profile mle track list        # run one command under a profile",
+        "python -m candid context export mle --file mle.zip",
+        "python -m candid context import --file mle.zip --name mle2",
+    ])
+    cs = _nested(s)
+    t = _sub(cs, "list", "List profiles (marks the current one).", [
+        "python -m candid context list",
+    ])
+    t = _sub(cs, "create", "Create a profile (optionally cloning another).", [
+        "python -m candid context create mle",
+        "python -m candid context create mle --target-role \"ML Engineer\"",
+        "python -m candid context create ds --from mle",
+    ])
+    t.add_argument("name", help="Profile name (letters, digits, '.', '_' or '-')")
+    t.add_argument("--target-role", default=None, help="Target role for this profile")
+    t.add_argument("--from", dest="from_", metavar="SRC", default=None,
+                   help="Clone from existing profile SRC")
+    t = _sub(cs, "use", "Make a profile the current (default) one.", [
+        "python -m candid context use mle",
+    ])
+    t.add_argument("name")
+    t = _sub(cs, "current", "Print the current profile name.", [
+        "python -m candid context current",
+    ])
+    t = _sub(cs, "rename", "Rename a profile.", [
+        "python -m candid context rename mle ml-eng",
+    ])
+    t.add_argument("old"); t.add_argument("new")
+    t = _sub(cs, "delete", "Delete a profile (its data is removed).", [
+        "python -m candid context delete mle",
+        "python -m candid context delete mle --force   # even if it is the current one",
+    ])
+    t.add_argument("name")
+    t.add_argument("--force", action="store_true",
+                   help="Delete even when it is the current profile")
+    t = _sub(cs, "show", "Show a profile's details.", [
+        "python -m candid context show mle",
+    ])
+    t.add_argument("name")
+    t = _sub(cs, "export", "Export a profile to a zip file.", [
+        "python -m candid context export mle --file mle.zip",
+    ])
+    t.add_argument("name")
+    t.add_argument("--file", required=True, help="Destination zip file")
+    t = _sub(cs, "import", "Import a profile from an export zip.", [
+        "python -m candid context import --file mle.zip",
+        "python -m candid context import --file mle.zip --name mle2",
+    ])
+    t.add_argument("--file", required=True, help="Export zip file")
+    t.add_argument("--name", default=None, help="Profile name (default: from the zip)")
+    s.set_defaults(func=cmd_context)
 
     # match
     s = _sub(sub, "match", "Score a job description against your profile.", [
@@ -564,6 +766,8 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track list",
         "python -m candid track update 3 --status selected_for_interview",
         "python -m candid track stats",
+        "python -m candid --profile mle track list",
+        "python -m candid track list --all-profiles",
     ])
     ts = _nested(s)
     t = _sub(ts, "add", "Add an application to the tracker.", [
@@ -577,12 +781,15 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track list",
         "python -m candid track list --status applied",
         "python -m candid track list --company Acme --json",
+        "python -m candid track list --all-profiles",
     ])
     t.add_argument("--status", default=None); t.add_argument("--company", default=None)
     t.add_argument("--limit", type=int, default=25,
                    help="Max rows in the default view (default: 25)")
     t.add_argument("--json", action="store_true",
                    help="Print the application list as JSON (for scripting)")
+    t.add_argument("--all-profiles", action="store_true",
+                   help="Aggregate across every profile (each row tagged with its profile)")
     t = _sub(ts, "update", "Update an application's status or notes.", [
         "python -m candid track update 3 --status applied",
         "python -m candid track update 3 --status selected_for_interview",
@@ -596,7 +803,10 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("id", type=int)
     t = _sub(ts, "stats", "Funnel stats and rates.", [
         "python -m candid track stats",
+        "python -m candid track stats --all-profiles",
     ])
+    t.add_argument("--all-profiles", action="store_true",
+                   help="Show stats for every profile")
     t = _sub(ts, "search", "Free-text search over company/role/notes.", [
         "python -m candid track search acme",
         "python -m candid track search \"machine learning\"",
@@ -936,6 +1146,10 @@ def _next_command(args, etype: str) -> str:
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
+        if getattr(args, "profile", None):
+            # global --profile flag: scope this run to the named profile
+            # before any command dispatches
+            _profiles().set_request_profile(args.profile)
         args.func(args)
     except SystemExit as e:
         # sys.exit("message") from helpers → friendly error + next step

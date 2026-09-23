@@ -95,9 +95,15 @@
 <header>
   <div><h1>candid <span>dashboard</span></h1>
   <div class="sub">local-only · nothing leaves this machine</div></div>
+  <div style="display:flex;gap:10px;align-items:stretch;flex-wrap:wrap">
+  <div class="profile-card" style="min-width:0">
+    <label for="profileSel" style="color:var(--muted);font-size:12px;display:block;margin-bottom:4px">Profile</label>
+    <select id="profileSel" title="Switch profile — reloads the dashboard for that profile"></select>
+  </div>
   <div class="profile-card" id="profileCard">
     <div class="name" id="profileName">—</div>
     <div class="headline" id="profileHeadline">no profile yet — run <code>python -m candid onboard</code></div>
+  </div>
   </div>
 </header>
 <main>
@@ -190,19 +196,42 @@
 /* candid dashboard UI — vanilla JS, no dependencies, works offline.
    Sections: overview, nudges, apps, jobs, prep, import, lab, salary. */
 const $=id=>document.getElementById(id);
+/* active profile comes from ?profile= in the URL ("" = resolved default).
+   "all" is the aggregate view across every profile. Every API call carries
+   it so each section of the page stays on the same profile. */
+const PROFILE=new URLSearchParams(location.search).get("profile")||"";
+const withProfile=p=>PROFILE?`${p}${p.includes("?")?"&":"?"}profile=${encodeURIComponent(PROFILE)}`:p;
 const api={
-  get:p=>fetch(p).then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;}),
-  post:(p,b)=>fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})})
+  get:p=>fetch(withProfile(p)).then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;}),
+  post:(p,b)=>fetch(withProfile(p),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})})
     .then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;})
 };
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const STATUSES=["saved","applied","selected_for_interview","rejected","offer","withdrawn"];
 const pretty=s=>String(s).replace(/_/g," ");
 
+/* ---------- profile switcher ---------- */
+function renderProfileSwitcher(o){
+  const sel=$("profileSel"); sel.innerHTML="";
+  const mk=(v,label)=>{const op=document.createElement("option");
+    op.value=v; op.textContent=label; return op;};
+  sel.appendChild(mk("all","All profiles (combined)"));
+  for(const n of (o.profiles||[])){
+    const info=(o.profile_info||{})[n]||{};
+    sel.appendChild(mk(n, info.target_role?`${n} — ${info.target_role}`:n));
+  }
+  sel.value=o.active_profile||"";
+  sel.onchange=()=>{location.search="?profile="+encodeURIComponent(sel.value);};
+}
+
 /* ---------- 1. overview: profile card, stat cards, funnel bars ---------- */
 async function loadOverview(){
   const o=await api.get("/api/overview");
-  if(o.profile.has_profile){
+  renderProfileSwitcher(o);
+  if(o.aggregate){
+    $("profileName").textContent="All profiles";
+    $("profileHeadline").textContent="combined view — pick a profile above for details";
+  }else if(o.profile.has_profile){
     $("profileName").textContent=o.profile.name||"Your profile";
     $("profileHeadline").textContent=o.profile.headline||"";
   }
@@ -228,6 +257,17 @@ async function loadOverview(){
     state.statusFilter=r.dataset.status; renderChips(); loadApps();
     document.querySelector("#sec-apps").scrollIntoView({behavior:"smooth"});
   });
+  const oldAgg=$("aggBreakdown"); if(oldAgg) oldAgg.remove();
+  if(o.aggregate&&(o.per_profile||[]).length){
+    const head=["Profile","Total",...STATUSES.map(pretty),"Resp %","IV %","Offer %"];
+    const rows=o.per_profile.map(p=>`<tr><td><b>${esc(p.profile)}</b></td><td>${p.total}</td>`+
+      STATUSES.map(s=>`<td>${p.funnel[s]||0}</td>`).join("")+
+      `<td>${p.response_rate}%</td><td>${p.interview_rate}%</td><td>${p.offer_rate}%</td></tr>`).join("");
+    $("funnelBars").insertAdjacentHTML("afterend",
+      `<div id="aggBreakdown" style="overflow-x:auto;margin-top:10px"><table>`+
+      `<thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead>`+
+      `<tbody>${rows}</tbody></table></div>`);
+  }
   loadNudges(o.nudges); loadProposals();
 }
 
@@ -236,7 +276,8 @@ function loadNudges(nudges){
   if(!nudges.length){w.innerHTML='<div style="color:var(--muted)">All quiet. 🎉</div>';return;}
   for(const n of nudges){
     const d=document.createElement("div"); d.className="nudge";
-    d.innerHTML=`<b>[${pretty(n.kind)}]</b> ${esc(n.message)}<br>→ ${esc(n.action)}<code>${esc(n.command)}</code>`;
+    const tag=n.profile?` <span class="pill saved">${esc(n.profile)}</span>`:"";
+    d.innerHTML=`<b>[${pretty(n.kind)}]</b>${tag} ${esc(n.message)}<br>→ ${esc(n.action)}<code>${esc(n.command)}</code>`;
     w.appendChild(d);
   }
 }
@@ -270,7 +311,8 @@ function sortApps(apps){
 async function loadApps(){
   const q=$("q").value;
   const apps=await api.get(`/api/apps?status=${encodeURIComponent(state.statusFilter)}&q=${encodeURIComponent(q)}`);
-  $("appsHead").innerHTML=COLS.map(([k,label])=>{
+  const cols=apps.some(a=>a.profile!==undefined)?[...COLS,["profile","Profile"]]:COLS;
+  $("appsHead").innerHTML=cols.map(([k,label])=>{
     const arrow=state.sortKey===k?`<span class="arrow">${state.sortDir===1?"▲":"▼"}</span>`:"";
     return `<th data-k="${k}">${label} ${arrow}</th>`;
   }).join("")+"<th>Prep</th><th>Status</th>";
@@ -280,12 +322,12 @@ async function loadApps(){
     loadApps();
   });
   const tb=$("appsBody"); tb.innerHTML="";
-  if(!apps.length){tb.innerHTML='<tr><td colspan="7" style="color:var(--muted)">Nothing here. Curate jobs or add an application from the CLI.</td></tr>';return;}
+  if(!apps.length){tb.innerHTML=`<tr><td colspan="${cols.length+2}" style="color:var(--muted)">Nothing here. Curate jobs or add an application from the CLI.</td></tr>`;return;}
   for(const a of sortApps(apps)){
     const tr=document.createElement("tr");
     tr.innerHTML=`<td>${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td>
       <td><span class="pill ${a.status}">${pretty(a.status)}</span></td>
-      <td>${esc(a.date_updated||"")}</td>
+      <td>${esc(a.date_updated||"")}</td>${a.profile!==undefined?`<td>${esc(a.profile)}</td>`:""}
       <td>${a.prep_pack?'<span class="ok">✓ pack</span>':'<span class="warn">—</span>'}
           <button class="ghost" data-prep="${a.id}" data-c="${esc(a.company)}" data-r="${esc(a.role)}" style="padding:4px 8px;font-size:12px">Prep</button></td>
       <td><select data-id="${a.id}" class="stSel">${STATUSES.map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select></td>`;
