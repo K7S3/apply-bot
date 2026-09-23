@@ -6,6 +6,7 @@ config-driven: edit the constants or data files here to extend behavior.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -35,6 +36,23 @@ def _config_dir() -> Path:
 # --- user data (git-ignored) -------------------------------------------------
 DATA_DIR = _data_dir()
 CONFIG_DIR = _config_dir()
+CONFIG_PATH = CONFIG_DIR / "config.json"
+
+
+def load_config() -> dict:
+    """Load the per-user config file ({} when missing/unreadable)."""
+    try:
+        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_config(cfg: dict) -> None:
+    """Write the per-user config file."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
 PROFILE_PATH = DATA_DIR / "profile.json"
 TRACKER_PATH = DATA_DIR / "tracker.json"
 OFFERS_PATH = DATA_DIR / "offers.json"

@@ -68,8 +68,11 @@ one ends with the exact next command to run.
 
 ## Job-source coverage (honest)
 
-`jobs curate` pulls from **two free, no-login JSON feeds**: Arbeitnow and
-RemoteOK. That's the entire coverage today. It does *not* search the web at
+`jobs curate` pulls from **six free, no-login feeds**: Arbeitnow and
+RemoteOK (JSON) plus four remote-work deep sources — We Work Remotely (RSS),
+Himalayas (API/RSS), Jobspresso (RSS), and Remotive (JSON). Use
+`--remote-only` for strict remote-only curation with timezone-overlap notes
+against your configured home timezone. It does *not* search the web at
 large, read company career pages, or touch anything behind a login — and the
 CLI never claims otherwise. Adding a new public feed is a ~20-line adapter;
 see [docs/adding_sources.md](docs/adding_sources.md).
@@ -138,7 +141,7 @@ proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
 The only network calls candid makes:
-- `jobs curate` → the two public job feeds above.
+- `jobs curate` → the six public job feeds above.
 - `match --jd <url>` → fetches the JD page you pointed it at.
 - `mock ai` → Gemini, **only** for conversational interview dialogue, only
   when you run it.

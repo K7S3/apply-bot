@@ -18,6 +18,13 @@ Pipeline:
 
 Everything is stored locally (tracker JSON + candid_data/jobs.json).
 Fetched listings are treated as *data* — never executed as code.
+
+Remote-work deep sources (batch 20): ``weworkremotely``, ``himalayas``,
+``jobspresso`` and ``remotive`` run by default alongside arbeitnow/remoteok
+(narrow with ``sources=[...]``). Pass ``--remote-only`` for strict
+remote-only filtering plus a remote-friendly keyword boost in ranking, and
+curated notes carry a timezone-overlap annotation (``home_tz`` config,
+default America/New_York).
 """
 
 from __future__ import annotations
@@ -134,6 +141,24 @@ ADAPTERS: dict[str, object] = {
     "arbeitnow": _adapt_arbeitnow,
     "remoteok": _adapt_remoteok,
 }
+
+
+def _all_adapters() -> dict[str, object]:
+    """Full adapter registry including opt-in remote-work deep sources.
+
+    The four batch-20 adapters live in ``candid.jobs_remote_sources`` and are
+    imported lazily here to avoid a circular import (that module imports
+    ``JobsError``/constants from this one). New sources: ``weworkremotely``,
+    ``himalayas``, ``jobspresso``, ``remotive`` — all free public feeds,
+    no key, no login, no scraping.
+    """
+    adapters = dict(ADAPTERS)
+    try:
+        from candid.jobs_remote_sources import REMOTE_ADAPTERS
+        adapters.update(REMOTE_ADAPTERS)
+    except Exception:  # pragma: no cover - adapter module unavailable
+        pass
+    return adapters
 
 
 # ---------------------------------------------------------------------------
@@ -263,15 +288,23 @@ def _fresh_enough(job: dict, days: int | None, now: datetime) -> bool:
 def filter_jobs(jobs: list[dict], role: str, location: str = "",
                 remote: bool = False, level: str | None = None,
                 limit: int = DEFAULT_LIMIT, days: int | None = None,
-                exclude_ids: set[str] | None = None) -> list[dict]:
+                exclude_ids: set[str] | None = None,
+                remote_only: bool = False) -> list[dict]:
     """Filter + rank raw adapter output for the requested role.
 
     ``days``: keep only jobs posted within the last N days (jobs with
     unparseable/missing dates are kept). ``exclude_ids``: skip jobs whose
     ``source_id`` (or ``id``) is in the set (dashboard dismiss support).
+    ``remote_only``: strict remote-only mode — drop anything not explicitly
+    remote (see ``candid.jobs_remote_filters.remote_only_filter``). When
+    ``remote``/``remote_only`` is set, a small keyword boost favors postings
+    with remote-friendly signals ("remote-first", "async", ...) in ranking.
     Cross-source dupes (same normalized title+company) are collapsed,
     keeping the highest-relevance copy.
     """
+    from candid import jobs_remote_filters as RF
+    if remote_only:
+        jobs = RF.remote_only_filter(jobs)
     role_terms = _tokens(role) - {"a", "the", "and", "for"}
     role_phrases = tuple(_role_phrases(role))
     excluded = set(exclude_ids or ())
@@ -288,6 +321,8 @@ def filter_jobs(jobs: list[dict], role: str, location: str = "",
         if not _fresh_enough(job, days, now):
             continue
         rel = _relevance(job, role_terms, role_phrases)
+        if remote or remote_only:
+            rel += RF.remote_keyword_boost(job["title"], job["description"]) * 2.0
         if rel <= 0:
             continue
         key = _norm_key(job.get("title", ""), job.get("company", ""))
@@ -349,35 +384,62 @@ def _tracked_keys() -> set[tuple[str, str]]:
     return {_norm_key(a.get("role", ""), a.get("company", "")) for a in T.list_apps()}
 
 
+def _tz_note(job: dict, home_tz: str) -> str:
+    """One-line timezone-overlap note for a curated job (batch 20).
+
+    Never raises: a missing/odd home timezone degrades to no note.
+    """
+    try:
+        from candid import jobs_tz as TZ
+        enr = TZ.enrich_with_tz(job, home_tz)
+        if enr.get("tz_overlap_hours", 0) > 0 or enr.get("tz_verdict") != "none":
+            return (f" | tz overlap {enr['tz_overlap_hours']}h "
+                    f"({enr['tz_verdict']}, home {home_tz})")
+    except Exception:
+        pass
+    return ""
+
+
 def curate(profile: dict, role: str, location: str = "", remote: bool = False,
            level: str | None = None, limit: int = DEFAULT_LIMIT,
            sources: list[str] | None = None, days: int | None = None,
-           min_score: float = 0) -> dict:
+           min_score: float = 0, remote_only: bool = False,
+           home_tz: str | None = None) -> dict:
     """Run one curation pass.
 
     Returns {fetched, candidates, added, skipped, skipped_low_score, errors}.
     ``days`` filters to postings from the last N days (unparseable dates are
     kept). ``min_score`` gates tracker writes: jobs scoring below it are NOT
     added — they are stashed in jobs.json under ``skipped_low_score`` so a
-    lower threshold can pick them up later.
+    lower threshold can pick them up later. ``remote_only`` enables strict
+    remote-only filtering. ``home_tz`` (default: config/TZ/env) annotates
+    each added job with a timezone-overlap note.
     """
     from candid import tracker as T
     from candid import salary as S
 
-    wanted = sources or list(ADAPTERS)
-    unknown = [s for s in wanted if s not in ADAPTERS]
+    wanted = sources or list(_all_adapters())
+    adapters = _all_adapters()
+    unknown = [s for s in wanted if s not in adapters]
     if unknown:
-        raise JobsError(f"Unknown source(s): {', '.join(unknown)}. Available: {', '.join(ADAPTERS)}")
+        raise JobsError(f"Unknown source(s): {', '.join(unknown)}. Available: {', '.join(adapters)}")
 
     raw: list[dict] = []
     errors: list[str] = []
     for name in wanted:
         try:
-            raw.extend(ADAPTERS[name]())  # type: ignore[operator]
+            raw.extend(adapters[name]())  # type: ignore[operator]
         except JobsError as e:
             errors.append(str(e))
 
-    candidates = filter_jobs(raw, role, location, remote, level, limit, days=days)
+    candidates = filter_jobs(raw, role, location, remote, level, limit, days=days,
+                             remote_only=remote_only)
+    if home_tz is None:
+        try:
+            from candid import jobs_tz as TZ
+            home_tz = TZ.home_tz_from_config()
+        except Exception:
+            home_tz = "America/New_York"
     state = _load_state()
     seen: dict = state.get("seen", {})
     tracked = _tracked_keys()
@@ -400,6 +462,7 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
             })
             continue
         notes = f"[curated {datetime.now().date().isoformat()}] match {scored['score']}/100 — {scored['why']}"
+        notes += _tz_note(job, home_tz)
         if scored["salary"]:
             notes += f" | posted pay ${scored['salary']['low']:,.0f}–${scored['salary']['high']:,.0f}/yr"
             try:
@@ -470,10 +533,12 @@ def get_job_meta(app_id: int) -> dict:
 def refresh(profile: dict, role: str, location: str = "", remote: bool = False,
             level: str | None = None, limit: int = DEFAULT_LIMIT,
             sources: Optional[List[str]] = None, days: int | None = None,
-            min_score: float = 0) -> dict:
+            min_score: float = 0, remote_only: bool = False,
+            home_tz: str | None = None) -> dict:
     """Re-run curation; the result's ``added`` holds only genuinely new jobs."""
     return curate(profile, role, location, remote, level, limit, sources=sources,
-                  days=days, min_score=min_score)
+                  days=days, min_score=min_score, remote_only=remote_only,
+                  home_tz=home_tz)
 
 
 def render_curated(result: dict) -> str:

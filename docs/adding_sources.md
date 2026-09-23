@@ -53,7 +53,21 @@ python3 -m unittest discover -s tests
 
 - `arbeitnow` — Arbeitnow API (general postings, has a `/job-board-api` feed)
 - `remoteok` — RemoteOK API (remote tech jobs)
+- `weworkremotely` — We Work Remotely public RSS (remote-only; programming,
+  devops, design categories)
+- `himalayas` — Himalayas public jobs API with RSS fallback (remote-only)
+- `jobspresso` — Jobspresso public RSS (remote jobs)
+- `remotive` — Remotive public API (remote-only, no key)
 
-That's it. Two public feeds, not the whole internet. Company career pages
+Six public feeds, still not the whole internet. Company career pages
 and aggregators that require login/keys are out of scope by design — the
 README says so, and the CLI should never imply otherwise.
+
+## Remote-only curation
+
+`jobs curate --remote-only` applies strict remote-only filtering (drops
+anything not explicitly remote) and adds a small remote-friendly keyword
+boost to ranking. Each curated note carries a timezone-overlap annotation,
+e.g. `tz overlap 3h (workable, home America/New_York)`, computed against
+your `home_timezone` config (falls back to `TZ` env, then
+America/New_York). See `candid/jobs_tz.py` for the inference rules.

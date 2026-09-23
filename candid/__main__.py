@@ -405,7 +405,9 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    remote_only=getattr(a, "remote_only", False),
+                    home_tz=getattr(a, "home_tz", None))
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -814,9 +816,15 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--role", required=True, help="Wanted title, e.g. \"Data Scientist\"")
     t.add_argument("--location", default="")
     t.add_argument("--remote", action="store_true")
+    t.add_argument("--remote-only", action="store_true",
+                   help="Strict remote-only: drop anything not explicitly remote, "
+                        "boost remote-friendly postings in ranking")
+    t.add_argument("--home-tz", default=None,
+                   help="Your timezone for overlap notes (default: home_timezone config)")
     t.add_argument("--level", default=None, help="entry|junior|mid|senior|lead|staff|principal")
     t.add_argument("--limit", type=int, default=15)
-    t.add_argument("--sources", nargs="*", default=None, help="subset of: arbeitnow remoteok")
+    t.add_argument("--sources", nargs="*", default=None,
+                   help="subset of: arbeitnow remoteok weworkremotely himalayas jobspresso remotive")
     t.add_argument("--days", type=int, default=None,
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
@@ -828,9 +836,15 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--role", required=True)
     t.add_argument("--location", default="")
     t.add_argument("--remote", action="store_true")
+    t.add_argument("--remote-only", action="store_true",
+                   help="Strict remote-only: drop anything not explicitly remote, "
+                        "boost remote-friendly postings in ranking")
+    t.add_argument("--home-tz", default=None,
+                   help="Your timezone for overlap notes (default: home_timezone config)")
     t.add_argument("--level", default=None)
     t.add_argument("--limit", type=int, default=15)
-    t.add_argument("--sources", nargs="*", default=None)
+    t.add_argument("--sources", nargs="*", default=None,
+                   help="subset of: arbeitnow remoteok weworkremotely himalayas jobspresso remotive")
     t.add_argument("--days", type=int, default=None,
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
