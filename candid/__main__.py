@@ -40,7 +40,8 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
-    "offer": ["add", "list", "compare", "export"],
+    "offer": ["add", "list", "compare", "export", "scenario",
+              "compare-scenarios", "breakeven"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -308,6 +309,65 @@ def cmd_offer(a):
         path = O.export_comparison(O.list_offers(),
                                    path=a.out or None)
         print(f"Offer comparison exported to {path}")
+    elif a.what == "scenario":
+        from candid import scenarios as S
+        offer = S.get_offer(a.company) if a.company else S.top_offer()
+        proj = S.project_comp(offer, years=a.years,
+                              growth=S.parse_growth(a.growth or a.preset),
+                              raise_pct=a.raise_pct,
+                              bonus_payout=a.payout, discount=a.discount)
+        if a.json:
+            import json as _json
+            print(_json.dumps(S.as_jsonable(proj), indent=2))
+        else:
+            print(S.render_projection(proj))
+        if a.out:
+            p = S.export_projection_md(proj, path=a.out)
+            print(f"Scenario exported to {p}")
+    elif a.what == "compare-scenarios":
+        from candid import scenarios as S
+        matrix = S.compare_matrix(O.list_offers(), growth_specs=a.growths,
+                                  years=a.years, raise_pct=a.raise_pct,
+                                  bonus_payout=a.payout, discount=a.discount)
+        if a.json:
+            import json as _json
+            print(_json.dumps(S.as_jsonable(matrix), indent=2))
+        else:
+            print(S.render_matrix(matrix))
+        if a.export:
+            p = S.export_matrix_md(matrix, path=a.out or None)
+            print(f"Scenario comparison exported to {p}")
+    elif a.what == "breakeven":
+        from candid import scenarios as S
+        oa, ob = S.get_offer(a.a), S.get_offer(a.b)
+        kw = dict(years=a.years, raise_pct=a.raise_pct,
+                  bonus_payout=a.payout)
+        pa = S.project_comp(oa, growth=S.parse_growth(a.growth), **kw)
+        pb = S.project_comp(ob, growth=S.parse_growth(a.growth), **kw)
+        g = S.breakeven_growth(oa, ob, **kw)
+        lines = [
+            f"Break-even: {oa.get('company')} vs {ob.get('company')}",
+            f"At {S.parse_growth(a.growth) * 100:.1f}% stock growth, "
+            f"{ob.get('company')} catches {oa.get('company')} in cumulative "
+            f"pre-tax comp in year "
+            f"{S.breakeven_year(pb, pa) or 'never (within horizon)'}",
+        ]
+        if g is None:
+            lines.append("No breakeven growth rate: one offer wins at every "
+                         "plausible growth rate (-50% to +100%/yr).")
+        else:
+            lines.append(
+                f"Breakeven growth rate: {g * 100:.1f}%/yr - above this, "
+                f"{ob.get('company')}'s 4y total beats {oa.get('company')}'s.")
+        lines.append("")
+        sens = S.sensitivity(oa, growth=S.parse_growth(a.growth), **kw,
+                             discount=a.discount)
+        lines.append(f"Sensitivity for {oa.get('company')} "
+                     "(assumption ranked by NPV swing):")
+        for r in sens:
+            lines.append(f"  {r['assumption']:<13} NPV moves "
+                         f"${abs(r['swing']):,.0f} across the tested range")
+        print("\n".join(lines))
 
 
 def cmd_negotiate(a):
@@ -689,6 +749,49 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid offer export --out offers.md",
     ])
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
+    t = _sub(os_, "scenario", "What-if total-comp projection for one offer.", [
+        "python -m candid offer scenario --company Acme",
+        "python -m candid offer scenario --company Acme --preset bull --years 4",
+        "python -m candid offer scenario --company Acme --growth 0.12 --raise 0.04 --json",
+    ])
+    t.add_argument("--company", default="", help="Offer company (default: top offer by normalized $/yr)")
+    t.add_argument("--growth", default="", help="Annual stock growth: decimal (0.1), percent (10%%), or preset")
+    t.add_argument("--preset", default="", choices=["bear", "flat", "base", "bull"],
+                   help="Named growth assumption (default: base = 8%%/yr)")
+    t.add_argument("--years", type=int, default=4)
+    t.add_argument("--raise", dest="raise_pct", type=float, default=0.03,
+                   help="Annual base raise, decimal (default 0.03)")
+    t.add_argument("--payout", type=float, default=1.0,
+                   help="Bonus payout as fraction of target (default 1.0)")
+    t.add_argument("--discount", type=float, default=0.05,
+                   help="Discount rate for NPV, decimal (default 0.05)")
+    t.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
+    t.add_argument("--out", default="", help="Also export the projection as markdown to this path")
+    t = _sub(os_, "compare-scenarios", "Offers x growth-scenarios comparison matrix.", [
+        "python -m candid offer compare-scenarios",
+        "python -m candid offer compare-scenarios --growths bear,flat,base,bull --export",
+        "python -m candid offer compare-scenarios --growths 0,0.1,0.2 --json",
+    ])
+    t.add_argument("--growths", default="bear,flat,base,bull",
+                   help="Comma-separated growth scenarios (presets, decimals, or percents)")
+    t.add_argument("--years", type=int, default=4)
+    t.add_argument("--raise", dest="raise_pct", type=float, default=0.03)
+    t.add_argument("--payout", type=float, default=1.0)
+    t.add_argument("--discount", type=float, default=0.05)
+    t.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
+    t.add_argument("--export", action="store_true", help="Export the matrix as markdown")
+    t.add_argument("--out", default="", help="Export path (default: candid_data/offer_comparisons/<date>_offer_scenarios.md)")
+    t = _sub(os_, "breakeven", "When does offer B catch offer A? Plus sensitivity.", [
+        "python -m candid offer breakeven --a Acme --b Globex",
+        "python -m candid offer breakeven --a Acme --b Globex --growth bull",
+    ])
+    t.add_argument("--a", required=True, help="First offer company (the one to beat)")
+    t.add_argument("--b", required=True, help="Second offer company (the challenger)")
+    t.add_argument("--growth", default="base", help="Growth assumption for the year analysis")
+    t.add_argument("--years", type=int, default=4)
+    t.add_argument("--raise", dest="raise_pct", type=float, default=0.03)
+    t.add_argument("--payout", type=float, default=1.0)
+    t.add_argument("--discount", type=float, default=0.05)
     s.set_defaults(func=cmd_offer)
 
     # negotiate

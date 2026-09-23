@@ -60,7 +60,7 @@ one ends with the exact next command to run.
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
-| `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
+| `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). The scenario modeler adds what-if stock-growth presets, year-by-year 4-year projections, break-even and sensitivity analysis, and an offers-x-scenarios matrix (`offer scenario`, `offer compare-scenarios`, `offer breakeven`; see `docs/offer_scenarios.md`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
@@ -157,13 +157,16 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+287 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
 salary (LCA import variants, title aggregation), judge verdicts (incl.
 infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
-STAR prompts), offers (sign-on amortization, markdown export), negotiation
+STAR prompts), offers (sign-on amortization, markdown export) and offer
+scenarios (growth presets, 4-year projections, vesting/cliff schedules,
+after-tax estimates, NPV, break-even, sensitivity, comparison matrix),
+negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
