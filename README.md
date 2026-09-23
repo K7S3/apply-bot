@@ -56,7 +56,7 @@ one ends with the exact next command to run.
 | `match` | Score any JD 0–100 (skills / seniority / domain / title fit) with a GO / CONDITIONAL / NO-GO verdict. Section-weighted skill extraction, explicit "N+ years" handling, per-skill JD evidence, and "how to close it" pointers for missing must-haves. Accepts text, a file, a URL, or stdin. `--json` for scripting. |
 | `tailor` | Grounded résumé + cover letter in 4 tones and 2 lengths. Reorders *your* bullets; never invents experience. Now ends with an **ATS keyword check** (covered vs missing JD keywords) and a **what-changed** summary. |
 | `track` | Application tracker: add / list / update / stats / search / export-csv, with funnel + response/interview/offer rates and per-status next-action hints. Re-adding an existing company+role returns the existing record instead of duplicating. |
-| `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
+| `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, `--stage` / `--min-salary` / `--tech-only` board-aware filters, cross-source dedupe (richest copy wins, `also_seen_on` recorded), `freshness` new/reposted/stale report, saved searches (`search-save`/`search-list`/`search-run`). See [coverage](#job-source-coverage-honest) — ten free boards, nothing behind a login. |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
@@ -68,11 +68,37 @@ one ends with the exact next command to run.
 
 ## Job-source coverage (honest)
 
-`jobs curate` pulls from **two free, no-login JSON feeds**: Arbeitnow and
-RemoteOK. That's the entire coverage today. It does *not* search the web at
-large, read company career pages, or touch anything behind a login — and the
-CLI never claims otherwise. Adding a new public feed is a ~20-line adapter;
-see [docs/adding_sources.md](docs/adding_sources.md).
+`jobs curate` pulls from **ten free, no-login feeds** (batch-14). Yield per
+board was verified 2026-09-22; honest per-board notes below.
+
+| Board | Key | Coverage notes |
+|---|---|---|
+| Arbeitnow | `arbeitnow` | Live. Free JSON API, general postings, EU-skewed. |
+| RemoteOK | `remoteok` | Live. Free JSON API, remote-only tech jobs. |
+| Wellfound | `wellfound` | Startup jobs. No clean public JSON endpoint (verified 2026-09-22); adapter parses embedded page data when present, currently returns no listings rather than inventing any. |
+| Built In | `builtin` | Startup/tech-hub jobs. No public JSON API (probed 2026-09-22); adapter parses the public server-rendered `/jobs` page (JSON-LD + job cards); live-verified with 26 listings. Company stage/funding is not on the listing page, so `--stage` passes Built In listings through. |
+| Dice | `dice` | No public no-login search endpoint exists (API shut down ~2017, RSS gone). Registered as a documented no-op returning zero listings. |
+| Authentic Jobs | `authenticjobs` | Public RSS feed, design/dev roles. Live-verified (10 listings); feed caps at the 10 most recent, no salary data. |
+| Remotive | `remotive` | Public JSON API, remote-only roles; salary captured verbatim. Live-verified (18 jobs for a sample query). |
+| We Work Remotely | `weworkremotely` | Public RSS feeds (programming, devops, product). Live-verified (56 items); no salary data, remote-only. |
+| 4 Day Week | `fourdayweek` | Public JSON feed (`api/jobs`, paginated), 4-day-week roles. Live-verified (100 jobs fetched); no descriptions or salary in the feed. |
+| Remote.co | `remoteco` | Public RSS feed URL exists, but the server silently drops automated requests (verified 2026-09-22) — adapter returns `[]` when unreachable rather than failing the run. |
+
+It does *not* search the web at large, read company career pages, or touch
+anything behind a login — and the CLI never claims otherwise. Adding a new
+public feed is a ~20-line adapter; see
+[docs/adding_sources.md](docs/adding_sources.md).
+
+Cross-board intelligence: every run dedupes across boards by normalized
+title+company, keeping the richest listing (has `salary_text` wins, then
+longer description) and recording merged boards in `also_seen_on`.
+`jobs freshness` reports new-since-last-run, reposted (same posting under a
+new source id), and stale (not seen in 30 days) postings. `jobs curate`
+accepts board-aware filters `--stage`, `--min-salary`, and `--tech-only`
+(each documented honestly in `--help`: they only apply where adapters
+supply the metadata, and jobs without it pass through untouched). Repeated
+searches can be saved and re-run with `jobs search-save` / `search-list` /
+`search-run`.
 
 ## Salary data: sources and limits
 
@@ -138,7 +164,7 @@ proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
 The only network calls candid makes:
-- `jobs curate` → the two public job feeds above.
+- `jobs curate` → the ten public job boards listed above.
 - `match --jd <url>` → fetches the JD page you pointed it at.
 - `mock ai` → Gemini, **only** for conversational interview dialogue, only
   when you run it.

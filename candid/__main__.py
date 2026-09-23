@@ -45,7 +45,8 @@ SUBCOMMANDS = {
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
-    "jobs": ["curate", "refresh", "list"],
+    "jobs": ["curate", "refresh", "list", "freshness",
+             "search-save", "search-list", "search-run"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
 }
@@ -124,6 +125,29 @@ def _nested(parser, dest="what"):
     return parser.add_subparsers(dest=dest, required=True,
                                  title="subcommands", metavar="<subcommand>",
                                  parser_class=CandidParser)
+
+
+def _add_curate_board_flags(t):
+    """Board-aware curate filters, shared by curate / refresh / search-save.
+
+    Each flag is opt-in and only applies where adapters supply the metadata;
+    jobs without it pass through untouched:
+    - --stage: startup stage (e.g. seed, series-a); matches extras.stage
+      from the Wellfound / Built In adapters only.
+    - --min-salary: annualized floor in dollars, parsed from salary_text;
+      unparseable/missing salary data is not filtered out.
+    - --tech-only: title must contain a tech keyword (see TECH_KEYWORDS);
+      this one always applies, since titles are always available.
+    """
+    t.add_argument("--stage", default=None,
+                   help="Startup stage, e.g. seed, series-a "
+                        "(only filters where adapters report extras.stage)")
+    t.add_argument("--min-salary", type=float, default=None,
+                   help="Annualized salary floor in dollars, e.g. 150000 "
+                        "(only filters where salary_text parses)")
+    t.add_argument("--tech-only", action="store_true",
+                   help="Keep only titles with a tech keyword "
+                        "(see jobs.TECH_KEYWORDS)")
 
 
 JD_HELP = ("JD text, file path, URL, or - to read the JD from stdin "
@@ -405,7 +429,36 @@ def cmd_jobs(a):
                     remote=a.remote, level=a.level, limit=a.limit,
                     sources=a.sources or None,
                     days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+                    min_score=getattr(a, "min_score", 0) or 0,
+                    stage=getattr(a, "stage", None),
+                    min_salary=getattr(a, "min_salary", None),
+                    tech_only=getattr(a, "tech_only", False))
+        print(J.render_curated(result))
+    elif a.what == "freshness":
+        rep = J.freshness_report()
+        if getattr(a, "json", False):
+            print(json.dumps(rep, indent=2, default=str))
+        else:
+            print(J.render_freshness(rep))
+    elif a.what == "search-save":
+        sources = [s.strip() for s in (a.sources or "").split(",")
+                   if s.strip()] or None
+        J.save_search(a.name, role=a.role, location=a.location or "",
+                      remote=a.remote, sources=sources, level=a.level,
+                      days=getattr(a, "days", None),
+                      min_score=getattr(a, "min_score", 0) or 0,
+                      stage=getattr(a, "stage", None),
+                      min_salary=getattr(a, "min_salary", None),
+                      tech_only=getattr(a, "tech_only", False))
+        print(f"✅ Saved search '{a.name}'. Run it with:\n"
+              f"  python -m candid jobs search-run {a.name}")
+    elif a.what == "search-list":
+        if getattr(a, "json", False):
+            print(json.dumps(J.list_searches(), indent=2, default=str))
+        else:
+            print(J.render_searches(J.list_searches()))
+    elif a.what == "search-run":
+        result = J.run_search(a.name, _profile())
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -804,12 +857,15 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid jobs curate --role \"Data Scientist\" --location \"New York\" --remote",
         "python -m candid jobs refresh --role \"ML Engineer\" --limit 10",
         "python -m candid jobs list",
+        "python -m candid jobs freshness",
+        "python -m candid jobs search-save --name ds-nyc --role \"Data Scientist\" --location \"New York\"",
     ])
     js = _nested(s)
     t = _sub(js, "curate", "Discover jobs, score them, save the best as 'saved'.", [
         "python -m candid jobs curate --role \"Data Scientist\" --remote",
         "python -m candid jobs curate --role \"Data Scientist\" --location \"New York\" --level senior --limit 10",
         "python -m candid jobs curate --role \"Data Scientist\" --sources arbeitnow",
+        "python -m candid jobs curate --role \"ML Engineer\" --remote --tech-only --min-salary 150000",
     ])
     t.add_argument("--role", required=True, help="Wanted title, e.g. \"Data Scientist\"")
     t.add_argument("--location", default="")
@@ -821,6 +877,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    _add_curate_board_flags(t)
     t = _sub(js, "refresh", "Re-run curation; report only new jobs.", [
         "python -m candid jobs refresh --role \"Data Scientist\"",
         "python -m candid jobs refresh --role \"ML Engineer\" --remote --limit 10",
@@ -835,12 +892,43 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
                    help="Only save to tracker when match score >= N (default 0 = off)")
+    _add_curate_board_flags(t)
     t = _sub(js, "list", "Show the curated pipeline (status=saved).", [
         "python -m candid jobs list",
         "python -m candid jobs list --json   # machine-readable output",
     ])
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
+    t = _sub(js, "freshness", "New / reposted / stale postings across runs.", [
+        "python -m candid jobs freshness",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the freshness report as JSON (for scripting)")
+    t = _sub(js, "search-save", "Save a curation search for re-running later.", [
+        "python -m candid jobs search-save --name ds-nyc --role \"Data Scientist\" --location \"New York\"",
+        "python -m candid jobs search-save --name ml-remote --role \"ML Engineer\" --remote --sources remoteok,arbeitnow",
+    ])
+    t.add_argument("--name", required=True, help="Name for the saved search")
+    t.add_argument("--role", required=True, help="Wanted title, e.g. \"Data Scientist\"")
+    t.add_argument("--location", default="")
+    t.add_argument("--remote", action="store_true")
+    t.add_argument("--sources", default=None,
+                   help="Comma-separated subset of adapters, e.g. remoteok,arbeitnow")
+    t.add_argument("--level", default=None, help="entry|junior|mid|senior|lead|staff|principal")
+    t.add_argument("--days", type=int, default=None,
+                   help="Only postings from the last N days (unparseable dates are kept)")
+    t.add_argument("--min-score", type=float, default=0,
+                   help="Only save to tracker when match score >= N (default 0 = off)")
+    _add_curate_board_flags(t)
+    t = _sub(js, "search-list", "List saved searches.", [
+        "python -m candid jobs search-list",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print saved searches as JSON (for scripting)")
+    t = _sub(js, "search-run", "Re-run a saved search.", [
+        "python -m candid jobs search-run ml-remote",
+    ])
+    t.add_argument("name", help="Saved search name (see: jobs search-list)")
     s.set_defaults(func=cmd_jobs)
 
     # dashboard
