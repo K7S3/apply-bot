@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "plan", "dashboard", "import", "gmail", "linkedin",
 ]
 
 SUBCOMMANDS = {
@@ -46,6 +46,9 @@ SUBCOMMANDS = {
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
+    "plan": ["new", "list", "show", "week", "check", "uncheck",
+             "check-learning", "progress", "stakeholders", "metrics",
+             "learning", "agenda", "review", "export", "remove"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
 }
@@ -55,7 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "PlanError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "PlanError": "python -m candid plan --help",
 }
 
 
@@ -267,6 +271,68 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+
+
+def cmd_plan(a):
+    from candid import plan as P
+    if a.what == "new":
+        try:
+            profile = _profile()
+        except Exception:
+            profile = None
+        focus = [f.strip() for f in (a.focus or "").split(";") if f.strip()]
+        plan = P.create(a.company, a.role, level=a.level or "mid",
+                        start_date=a.start_date or None,
+                        name=a.name or "", profile=profile,
+                        focus_areas=focus, family=a.family or None)
+        n = sum(len(ph["goals"]) for ph in plan["phases"])
+        print(f"Created 90-day plan #{plan['id']}: {plan['role']} @ {plan['company']}")
+        print(f"Template: {plan['role_label']} | Level: {plan['level']} | "
+              f"Start: {plan['start_date']} | {n} milestones")
+        if profile is None:
+            print("(Tip: run `python -m candid onboard` first for a "
+                  "personalized plan.)")
+    elif a.what == "list":
+        plans = P.list_plans()
+        if a.json:
+            print(json.dumps(plans, indent=2, default=str))
+        else:
+            print(P.render_list(plans))
+    elif a.what == "show":
+        plan = P.get_plan(a.id)
+        if a.json:
+            print(json.dumps(plan, indent=2, default=str))
+        else:
+            print(P.summarize(plan))
+    elif a.what == "week":
+        print(P.render_week(P.week_view(a.id, a.week)))
+    elif a.what == "check":
+        P.check(a.id, a.goal_id)
+        print(f"Marked {a.goal_id} done in plan #{a.id}.")
+    elif a.what == "uncheck":
+        P.uncheck(a.id, a.goal_id)
+        print(f"Reopened {a.goal_id} in plan #{a.id}.")
+    elif a.what == "check-learning":
+        P.check_learning(a.id, a.learning_id)
+        print(f"Marked learning {a.learning_id} done in plan #{a.id}.")
+    elif a.what == "progress":
+        print(P.render_progress(P.progress(a.id)))
+    elif a.what == "stakeholders":
+        print(P.render_stakeholders(P.get_plan(a.id)))
+    elif a.what == "metrics":
+        print(P.render_metrics(P.get_plan(a.id)))
+    elif a.what == "learning":
+        print(P.render_learning(P.get_plan(a.id)))
+    elif a.what == "agenda":
+        print(P.agenda(P.get_plan(a.id), kind=a.kind))
+    elif a.what == "review":
+        print(P.review_draft(P.get_plan(a.id)))
+    elif a.what == "export":
+        dest = P.export(a.id, format=a.format)
+        print(f"Exported plan #{a.id} to {dest}")
+    elif a.what == "remove":
+        P.remove(a.id)
+        print(f"Removed 90-day plan #{a.id}.")
 
 
 def cmd_prep(a):
@@ -607,6 +673,95 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("dest", help="Destination CSV file path")
     s.set_defaults(func=cmd_track)
+
+    # plan
+    s = _sub(sub, "plan", "30-60-90 day onboarding plan generator.", [
+        "python -m candid plan new --company Acme --role \"Backend Engineer\"",
+        "python -m candid plan week 1 2",
+        "python -m candid plan check 1 g3",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "new", "Create a 90-day plan from a role-specific template.", [
+        "python -m candid plan new --company Acme --role \"Backend Engineer\"",
+        "python -m candid plan new --company Acme --role \"Data Scientist\" --level senior --start-date 2026-10-05",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--level", default="mid",
+                   help="junior | mid | senior | staff (default: mid)")
+    t.add_argument("--start-date", default="",
+                   help="Start date YYYY-MM-DD (default: today)")
+    t.add_argument("--name", default="",
+                   help="Your name (used in agendas and exports)")
+    t.add_argument("--focus", default="",
+                   help="Semicolon-separated focus areas, added as custom goals")
+    t.add_argument("--family", default="",
+                   help="Override the auto-detected role family")
+    t = _sub(ps, "list", "List 90-day plans.", [
+        "python -m candid plan list",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print plans as JSON (for scripting)")
+    t = _sub(ps, "show", "Show a plan's milestones and progress.", [
+        "python -m candid plan show 1",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "week", "Weekly focus sheet with reflection prompts.", [
+        "python -m candid plan week 1 2",
+    ])
+    t.add_argument("id", type=int); t.add_argument("week", type=int,
+                   help="Week number 1-12")
+    t = _sub(ps, "check", "Mark a milestone done.", [
+        "python -m candid plan check 1 g3",
+    ])
+    t.add_argument("id", type=int); t.add_argument("goal_id",
+                   help="Goal id from `plan show` (e.g. g3)")
+    t = _sub(ps, "uncheck", "Reopen a milestone.", [
+        "python -m candid plan uncheck 1 g3",
+    ])
+    t.add_argument("id", type=int); t.add_argument("goal_id")
+    t = _sub(ps, "check-learning", "Mark a learning objective complete.", [
+        "python -m candid plan check-learning 1 l2",
+    ])
+    t.add_argument("id", type=int); t.add_argument("learning_id")
+    t = _sub(ps, "progress", "Completion stats overall and per phase.", [
+        "python -m candid plan progress 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ps, "stakeholders", "Stakeholder map with first-meeting questions.", [
+        "python -m candid plan stakeholders 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ps, "metrics", "Draft success metrics to align on with your manager.", [
+        "python -m candid plan metrics 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ps, "learning", "Learning objectives with resources.", [
+        "python -m candid plan learning 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ps, "agenda", "Draft a 1:1 agenda (first / weekly / monthly).", [
+        "python -m candid plan agenda 1",
+        "python -m candid plan agenda 1 --kind weekly",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--kind", default="first",
+                   choices=["first", "weekly", "monthly"])
+    t = _sub(ps, "review", "Draft a 90-day self-review from completed milestones.", [
+        "python -m candid plan review 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ps, "export", "Export the plan to Markdown or HTML.", [
+        "python -m candid plan export 1",
+        "python -m candid plan export 1 --format html",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--format", default="md", choices=["md", "html"])
+    t = _sub(ps, "remove", "Delete a 90-day plan.", [
+        "python -m candid plan remove 1",
+    ])
+    t.add_argument("id", type=int)
+    s.set_defaults(func=cmd_plan)
 
     # prep
     s = _sub(sub, "prep", "Build an interview prep pack.", [

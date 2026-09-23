@@ -42,6 +42,8 @@ SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
 GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
+PLANS_PATH = DATA_DIR / "plans.json"
+PLAN_EXPORTS_DIR = DATA_DIR / "plan_exports"
 
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"
@@ -144,7 +146,7 @@ def skill_regex(alias: str) -> "re.Pattern[str]":
 
 def ensure_data_dirs() -> None:
     """Create the git-ignored user data directories if missing."""
-    for d in (DATA_DIR, PREP_PACKS_DIR, TAILOR_DIR):
+    for d in (DATA_DIR, PREP_PACKS_DIR, TAILOR_DIR, PLAN_EXPORTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 

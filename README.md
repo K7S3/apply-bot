@@ -62,6 +62,7 @@ one ends with the exact next command to run.
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
+| `plan` | 30-60-90 day onboarding plan generator: role-specific templates (backend, frontend, mobile, ML, data, devops, EM, PM, design, general) with level-aware expectations, learning goals with resources, stakeholder maps with first-meeting questions, draft success metrics, weekly check-ins, milestone tracking, 1:1 agendas, a 90-day self-review draft, and Markdown/HTML export. See [docs/plan_90day.md](docs/plan_90day.md). |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
@@ -157,7 +158,7 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+290 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
@@ -167,9 +168,12 @@ STAR prompts), offers (sign-on amortization, markdown export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
-errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
+errors), the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
 `/api/import` multipart upload, import guides, and an HTML↔API
-cross-check). The mock judge is also verified by running every problem's
+cross-check), and the 30-60-90 day plan generator (family detection,
+template integrity, level modifiers, milestone tracking, week views,
+stakeholder/learning/metrics views, agendas, review drafts, md/html
+export, and CLI wiring). The mock judge is also verified by running every problem's
 reference solution through it (`python scripts/seed_problems.py --verify`).
 
 ## Legacy automation
