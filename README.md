@@ -34,7 +34,12 @@ python -m candid tailor resume --jd samples/candid/sample_jd.txt \
 python -m candid tailor cover-letter --jd samples/candid/sample_jd.txt \
     --company "Acme Corp" --role "Senior Data Scientist"
 
-# 4. Track it, then build an interview prep pack when you're selected
+# 4. Turn the gaps into a weekend project idea (ML-role JD: the sample
+#    resume is light on LLM/cloud skills, so the ideator has real gaps)
+python -m candid project gaps --jd samples/candid/sample_jd_ml.txt
+python -m candid project ideas --jd samples/candid/sample_jd_ml.txt --n 3
+
+# 5. Track it, then build an interview prep pack when you're selected
 python -m candid track add --company "Acme Corp" --role "Senior Data Scientist"
 python -m candid track update 1 --status selected_for_interview
 python -m candid prep --company "Capital One" --role "Senior Data Scientist" --app-id 1
@@ -70,6 +75,7 @@ one ends with the exact next command to run.
 | `benefits` | Benefits comparator: health-plan cost at a spend level, scenario-weighted healthcare cost, 401(k) match math, vesting schedules, PTO valuation, ESPP gain, HSA/FSA value, commuter benefits, paid-leave valuation, stipends, whole-package normalization (`normalize`) and head-to-head package comparison (`compare`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
+| `project` | Side-project ideator: rank the JD skills missing from your résumé, then get concrete weekend-scoped project ideas that fill exactly those gaps (20-idea curated library, deterministic scoring), JD-tuned tech-stack suggestions, per-weekend milestones with done-criteria, effort estimates mapped onto a calendar, free learning resources, one-command repo scaffolds, a project ledger, and STAR portfolio stories. See [docs/projects.md](docs/projects.md). |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
 

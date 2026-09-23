@@ -18,6 +18,8 @@ Modules:
     jobs      curated job discovery → tracker pipeline
     patterns  coding patterns curriculum: taxonomy, gap-driven Blind-75-style
               study plans, spaced repetition, drills, mastery, cheat sheets
+    projects  side-project ideator: resume-gap ideas, weekend scopes,
+              stack suggestions, estimates, scaffolds, portfolio stories
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.
@@ -28,4 +30,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

@@ -1,0 +1,22 @@
+Senior ML Engineer — Acme AI (fictional company)
+New York, NY · Hybrid
+
+About the role:
+We're hiring a Senior ML Engineer to ship LLM-powered features. You'll build
+RAG pipelines over our docs corpus, evaluate prompts with statistical rigor,
+and own the MLOps loop from training to monitored deployment.
+
+Requirements:
+- 4+ years of Python and machine learning in production
+- Hands-on LLM experience: RAG, prompt evaluation, fine-tuning
+- MLOps: Docker, Kubernetes, CI/CD for model deployment
+- AWS for training and serving infrastructure
+- Strong SQL over large event datasets
+
+Nice to have:
+- Recommendation systems experience
+- Go for high-throughput services
+
+Compensation:
+The salary range for this role is $170,000 - $210,000 per year, plus annual
+bonus and equity. Benefits include health, dental, 401(k) match.

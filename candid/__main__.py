@@ -62,6 +62,7 @@ _EXPECTED_ERRORS = {
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "PatternsError",
+    "ProjectError",
     "ValueError",
 }
 
@@ -81,6 +82,7 @@ _NEXT_COMMAND = {
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
+    "ProjectError": "python -m candid project --help",
 }
 
 
@@ -633,6 +635,79 @@ def cmd_jobs(a):
 def cmd_dashboard(a):
     from candid import dashboard as D
     D.serve(port=a.port, open_browser=not a.no_browser)
+
+
+def _project_jd(a) -> str:
+    """Optional JD for project subcommands; empty string when not given."""
+    if not getattr(a, "jd", None) and not getattr(a, "app_id", None):
+        return ""
+    return _jd_text(a)
+
+
+def cmd_project(a):
+    from candid import projects as PR
+    what = a.what
+    if what == "gaps":
+        jd = _jd_text(a)
+        analysis = PR.analyze_gaps(_profile(), jd,
+                                   existing=PR.list_projects())
+        print(PR.render_gaps(analysis))
+    elif what in ("ideas", "rank"):
+        jd = _project_jd(a)
+        ideas = PR.generate_ideas(_profile(), jd_text=jd, role=a.role or "",
+                                  n=a.n)
+        if a.json:
+            print(json.dumps(ideas, indent=2, default=str))
+        else:
+            print(PR.render_ideas(ideas))
+    elif what == "scope":
+        print(PR.render_scope(PR.weekend_scope(a.idea_id)))
+    elif what == "stack":
+        jd = _project_jd(a)
+        print(PR.render_stack(PR.suggest_stack(a.idea_id, jd_text=jd)))
+    elif what == "estimate":
+        e = PR.estimate(a.idea_id, _profile(),
+                        hours_per_weekend=a.hours_per_weekend,
+                        start=a.start or "")
+        print(PR.render_estimate(e))
+    elif what == "learn":
+        t = PR.get_idea(a.idea_id)
+        print(PR.render_learn(PR.learning_plan(a.idea_id), t["title"]))
+    elif what == "scaffold":
+        path = PR.scaffold(a.idea_id, a.dir)
+        print(f"Scaffolded '{a.idea_id}' at {path}")
+        print("Next: `cd` in, read the README milestones, and start weekend 1.")
+    elif what == "story":
+        print(PR.render_story(PR.build_story(a.ref)))
+    elif what == "add":
+        skills = [s.strip() for s in (a.skills or "").split(",")]
+        rec = PR.add_project(a.name, skills, status=a.status,
+                             url=a.url or "", description=a.desc or "")
+        print(f"Added '{rec['name']}' [{rec['status']}] "
+              f"({', '.join(rec['skills']) or 'no skills'}).")
+    elif what == "list":
+        projects = PR.list_projects(status=a.status)
+        if a.json:
+            print(json.dumps(projects, indent=2, default=str))
+        else:
+            print(PR.render_ledger(projects))
+    elif what == "rm":
+        rec = PR.remove_project(a.name)
+        print(f"Removed '{rec['name']}' from the ledger.")
+    elif what == "done":
+        rec = PR.update_project(a.name, status="done")
+        print(f"Marked '{rec['name']}' done. It now covers its skills in "
+              "gap analysis - nice work.")
+    elif what == "browse":
+        ideas = PR.list_ideas()
+        if a.json:
+            print(json.dumps(ideas, indent=2, default=str))
+        else:
+            for i in ideas:
+                print(f"- {i['id']}: {i['title']} "
+                      f"({', '.join(i['skills'])}; ~{i['weekends']} wknd)")
+    else:  # pragma: no cover - argparse required=True guards this
+        sys.exit(f"Unknown project subcommand: {what}")
 
 
 def cmd_import(a):
@@ -1219,6 +1294,103 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
     s.set_defaults(func=cmd_jobs)
+
+    # project (side-project ideator)
+    s = _sub(sub, "project", "Side-project ideator: gap-driven ideas, weekend scopes, stacks.", [
+        "python -m candid project gaps --jd jd.txt",
+        "python -m candid project ideas --jd jd.txt",
+        "python -m candid project scope rag-support-bot",
+        "python -m candid project scaffold rag-support-bot --dir ~/code/rag-bot",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "gaps", "Rank the JD skills missing from your resume.", [
+        "python -m candid project gaps --jd jd.txt",
+        "cat jd.txt | python -m candid project gaps --jd -",
+    ])
+    t.add_argument("--jd", required=True, help=JD_HELP)
+    t.add_argument("--app-id", type=int, default=None,
+                   help="Use the JD stored for a tracked application")
+    t = _sub(ps, "ideas", "Generate project ideas that fill your gaps.", [
+        "python -m candid project ideas --jd jd.txt",
+        "python -m candid project ideas --role ml --n 5",
+        "python -m candid project ideas --jd jd.txt --json",
+    ])
+    t.add_argument("--jd", default=None, help=JD_HELP + " (optional)")
+    t.add_argument("--app-id", type=int, default=None,
+                   help="Use the JD stored for a tracked application")
+    t.add_argument("--role", default="",
+                   help="Role family to bias toward (ml, data, backend, frontend, platform)")
+    t.add_argument("--n", type=int, default=8, help="Max ideas to show")
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "rank", "Alias for ideas (ranked output).", [
+        "python -m candid project rank --jd jd.txt",
+    ])
+    t.add_argument("--jd", default=None, help=JD_HELP + " (optional)")
+    t.add_argument("--app-id", type=int, default=None)
+    t.add_argument("--role", default="")
+    t.add_argument("--n", type=int, default=8)
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "browse", "List every curated idea in the library.", [
+        "python -m candid project browse",
+    ])
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "scope", "Weekend-by-weekend plan for an idea.", [
+        "python -m candid project scope rag-support-bot",
+    ])
+    t.add_argument("idea_id", help="Idea id (see `project browse`)")
+    t = _sub(ps, "stack", "Tech-stack recommendation for an idea.", [
+        "python -m candid project stack rag-support-bot",
+        "python -m candid project stack rag-support-bot --jd jd.txt",
+    ])
+    t.add_argument("idea_id", help="Idea id (see `project browse`)")
+    t.add_argument("--jd", default=None, help=JD_HELP + " (optional; tunes the stack)")
+    t.add_argument("--app-id", type=int, default=None)
+    t = _sub(ps, "estimate", "Hours + weekend calendar for an idea.", [
+        "python -m candid project estimate rag-support-bot",
+        "python -m candid project estimate rag-support-bot --hours-per-weekend 6",
+    ])
+    t.add_argument("idea_id", help="Idea id (see `project browse`)")
+    t.add_argument("--hours-per-weekend", type=float, default=10)
+    t.add_argument("--start", default="", help="Start date YYYY-MM-DD (default: today)")
+    t = _sub(ps, "learn", "Free learning resources for the idea's stack.", [
+        "python -m candid project learn rag-support-bot",
+    ])
+    t.add_argument("idea_id", help="Idea id (see `project browse`)")
+    t = _sub(ps, "scaffold", "Generate a starter repo for an idea.", [
+        "python -m candid project scaffold rag-support-bot --dir ~/code/rag-bot",
+    ])
+    t.add_argument("idea_id", help="Idea id (see `project browse`)")
+    t.add_argument("--dir", required=True, help="Target directory (must not exist or be empty)")
+    t = _sub(ps, "story", "Resume bullets + talking points for a project.", [
+        "python -m candid project story rag-support-bot",
+        "python -m candid project story \"My Churn Model\"",
+    ])
+    t.add_argument("ref", help="Idea id or ledger project name")
+    t = _sub(ps, "add", "Record one of your projects in the ledger.", [
+        "python -m candid project add --name \"Churn model\" --skills \"python,xgboost,sql\" --status done",
+    ])
+    t.add_argument("--name", required=True)
+    t.add_argument("--skills", default="", help="Comma-separated canonical skills it demonstrates")
+    t.add_argument("--status", default="planned",
+                   choices=["planned", "in_progress", "done", "archived"])
+    t.add_argument("--url", default="", help="Repo/demo URL")
+    t.add_argument("--desc", default="", help="One-line description")
+    t = _sub(ps, "list", "Show the project ledger.", [
+        "python -m candid project list",
+        "python -m candid project list --status done",
+    ])
+    t.add_argument("--status", default=None,
+                   choices=["planned", "in_progress", "done", "archived"])
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "done", "Mark a ledger project done (covers its skills).", [
+        "python -m candid project done \"Churn model\"",
+    ])
+    t.add_argument("name", help="Ledger project name")
+    t = _sub(ps, "rm", "Remove a project from the ledger.", [
+        "python -m candid project rm \"Churn model\"",
+    ])
+    t.add_argument("name", help="Ledger project name")
+    s.set_defaults(func=cmd_project)
 
     # dashboard
     s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 only).", [
