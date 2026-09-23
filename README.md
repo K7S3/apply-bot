@@ -64,6 +64,7 @@ one ends with the exact next command to run.
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
+| `polish` | Polish your interview answers into tight STAR responses in your voice - the polisher never invents metrics or outcomes. Drafts stay local until you approve them; then export a Markdown cheatsheet (`polish export`), a printer-friendly sheet (`polish sheet`), or self-quiz with seeded flashcard drills (`polish flashcards --seed N`). |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
 
 ## Job-source coverage (honest)

@@ -32,11 +32,13 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "polish",
 ]
 
 SUBCOMMANDS = {
     "profile": ["show"],
+    "polish": ["run", "star", "scrub", "library", "score", "pair", "report",
+               "export", "sheet", "flashcards"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "PolishError", "LibraryError", "IntelError", "ExportError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,10 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "PolishError": "python -m candid polish --help",
+    "LibraryError": "python -m candid polish library --help",
+    "IntelError": "python -m candid polish --help",
+    "ExportError": "python -m candid polish --help",
 }
 
 
@@ -484,6 +490,143 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_polish(a):
+    from candid import polish as PL
+    from candid import config as C
+    if a.what == "run":
+        source = a.file or (("text:" + a.text) if a.text else "-")
+        result = PL.polish_answer(PL.read_draft(source),
+                                  target_seconds=a.target_seconds)
+        out_path = C.DATA_DIR / "polish_last.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(result, indent=2),
+                            encoding="utf-8")
+        if a.json:
+            print(json.dumps(result, indent=2))
+            return
+        diff = PL.render_diff(result["original"], result["polished"])
+        print(diff if diff else "(no changes)")
+        st = result["stats"]
+        print(f"\nwords: {st['words_before']} -> {st['words_after']} | "
+              f"fillers removed: {st['fillers_removed']} | "
+              f"voice overlap: {st['voice_overlap_pct']}%")
+        for sug in result["suggestions"]:
+            print(f"  - {sug}")
+        print(f"saved: {out_path}")
+    elif a.what == "star":
+        source = a.file or (("text:" + a.text) if a.text else "-")
+        star = PL.to_star(PL.read_draft(source))
+        if a.json:
+            print(json.dumps(star, indent=2))
+            return
+        for section in ("situation", "task", "action", "result"):
+            body = star[section] or "(missing)"
+            print(f"[{section.upper()}]\n{body}\n")
+    elif a.what == "scrub":
+        source = a.file or (("text:" + a.text) if a.text else "-")
+        cleaned, removed = PL.scrub_fillers(PL.read_draft(source))
+        if a.json:
+            print(json.dumps(
+                {"cleaned": cleaned, "removed": removed}, indent=2))
+            return
+        print(cleaned)
+        print(f"\nremoved ({len(removed)}): "
+              f"{', '.join(sorted(set(removed))) or 'none'}")
+    elif a.what == "library":
+        _cmd_polish_library(a)
+    elif a.what == "score":
+        from candid import polish_library as PLL, polish_intel as PI
+        entry = PLL.get_entry(a.id)
+        result = PI.rubric_score(entry.get("original", ""),
+                                 entry.get("polished", ""))
+        if a.json:
+            print(json.dumps({"id": entry.get("id"),
+                              "name": entry.get("name"), **result}, indent=2))
+            return
+        label = entry.get("name") or entry.get("id")
+        print(f"Rubric for '{label}' (original vs polished)")
+        for dim in ("clarity", "structure", "specificity", "impact"):
+            print(f"  {dim:12} {result[dim]}/5")
+        print(f"  {'overall':12} {result['overall']}/5")
+        print()
+        for note in result["notes"]:
+            print(f"  - {note}")
+    elif a.what == "pair":
+        from candid import polish_intel as PI
+        ranked = PI.pair_with_question(a.question)
+        if a.json:
+            print(json.dumps(ranked, indent=2))
+            return
+        if not ranked:
+            print("No approved library entries share keywords with that question.")
+            return
+        print(f"{len(ranked)} candidate(s), best first:")
+        for row in ranked:
+            print(f"  [{row['id']}] {row['name']} (score {row['score']})")
+            print(f"      {row['explanation']}")
+    elif a.what == "report":
+        from candid import polish_intel as PI
+        print(PI.format_report(PI.before_after_report()))
+    elif a.what == "export":
+        from candid import polish_export as PE
+        print(f"Wrote {PE.export_markdown(entry_id=a.id, path=a.out)}")
+    elif a.what == "sheet":
+        from candid import polish_export as PE
+        print(PE.print_sheet(entry_id=a.id), end="")
+    elif a.what == "flashcards":
+        from candid import polish_export as PE
+        cards = PE.drill_order(PE.flashcards(), seed=a.seed)
+        print(PE.format_cards(cards), end="")
+
+
+def _cmd_polish_library(a):
+    from candid import polish_library as PL
+    try:
+        if a.lib_cmd == "save":
+            entry_id = PL.save_entry(a.name, question=a.question)
+            print(f"Saved {entry_id} (pending approval)")
+            print(PL.render_approval(entry_id))
+            print(f"Review the diff, then: "
+                  f"python -m candid polish library approve {entry_id}")
+        elif a.lib_cmd == "list":
+            entries = PL.list_entries(status=a.status)
+            if a.json:
+                print(json.dumps(entries, indent=2))
+            else:
+                if not entries:
+                    print("(library is empty)")
+                for e in entries:
+                    q = e.get("question") or "-"
+                    print(f"{e['id']}  [{e['status']:8}]  {e['name']}  ::  {q}")
+        elif a.lib_cmd == "show":
+            if a.diff:
+                print(PL.render_approval(a.id))
+            else:
+                e = PL.get_entry(a.id)
+                print(f"{e['id']}  [{e['status']}]  {e['name']}")
+                print(f"Question: {e.get('question') or '(none)'}")
+                print(f"Story: {e.get('story_id') or '(none)'}")
+                print("\n--- polished ---\n" + e["polished"])
+        elif a.lib_cmd == "approve":
+            print(PL.approve(a.id))
+            print(f"Approved {a.id}")
+        elif a.lib_cmd == "reject":
+            print(PL.reject(a.id))
+            print(f"Rejected {a.id}")
+        elif a.lib_cmd == "delete":
+            PL.delete(a.id)
+            print(f"Deleted {a.id}")
+        elif a.lib_cmd == "link":
+            PL.link_story(a.id, a.story_id)
+            print(f"Linked {a.id} -> story {a.story_id}")
+        else:
+            print(f"Unknown library command: {a.lib_cmd}", file=sys.stderr)
+            sys.exit(2)
+    except PL.LibraryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1061,118 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    s = _sub(sub, "polish", "Polish interview answers: scrub fillers, STAR split, tighten.", [
+        "echo 'Um, basically I led...' | python -m candid polish run",
+        "python -m candid polish run --file draft.txt --target-seconds 60",
+        "python -m candid polish star --file draft.txt",
+        "python -m candid polish scrub --file draft.txt",
+    ])
+    ps = _nested(s)
+
+    def _polish_source(t):
+        t.add_argument("--file", default=None,
+                       help="Draft file path (default: read from stdin)")
+        t.add_argument("--text", default=None,
+                       help="Raw draft text instead of a file/stdin")
+
+    t = _sub(ps, "run", "Full pipeline: scrub, STAR split, tighten to target length.", [
+        "python -m candid polish run --file draft.txt",
+        "python -m candid polish run --text 'Um, basically I led the migration...' --json",
+    ])
+    _polish_source(t)
+    t.add_argument("--target-seconds", type=int, default=90,
+                   help="Spoken target length in seconds (default 90, ~150 wpm)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the full result as JSON")
+    t = _sub(ps, "star", "Split a draft into Situation/Task/Action/Result.", [
+        "python -m candid polish star --file draft.txt",
+    ])
+    _polish_source(t)
+    t.add_argument("--json", action="store_true",
+                   help="Print the STAR dict as JSON")
+    t = _sub(ps, "scrub", "Remove filler phrases and hedges from a draft.", [
+        "python -m candid polish scrub --file draft.txt",
+    ])
+    _polish_source(t)
+    t.add_argument("--json", action="store_true",
+                   help="Print cleaned text and removed list as JSON")
+    s.set_defaults(func=cmd_polish)
+
+    # ---- library: persistent answer library with approval gate ----
+    lb = _sub(ps, "library", "Save and curate polished answers (approval gate).", [
+        "python -m candid polish library save --name ans-1 --question 'Tell me about yourself'",
+        "python -m candid polish library list --status pending",
+        "python -m candid polish library approve pl-1a2b3c4d",
+    ])
+    lbs = _nested(lb, dest="lib_cmd")
+    t = _sub(lbs, "save", "Save the latest polished answer (from `polish run`).", [
+        "python -m candid polish library save --name ans-1",
+    ])
+    t.add_argument("--name", required=True, help="Short name for this answer")
+    t.add_argument("--question", default=None,
+                   help="Interview question it answers")
+    t = _sub(lbs, "list", "List library entries.", [
+        "python -m candid polish library list --status pending",
+    ])
+    t.add_argument("--status", choices=["pending", "approved", "rejected"],
+                   default=None)
+    t.add_argument("--json", action="store_true",
+                   help="Machine-readable output")
+    t = _sub(lbs, "show", "Show an entry.", [
+        "python -m candid polish library show pl-1a2b3c4d --diff",
+    ])
+    t.add_argument("id", help="Entry id (e.g. pl-1a2b3c4d)")
+    t.add_argument("--diff", action="store_true",
+                   help="Show the approval diff instead of the text")
+    for _cmd in ("approve", "reject", "delete"):
+        _p = _sub(lbs, _cmd, f"{_cmd.capitalize()} a library entry.", [
+            f"python -m candid polish library {_cmd} pl-1a2b3c4d",
+        ])
+        _p.add_argument("id", help="Entry id")
+    t = _sub(lbs, "link", "Link an entry to a story-bank id.", [
+        "python -m candid polish library link pl-1a2b3c4d s3",
+    ])
+    t.add_argument("id", help="Entry id")
+    t.add_argument("story_id", help="Story id from `candid stories`")
+
+    # ---- intel: rubric scoring, question pairing, before/after report ----
+    t = _sub(ps, "score", "Rubric-score a library entry (original vs polished).", [
+        "python -m candid polish score --id pl-1a2b3c4d",
+    ])
+    t.add_argument("--id", required=True, help="Library entry id")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw result as JSON")
+    t = _sub(ps, "pair", "Rank approved answers that fit a new question.", [
+        "python -m candid polish pair --question 'Tell me about a conflict'",
+    ])
+    t.add_argument("--question", required=True,
+                   help="The interview question to match against")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw result as JSON")
+    t = _sub(ps, "report", "Before/after polish gains across the library.", [
+        "python -m candid polish report",
+    ])
+
+    # ---- export: cheatsheets, print sheets, flashcards ----
+    t = _sub(ps, "export", "Export approved answers to a Markdown cheatsheet.", [
+        "python -m candid polish export",
+        "python -m candid polish export --id pl-1a2b3c4d --out /tmp/sheet.md",
+    ])
+    t.add_argument("--id", default=None,
+                   help="Entry id to export (default: all approved)")
+    t.add_argument("--out", default=None,
+                   help="Output path (default: <data-dir>/polish_cheatsheet.md)")
+    t = _sub(ps, "sheet", "Printer-friendly 80-col plain-text sheet.", [
+        "python -m candid polish sheet --id pl-1a2b3c4d > /tmp/sheet.txt",
+    ])
+    t.add_argument("--id", default=None,
+                   help="Entry id to print (default: all approved)")
+    t = _sub(ps, "flashcards", "Flashcard deck for self-quizzing.", [
+        "python -m candid polish flashcards --seed 7",
+    ])
+    t.add_argument("--seed", type=int, default=0,
+                   help="Seed for deterministic drill order (default: 0)")
 
     return p
 
