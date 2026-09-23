@@ -30,7 +30,7 @@ from candid import __version__
 # ---------------------------------------------------------------------------
 
 COMMANDS = [
-    "onboard", "profile", "match", "tailor", "track", "prep",
+    "onboard", "profile", "match", "tailor", "track", "prep", "brief",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
@@ -48,6 +48,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "brief": ["add", "list", "remove", "background", "debrief", "roles", "show"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "InterviewerError",
     "ValueError",
 }
 
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "InterviewerError": "python -m candid brief --help",
 }
 
 
@@ -275,6 +278,112 @@ def cmd_prep(a):
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
                                   app_id=a.app_id, location=a.location or "")
     print(f"Prep pack saved to {path}\n")
+    print(markdown[:3000])
+    if len(markdown) > 3000:
+        print(f"\n... ({len(markdown) - 3000} more chars in the file)")
+
+
+def cmd_brief(a):
+    from candid import interviewers as I
+    if a.what == "add":
+        rec = I.add_interviewer(a.name, app_id=a.app_id, role=a.role or "",
+                                round_label=a.round or "")
+        print(f"Added interviewer #{rec['id']}: {rec['name']}"
+              + (f" [{rec['role']}]" if rec['role'] else "")
+              + (f" (app #{rec['app_id']})" if rec['app_id'] else ""))
+    elif a.what == "list":
+        ivs = I.list_interviewers(app_id=a.app_id)
+        if a.json:
+            print(json.dumps(ivs, indent=2, default=str))
+            return
+        if not ivs:
+            print("No interviewers recorded yet. Add one with:")
+            print("  python -m candid brief add --name \"Jane Doe\" "
+                  "--role hiring_manager --app-id 3")
+            return
+        for iv in ivs:
+            print(f"#{iv['id']} {iv['name']}"
+                  + (f" [{iv['role']}]" if iv['role'] else "")
+                  + (f" {iv['round_label']}" if iv['round_label'] else "")
+                  + (f" (app #{iv['app_id']})" if iv['app_id'] else ""))
+    elif a.what == "remove":
+        I.remove_interviewer(a.id)
+        print(f"Removed interviewer #{a.id}.")
+    elif a.what == "background":
+        fields = {}
+        if a.title:
+            fields["title"] = a.title
+        if a.team:
+            fields["team"] = a.team
+        if a.tenure:
+            fields["tenure"] = a.tenure
+        if a.focus:
+            fields["focus_areas"] = [f.strip() for f in a.focus.split(",")
+                                     if f.strip()]
+        if a.note:
+            fields["notes"] = a.note
+        if not fields:
+            print("Nothing to update. Pass --title, --team, --tenure, "
+                  "--focus, or --note.")
+            return
+        rec = I.update_background(a.id, **fields)
+        print(f"Updated background for #{rec['id']} {rec['name']}.")
+    elif a.what == "debrief":
+        asked = [q.strip() for q in (a.asked or "").split(";") if q.strip()]
+        signals = [s2.strip() for s2 in (a.signals or "").split(";")
+                   if s2.strip()]
+        rec = I.add_debrief(a.id, asked=asked or None, signals=signals or None,
+                            follow_up=a.follow_up or "")
+        print(f"Debrief saved for #{rec['id']} {rec['name']}.")
+    elif a.what == "roles":
+        from candid import interviewer_roles as IR
+        if a.json:
+            print(json.dumps({r: IR.get_role_profile(r)
+                              for r in IR.list_roles()}, indent=2))
+            return
+        for r in IR.list_roles():
+            p = IR.get_role_profile(r)
+            print(f"{r}: {p['label']}\n  {p['description']}")
+    elif a.what == "show":
+        _cmd_brief_show(a)
+
+
+def _cmd_brief_show(a):
+    from candid import interviewers as I, brief as B
+    from candid import prep_questions as PQ
+    ivs = []
+    if a.app_id:
+        ivs = I.list_interviewers(app_id=a.app_id)
+    if not ivs and a.company:
+        from candid import tracker as T
+        for app in T.list_apps(company=a.company):
+            ivs.extend(I.list_interviewers(app_id=app["id"]))
+    if not ivs:
+        print("No interviewers found. Add them first:")
+        print("  python -m candid brief add --name \"Jane Doe\" "
+              "--role hiring_manager --app-id 3")
+        return
+    questions: list[dict] = []
+    if a.company:
+        slug = "".join(c for c in a.company.lower() if c.isalnum())
+        questions.extend(PQ.QUESTIONS_DB.get(slug, []))
+    for bank in PQ.GENERIC_BANKS.values():
+        questions.extend(bank[:6])
+    bullets: list[str] = []
+    try:
+        for e in _profile().get("experience", [])[:3]:
+            for b in e.get("bullets", [])[:3]:
+                if str(b).strip():
+                    bullets.append(str(b).strip())
+    except Exception:
+        pass
+    jd = _jd_text(a) if getattr(a, "jd", "") else ""
+    markdown = B.build_brief(ivs, company=a.company or "",
+                             role_title=a.role_title or "", jd_text=jd,
+                             profile_bullets=bullets or None,
+                             questions_db=questions or None)
+    path = B.save_brief(markdown, a.company or "interview")
+    print(f"Brief saved to {path}\n")
     print(markdown[:3000])
     if len(markdown) > 3000:
         print(f"\n... ({len(markdown) - 3000} more chars in the file)")
@@ -620,6 +729,58 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
     s.set_defaults(func=cmd_prep)
+
+    # brief
+    s = _sub(sub, "brief", "Interviewer briefs: who is interviewing you.", [
+        "python -m candid brief add --name \"Jane Doe\" --role hiring_manager --app-id 3",
+        "python -m candid brief background --id 1 --title \"Eng Manager\" --focus \"ranking, experimentation\"",
+        "python -m candid brief show --company Acme --role-title \"Data Scientist\"",
+    ])
+    bs = _nested(s)
+    t = _sub(bs, "add", "Add an interviewer to the roster.", [
+        "python -m candid brief add --name \"Jane Doe\" --role hiring_manager --app-id 3 --round \"Round 2\"",
+    ])
+    t.add_argument("--name", required=True, help="Interviewer's name")
+    t.add_argument("--role", default="", help="hiring_manager | peer_engineer | bar_raiser | recruiter | skip_level | domain_specialist")
+    t.add_argument("--app-id", type=int, default=None, help="Tracker id to link to")
+    t.add_argument("--round", default="", help="Round label, e.g. \"Round 2\"")
+    t = _sub(bs, "list", "List recorded interviewers.", [
+        "python -m candid brief list --app-id 3",
+    ])
+    t.add_argument("--app-id", type=int, default=None)
+    t.add_argument("--json", action="store_true")
+    t = _sub(bs, "remove", "Remove an interviewer.", [
+        "python -m candid brief remove --id 1",
+    ])
+    t.add_argument("--id", type=int, required=True)
+    t = _sub(bs, "background", "Record an interviewer's public background (entered by you, never scraped).", [
+        "python -m candid brief background --id 1 --title \"Eng Manager\" --focus \"ranking, experimentation\"",
+    ])
+    t.add_argument("--id", type=int, required=True)
+    t.add_argument("--title", default=""); t.add_argument("--team", default="")
+    t.add_argument("--tenure", default="")
+    t.add_argument("--focus", default="", help="Comma-separated focus areas / talk topics")
+    t.add_argument("--note", default="")
+    t = _sub(bs, "debrief", "Log a post-interview debrief for an interviewer.", [
+        "python -m candid brief debrief --id 1 --asked \"churn case; SQL window\" --signals \"dug deep on metrics\"",
+    ])
+    t.add_argument("--id", type=int, required=True)
+    t.add_argument("--asked", default="", help="Questions they asked, separated by ';'")
+    t.add_argument("--signals", default="", help="Signals you picked up, separated by ';'")
+    t.add_argument("--follow-up", default="")
+    t = _sub(bs, "roles", "Show interviewer role profiles and likely question angles.", [
+        "python -m candid brief roles",
+    ])
+    t.add_argument("--json", action="store_true")
+    t = _sub(bs, "show", "Build the full interviewer brief.", [
+        "python -m candid brief show --company Acme --role-title \"Data Scientist\"",
+        "python -m candid brief show --app-id 3",
+    ])
+    t.add_argument("--company", default="")
+    t.add_argument("--app-id", type=int, default=None)
+    t.add_argument("--role-title", default="")
+    t.add_argument("--jd", default="", help=JD_HELP)
+    s.set_defaults(func=cmd_brief)
 
     # followup
     s = _sub(sub, "followup", "Draft thank-you / check-in / referral emails.", [

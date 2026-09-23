@@ -354,6 +354,13 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
         lines += [talking_points]
     lines += ["## 7. " + _research_checklist(company).lstrip("# ").rstrip(), ""]
     lines += ["## 8. " + PC.DAY_BEFORE_CHECKLIST.lstrip("# ").rstrip(), ""]
+    try:
+        from candid import brief as _BR
+        _brief_section = _BR.brief_section_for_prep(company)
+    except Exception:
+        _brief_section = ""
+    if _brief_section:
+        lines += [_brief_section, ""]
     lines.append("---")
     lines.append(
         "_Question bank: `candid/prep_questions.py` — add new reported questions "

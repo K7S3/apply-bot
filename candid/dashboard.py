@@ -318,6 +318,7 @@ def run_tailor_diff(kind: str, company: str, role: str, jd: str,
 def prep_status() -> list[dict]:
     """Per-application interview-prep state (interview-stage apps only)."""
     from candid import tracker as T
+    from candid import interviewers as IV
     out = []
     for a in T.list_apps():
         if a.get("status") not in ("selected_for_interview", "offer"):
@@ -331,6 +332,7 @@ def prep_status() -> list[dict]:
             "status": a["status"],
             "has_pack": has_pack,
             "pack_path": pack if has_pack else "",
+            "n_interviewers": len(IV.find_by_app(a["id"])),
         })
     return out
 
