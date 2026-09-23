@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "practice",
 ]
 
 SUBCOMMANDS = {
@@ -45,6 +45,8 @@ SUBCOMMANDS = {
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
+    "practice": ["start", "list", "show", "review", "stats", "queue",
+                 "tag", "routine"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "PracticeError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "PracticeError": "python -m candid practice --help",
 }
 
 
@@ -391,6 +394,78 @@ def cmd_mock(a):
         M.behavioral_session(theme=a.theme, ai_feedback=a.ai)
     elif a.what == "design":
         M.design_session(level=a.level, ai_feedback=a.ai)
+
+
+def cmd_practice(a):
+    from candid import practice as P
+    if a.what == "start":
+        P.run_session(problem_id=a.problem, topic=a.topic,
+                      difficulty=a.difficulty, minutes=a.minutes,
+                      focus=not a.no_focus, think_every_s=a.think_every * 60.0,
+                      phases=P.parse_phases(a.phases),
+                      extra_tags=(a.tag.split(",") if a.tag else None))
+    elif a.what == "list":
+        entries = P.list_sessions(tag=a.tag, outcome=a.outcome,
+                                  problem=a.problem, limit=a.limit)
+        print(P.render_session_list(entries))
+    elif a.what == "show":
+        print(P.render_session_detail(P.load_session(a.session)))
+    elif a.what == "review":
+        session = P.load_session(a.session)
+        if session.get("review"):
+            print(P.render_review(session))
+            return
+        print("No review on that session yet - answering the 4 reflections now.\n")
+        answers = {}
+        for key, question in P.REVIEW_QUESTIONS:
+            print(f"Q: {question}")
+            try:
+                answers[key] = input("> ").strip()
+            except EOFError:
+                answers[key] = ""
+        session["review"] = P.build_review(session, answers)
+        session["tags"] = P.finalize_tags(
+            session, {"id": session["problem"]["id"],
+                      "topic": session["problem"]["topic"],
+                      "difficulty": session["problem"]["difficulty"]})
+        P.save_session(session)
+        print("\n" + P.render_review(session))
+    elif a.what == "stats":
+        entries = P.list_sessions(limit=100000)
+        if a.tag:
+            entries = [e for e in entries if a.tag in e.get("tags", [])]
+        print(P.render_stats(P.compute_stats(entries)))
+    elif a.what == "queue":
+        print(P.render_queue(P.due_queue()))
+    elif a.what == "tag":
+        session = P.load_session(a.session)
+        if a.add:
+            P.add_tags(session, a.add.split(","))
+        if a.remove:
+            P.remove_tags(session, a.remove.split(","))
+        P.save_session(session)
+        print(f"Tags for {a.session}: {', '.join(session['tags'])}")
+    elif a.what == "routine":
+        action = a.action
+        if action in ("show", "save", "delete", "run") and not a.name:
+            raise P.PracticeError(
+                f"`practice routine {action}` needs --name (see `practice routine list`).")
+        if action == "list":
+            print(P.render_routines(P.list_routines()))
+        elif action == "show":
+            print(P.render_routines({a.name: P.get_routine(a.name)}))
+        elif action == "save":
+            if not a.steps:
+                raise P.PracticeError(
+                    "`practice routine save` needs --steps, e.g. --steps max-subarray:20,climbing-stairs:25.")
+            name = P.save_routine(a.name, P.parse_steps_spec(a.steps))
+            print(f"Saved routine '{name}'.")
+        elif action == "delete":
+            P.delete_routine(a.name)
+            print(f"Deleted routine '{a.name}'.")
+        elif action == "run":
+            P.run_routine(a.name, focus=not a.no_focus,
+                          think_every_s=a.think_every * 60.0)
 
 
 def cmd_jobs(a):
@@ -798,6 +873,71 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
+
+    # practice: live-coding practice harness (timed sessions, focus mode, reviews)
+    s = _sub(sub, "practice", "Timed live-coding practice: focus mode, think-aloud, reviews, tags, stats.", [
+        "python -m candid practice start --problem max-subarray --minutes 45 --focus",
+        "python -m candid practice stats",
+        "python -m candid practice queue",
+        "python -m candid practice routine --action run --name warmup",
+    ])
+    ms = _nested(s)
+    t = _sub(ms, "start", "Start a timed practice session.", [
+        "python -m candid practice start --problem max-subarray --minutes 45 --focus",
+        "python -m candid practice start --difficulty medium --minutes 30 --no-focus",
+    ])
+    t.add_argument("--problem", default=None); t.add_argument("--topic", default=None)
+    t.add_argument("--difficulty", default=None)
+    t.add_argument("--minutes", type=float, default=45.0)
+    t.add_argument("--focus", dest="no_focus", action="store_false",
+                   help="alias: omit for focus mode on")
+    t.add_argument("--no-focus", dest="no_focus", action="store_true",
+                   help="allow hints/solutions mid-session")
+    t.set_defaults(no_focus=False)
+    t.add_argument("--think-every", type=float, default=10.0,
+                   help="think-aloud prompt interval in minutes (0 to disable)")
+    t.add_argument("--phases", default=None,
+                   help="e.g. plan:10,code:60,test:20,review:10")
+    t.add_argument("--tag", default=None, help="comma-separated extra tags")
+    t = _sub(ms, "list", "List past practice sessions.", [
+        "python -m candid practice list",
+        "python -m candid practice list --tag topic:arrays --outcome solved",
+    ])
+    t.add_argument("--tag", default=None); t.add_argument("--outcome", default=None)
+    t.add_argument("--problem", default=None); t.add_argument("--limit", type=int, default=20)
+    t = _sub(ms, "show", "Show a session's full detail.", [
+        "python -m candid practice show --session p20260922_101500",
+    ])
+    t.add_argument("--session", required=True)
+    t = _sub(ms, "review", "Show or fill in a session's review.", [
+        "python -m candid practice review --session p20260922_101500",
+    ])
+    t.add_argument("--session", required=True)
+    t = _sub(ms, "stats", "Aggregate practice stats.", [
+        "python -m candid practice stats",
+        "python -m candid practice stats --tag topic:dp",
+    ])
+    t.add_argument("--tag", default=None)
+    t = _sub(ms, "queue", "Spaced-repetition revisit queue.", [
+        "python -m candid practice queue",
+    ])
+    t = _sub(ms, "tag", "Add/remove tags on a session.", [
+        "python -m candid practice tag --session p20260922_101500 --add needs-drill",
+    ])
+    t.add_argument("--session", required=True)
+    t.add_argument("--add", default=None); t.add_argument("--remove", default=None)
+    t = _sub(ms, "routine", "Named multi-problem practice routines.", [
+        "python -m candid practice routine --action list",
+        "python -m candid practice routine --action save --name my-drill --steps max-subarray:20,climbing-stairs:25",
+        "python -m candid practice routine --action run --name warmup",
+    ])
+    t.add_argument("--action", default="list",
+                   choices=["list", "show", "save", "delete", "run"])
+    t.add_argument("--name", default=None)
+    t.add_argument("--steps", default=None, help="problem:minutes,problem:minutes")
+    t.add_argument("--no-focus", dest="no_focus", action="store_true")
+    t.add_argument("--think-every", type=float, default=10.0)
+    s.set_defaults(func=cmd_practice)
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
