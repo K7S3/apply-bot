@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `design` | Designer track: portfolio-review prep packs (honestly labeled general prep), portfolio gap analysis vs any JD, 8 design-method deep-dives, self-critique checklist, interactive design-critique drills with rubric scoring, timed whiteboard exercises, tradeoff rapid-fire, portfolio presentation timer, case-study structuring wizard, portfolio-site content drafts, "walk me through your portfolio" scripts, and case-study Markdown/HTML export. |
 
 ## Job-source coverage (honest)
 

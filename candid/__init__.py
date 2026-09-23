@@ -16,6 +16,12 @@ Modules:
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
     jobs      curated job discovery → tracker pipeline
+    design    designer track: portfolio-review prep packs, portfolio gap
+              analysis, design-method deep-dives, self-critique checklist
+    design_drills  design-critique drills, timed whiteboard exercises,
+              tradeoff rapid-fire, portfolio presentation timer
+    design_studio  case-study structuring wizard, portfolio-site content
+              drafts, walkthrough scripts, case-study export
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.

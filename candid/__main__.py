@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "design",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,9 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "design": ["prep", "gaps", "concepts", "checklist", "critique",
+               "whiteboard", "rapid-fire", "present", "casestudy",
+               "site", "walkthrough"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -486,6 +489,80 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def cmd_design(a):
+    """Designer-track tools: portfolio prep, drills, case studies."""
+    from candid import design as D
+    from candid import design_drills as DD
+    from candid import design_studio as DS
+    prof = _profile()
+    w = a.what
+    if w == "prep":
+        md, path = D.build_design_prep(a.company, a.role, prof,
+                                       out_dir=a.out_dir or None)
+        print(md)
+        print(f"\nSaved to {path}")
+    elif w == "gaps":
+        jd = _jd_text(a)
+        result = D.analyze_portfolio_gaps(prof, jd)
+        print(D.render_gap_report(result))
+    elif w == "concepts":
+        if a.slug:
+            print(D.get_concept(a.slug))
+        else:
+            print("Design method deep-dives (pass a slug to read one):\n")
+            for slug in D.DESIGN_CONCEPTS:
+                title = slug.replace("_", " ").title()
+                print(f"  {slug:<28} {title}")
+    elif w == "checklist":
+        print(D.self_critique_checklist(a.project))
+    elif w == "critique":
+        res = DD.critique_drill(scenario_id=a.scenario or None)
+        sc = res["score"]
+        print(f"\nScore: {sc['total']}/{sc['max_total']} "
+              f"({sc['percent']}%, {sc['band']})")
+    elif w == "whiteboard":
+        res = DD.whiteboard_drill(exercise_id=a.exercise or None,
+                                  minutes=a.minutes)
+        rv = res["review"]
+        print(f"\nSelf-review: {rv['yes']}/{rv['total']} "
+              f"({rv['percent']}%) - {rv['verdict']}")
+    elif w == "rapid-fire":
+        res = DD.rapid_fire(n=a.n)
+        print(f"\nAnswered {res['answered']} rapid-fire questions.")
+    elif w == "present":
+        path = DD.presentation_plan(total_minutes=a.minutes)
+        print(f"Presentation plan saved to {path}")
+    elif w == "casestudy":
+        import json as _json
+        project = _json.loads(open(a.project_json).read()) if a.project_json else {}
+        if not project.get("title"):
+            project["title"] = input("Project title: ").strip()
+        answers = (_json.loads(open(a.answers_json).read())
+                   if a.answers_json else None)
+        cs = DS.case_study_wizard(project, answers)
+        print(DS.render_case_study_md(cs))
+        if a.export:
+            out = DS.export_case_study(cs, fmt=a.export)
+            print(f"\nExported to {out}")
+    elif w == "site":
+        projects = prof.get("projects") or []
+        content = DS.site_content(prof, projects)
+        print(f"Site content drafts saved to {content['path']} "
+              "(all marked DRAFT for editing)")
+    elif w == "walkthrough":
+        projects = prof.get("projects") or []
+        if not projects:
+            sys.exit("No projects in your profile. Add projects first, "
+                     "or pass a projects JSON via `design walkthrough --help`.")
+        script = DS.walkthrough_script(projects, total_minutes=a.minutes)
+        for b in script["beats"]:
+            print(f"\n[{b['label']}] ({b['minutes']} min)")
+            print(b["script"])
+            if b.get("tip"):
+                print(f"Tip: {b['tip']}")
+        print(f"\nTips: {script['tips']['opener']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -620,6 +697,67 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
     s.set_defaults(func=cmd_prep)
+
+    # design (designer track: portfolio prep, drills, case studies)
+    s = _sub(sub, "design", "Designer-track tools: portfolio prep, drills, case studies.", [
+        "python -m candid design prep --company Acme --role \"Product Designer\"",
+        "python -m candid design gaps --jd jd.txt",
+        "python -m candid design critique",
+        "python -m candid design whiteboard --minutes 30",
+        "python -m candid design casestudy --export html",
+    ])
+    ds = _nested(s)
+    t = _sub(ds, "prep", "Build a portfolio-review prep pack.", [
+        "python -m candid design prep --company Acme --role \"Product Designer\"",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--out-dir", default="", help="Output dir (default: candid_data/design_packs/)")
+    t = _sub(ds, "gaps", "Analyze portfolio gaps against a JD.", [
+        "python -m candid design gaps --jd jd.txt",
+        "cat jd.txt | python -m candid design gaps --jd -",
+    ])
+    t.add_argument("--jd", default="", help=JD_HELP)
+    t = _sub(ds, "concepts", "Design method deep-dives (list or read one).", [
+        "python -m candid design concepts",
+        "python -m candid design concepts usability_heuristics",
+    ])
+    t.add_argument("slug", nargs="?", default="", help="Concept slug to read")
+    t = _sub(ds, "checklist", "Self-critique checklist for a described design.", [
+        "python -m candid design checklist --project \"redesigned onboarding flow\"",
+    ])
+    t.add_argument("--project", default="", help="Short description of the design to critique")
+    t = _sub(ds, "critique", "Interactive design-critique drill with rubric scoring.", [
+        "python -m candid design critique",
+    ])
+    t.add_argument("--scenario", default="", help="Scenario id (default: first)")
+    t = _sub(ds, "whiteboard", "Timed whiteboard design exercise drill.", [
+        "python -m candid design whiteboard --minutes 30",
+    ])
+    t.add_argument("--exercise", default="", help="Exercise id (default: first)")
+    t.add_argument("--minutes", type=int, default=30)
+    t = _sub(ds, "rapid-fire", "Tradeoff rapid-fire questions with strong-answer pointers.", [
+        "python -m candid design rapid-fire --n 5",
+    ])
+    t.add_argument("--n", type=int, default=5)
+    t = _sub(ds, "present", "Timed portfolio presentation plan.", [
+        "python -m candid design present --minutes 10",
+    ])
+    t.add_argument("--minutes", type=int, default=10)
+    t = _sub(ds, "casestudy", "Case-study structuring wizard (interactive or JSON).", [
+        "python -m candid design casestudy",
+        "python -m candid design casestudy --project-json p.json --answers-json a.json --export html",
+    ])
+    t.add_argument("--project-json", default="", help="Path to project JSON")
+    t.add_argument("--answers-json", default="", help="Path to answers JSON (skips prompts)")
+    t.add_argument("--export", default="", choices=["", "md", "html", "both"])
+    t = _sub(ds, "site", "Draft portfolio-site content (hero, about, project cards).", [
+        "python -m candid design site",
+    ])
+    t = _sub(ds, "walkthrough", "Timed 'walk me through your portfolio' script.", [
+        "python -m candid design walkthrough --minutes 5",
+    ])
+    t.add_argument("--minutes", type=float, default=5)
+    s.set_defaults(func=cmd_design)
 
     # followup
     s = _sub(sub, "followup", "Draft thank-you / check-in / referral emails.", [
