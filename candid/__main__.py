@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "guide",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "guide": ["posting", "ats", "referral", "log", "stats", "email"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "ChannelError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +73,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "ChannelError": "python -m candid guide --help",
 }
 
 
@@ -229,7 +231,7 @@ def cmd_track(a):
     from candid import tracker as T
     if a.what == "add":
         rec = T.add(a.company, a.role, jd_link=a.jd_link or "", status=a.status,
-                    notes=a.notes or "")
+                    notes=a.notes or "", channel=a.channel)
         if rec.get("duplicate"):
             print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
                   f"[{rec['status']}] — not duplicated.")
@@ -247,8 +249,9 @@ def cmd_track(a):
                  if len(apps) > limit else ""))
         print(T.render_list(shown))
     elif a.what == "update":
-        rec = T.update(a.id, status=a.status, notes=a.notes)
-        print(f"Updated #{rec['id']}: status={rec['status']}")
+        rec = T.update(a.id, status=a.status, notes=a.notes, channel=a.channel)
+        print(f"Updated #{rec['id']}: status={rec['status']}"
+              + (f" channel={rec['channel']}" if rec.get("channel") else ""))
         if rec["status"] == "selected_for_interview":
             print("\n🎯 Interview! Generate a prep pack with:")
             print(f"   python -m candid prep --company \"{rec['company']}\" "
@@ -486,6 +489,112 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def _load_guide_connections(path: str | None) -> tuple[list[dict] | None, str | None]:
+    """Load LinkedIn connections for guide; returns (connections, error).
+
+    Never raises: when no export is configured the error message is passed
+    through to the report instead of aborting it.
+    """
+    from candid import channels as CH
+    try:
+        return CH.load_connections(path), None
+    except CH.ChannelError as e:
+        return None, str(e)
+
+
+def cmd_guide(a):
+    from candid import channels as CH
+    from candid import jobs as J
+    from candid import tracker as T
+    if a.what == "posting":
+        job: dict
+        if getattr(a, "app_id", None):
+            rec = next((x for x in T.list_apps() if x["id"] == a.app_id), None)
+            if rec is None:
+                sys.exit(f"No tracked application with id {a.app_id}. "
+                         "Run `python -m candid track list` to see ids.")
+            meta = J.get_job_meta(a.app_id)
+            job = {
+                "title": rec["role"], "company": rec["company"],
+                "url": meta.get("source_url") or rec.get("jd_link") or "",
+                "description": meta.get("jd_text") or "",
+                "source": meta.get("source") or "",
+            }
+        else:
+            if not a.company and not a.url:
+                sys.exit("Pass --app-id, or --company/--url to describe the posting.")
+            jd = ""
+            if a.jd:
+                if a.jd == "-":
+                    jd = sys.stdin.read()
+                else:
+                    from candid import match as M
+                    jd = M.fetch_jd(a.jd)
+            job = {"title": a.role or "", "company": a.company or "",
+                   "url": a.url or "", "description": jd, "source": ""}
+        conns, cerr = _load_guide_connections(getattr(a, "connections", None))
+        g = CH.guide(job, connections=conns, connections_error=cerr)
+        if a.json:
+            print(json.dumps(g, indent=2, default=str))
+        else:
+            print(CH.render_guide(g))
+    elif a.what == "ats":
+        name = (a.name or "").strip()
+        canon = next((k for k in CH.ATS_NOTES if k.lower() == name.lower()), None)
+        notes = CH.ats_notes(canon)
+        if a.json:
+            print(json.dumps(notes, indent=2, default=str))
+            return
+        n = notes
+        acct = ("account required" if n["account_required"]
+                else "no account needed" if n["account_required"] is False
+                else "account requirement unknown")
+        print(f"ATS portal notes: {n['ats']} ({acct}, ~{n['time_minutes']} min, "
+              f"resume parsing: {n['parsing_quality']})")
+        for q in n["quirks"]:
+            print(f"  - {q}")
+        for t in n["tips"]:
+            print(f"  Tip: {t}")
+        if not name or canon is None:
+            print("\nKnown portals: " + ", ".join(sorted(CH.ATS_NOTES)))
+    elif a.what == "referral":
+        if not a.company:
+            sys.exit("--company is required.")
+        conns, cerr = _load_guide_connections(getattr(a, "connections", None))
+        if cerr:
+            sys.exit(f"Error: {cerr}")
+        rp = CH.referral_path(a.company, conns)
+        if a.json:
+            print(json.dumps(rp, indent=2, default=str))
+            return
+        if not rp["count"]:
+            print(f"No 1st-degree connections at {a.company} in your export.")
+            return
+        print(f"{rp['count']} referral candidate(s) at {a.company}:")
+        for c in rp["candidates"][:10]:
+            print(f"  - {c['name']} ({c.get('position') or 'role unknown'}) — "
+                  f"{c.get('rank_reason') or ''}")
+        best = rp["best"]
+        print("\nDraft message:")
+        print(CH.draft_referral_request(best["name"], a.company,
+                                       a.role or "[Role]"))
+    elif a.what == "log":
+        rec = T.update(a.app_id, channel=a.channel)
+        print(f"Logged channel '{rec['channel']}' for #{rec['id']}: "
+              f"{rec['role']} @ {rec['company']}")
+    elif a.what == "stats":
+        print(CH.render_channel_stats(CH.channel_stats()))
+    elif a.what == "email":
+        if not a.company or not a.role:
+            sys.exit("--company and --role are required.")
+        try:
+            name = _profile().get("name") or ""
+        except Exception:
+            name = ""
+        print(CH.draft_direct_apply_email(name, a.company, a.role,
+                                          to_email=a.to or ""))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -573,6 +682,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd-link", default=""); t.add_argument("--status", default="saved")
     t.add_argument("--notes", default="")
+    t.add_argument("--channel", default=None,
+                   help="How you applied: referral | direct_email | ats_portal | company_site | linkedin_easy_apply | aggregator")
     t = _sub(ts, "list", "List tracked applications (default view: newest first, up to --limit).", [
         "python -m candid track list",
         "python -m candid track list --status applied",
@@ -590,6 +701,8 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("id", type=int)
     t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--channel", default=None,
+                   help="Log the application channel (same choices as `track add --channel`)")
     t = _sub(ts, "remove", "Remove an application.", [
         "python -m candid track remove 3",
     ])
@@ -918,6 +1031,62 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # guide — direct-apply vs portal guidance
+    s = _sub(sub, "guide", "Direct-apply vs portal guidance: best channel per posting, ATS notes, referral paths.", [
+        "python -m candid guide posting --app-id 3",
+        "python -m candid guide posting --url https://boards.greenhouse.io/acme/jobs/123 --company Acme",
+        "python -m candid guide ats --name workday",
+        "python -m candid guide referral --company Acme",
+        "python -m candid guide log --app-id 3 --channel referral",
+        "python -m candid guide stats",
+    ])
+    gs = _nested(s)
+    t = _sub(gs, "posting", "Ranked application-channel advice for one posting.", [
+        "python -m candid guide posting --app-id 3",
+        "python -m candid guide posting --url https://boards.greenhouse.io/acme/jobs/123 --company Acme --role \"ML Engineer\"",
+        "python -m candid guide posting --company Acme --jd jd.txt --connections Connections.csv",
+    ])
+    t.add_argument("--app-id", type=int, default=None)
+    t.add_argument("--url", default=""); t.add_argument("--company", default="")
+    t.add_argument("--role", default=""); t.add_argument("--jd", default="",
+                   help="JD text, file path, URL, or - for stdin")
+    t.add_argument("--connections", default=None,
+                   help="LinkedIn export ZIP or Connections.csv for referral detection")
+    t.add_argument("--json", action="store_true",
+                   help="Print the full guide as JSON (for scripting)")
+    t = _sub(gs, "ats", "Portal notes for an ATS (account, parsing, quirks, tips).", [
+        "python -m candid guide ats --name workday",
+        "python -m candid guide ats --name greenhouse",
+    ])
+    t.add_argument("--name", default="",
+                   help="ATS name (e.g. workday, greenhouse, lever, taleo)")
+    t.add_argument("--json", action="store_true")
+    t = _sub(gs, "referral", "Find referral paths at a company + draft the ask.", [
+        "python -m candid guide referral --company Acme",
+        "python -m candid guide referral --company Acme --connections Connections.csv",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--role", default="")
+    t.add_argument("--connections", default=None,
+                   help="LinkedIn export ZIP or Connections.csv")
+    t.add_argument("--json", action="store_true")
+    t = _sub(gs, "log", "Log which channel you used for a tracked application.", [
+        "python -m candid guide log --app-id 3 --channel referral",
+        "python -m candid guide log --app-id 3 --channel ats_portal",
+    ])
+    t.add_argument("--app-id", type=int, required=True)
+    t.add_argument("--channel", required=True,
+                   help="referral | direct_email | ats_portal | company_site | linkedin_easy_apply | aggregator")
+    t = _sub(gs, "stats", "Interview/offer rates per application channel.", [
+        "python -m candid guide stats",
+    ])
+    t = _sub(gs, "email", "Draft a cold direct-application email.", [
+        "python -m candid guide email --company Acme --role \"ML Engineer\" --to jobs@acme.com",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--to", default="", help="Recipient email (optional)")
+    s.set_defaults(func=cmd_guide)
 
     return p
 

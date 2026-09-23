@@ -16,6 +16,9 @@ Modules:
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
     jobs      curated job discovery → tracker pipeline
+    channels  direct-apply vs portal guidance: per-posting channel ranking,
+              ATS identification + portal notes, referral-path detection,
+              direct-email extraction, channel stats
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.
@@ -26,4 +29,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

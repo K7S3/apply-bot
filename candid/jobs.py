@@ -477,6 +477,7 @@ def refresh(profile: dict, role: str, location: str = "", remote: bool = False,
 
 
 def render_curated(result: dict) -> str:
+    from candid import channels as CH
     lines = [
         f"Fetched {result['fetched']} postings → {result['candidates']} relevant candidates."
     ]
@@ -485,10 +486,13 @@ def render_curated(result: dict) -> str:
     if result["added"]:
         lines.append(f"\n✅ {len(result['added'])} new → tracker (status: saved):")
         for j in result["added"]:
+            ats = CH.identify_ats(j.get("url") or "", j.get("description") or "")
+            tag = f" [{ats}]" if ats else ""
             lines.append(f"  [#{j['app_id']}] {j['title']} @ {j['company']} "
-                         f"({j['location']}) — {j['score']}/100 [{j['source']}]")
+                         f"({j['location']}) — {j['score']}/100 [{j['source']}]{tag}")
             if j["url"]:
                 lines.append(f"      apply: {j['url']}")
+        lines.append("\nTip: `python -m candid guide posting --app-id <id>` ranks the best way to apply.")
     else:
         lines.append("\nNo new jobs since last run.")
     if result.get("skipped_low_score"):
@@ -503,15 +507,18 @@ def render_curated(result: dict) -> str:
 def render_saved() -> str:
     """Show the curated pipeline: saved jobs with scores and apply links."""
     from candid import tracker as T
+    from candid import channels as CH
     apps = T.list_apps(status="saved")
     if not apps:
         return ("No saved jobs yet. Run:\n"
                 "  python -m candid jobs curate --role \"Data Scientist\" --location \"New York\"")
-    lines = [f"{'ID':<4}{'Score':<7}{'Title':<34}{'Company':<22}Apply URL"]
+    lines = [f"{'ID':<4}{'Score':<7}{'Title':<34}{'Company':<22}Portal/Apply URL"]
     for a in apps:
         meta = get_job_meta(a["id"])
         score = meta.get("match_score", "—")
         url = meta.get("source_url") or a.get("jd_link") or ""
+        ats = CH.identify_ats(url, meta.get("jd_text") or "")
+        portal = (ats or "—") + " " + url[:52]
         lines.append(f"{a['id']:<4}{str(score):<7}{a['role'][:33]:<34}"
-                     f"{a['company'][:21]:<22}{url[:60]}")
+                     f"{a['company'][:21]:<22}{portal}")
     return "\n".join(lines)

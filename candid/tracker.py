@@ -43,17 +43,21 @@ def _next_id(apps: list[dict]) -> int:
 
 
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
-        notes: str = "", path: str | Path | None = None) -> dict:
+        notes: str = "", channel: str | None = None,
+        path: str | Path | None = None) -> dict:
     """Add an application. Returns the new record.
 
     If the same company+role is already tracked, returns the EXISTING
     record (a copy) with ``"duplicate": True`` instead of duplicating —
     no write happens. Check ``rec.get("duplicate")`` to tell the user.
+    ``channel`` records how you applied (see candid.channels.CHANNELS);
+    validated when given.
     """
     if not company or not role:
         raise TrackerError("Both --company and --role are required to add an application.")
     if status not in C.STATUSES:
         raise TrackerError(f"Unknown status '{status}'. Choose from: {', '.join(C.STATUSES)}")
+    channel = _validate_channel(channel)
     apps = _load(path)
     for a in apps:
         if a["company"].lower() == company.lower() and a["role"].lower() == role.lower():
@@ -64,6 +68,7 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         "role": role.strip(),
         "jd_link": jd_link.strip(),
         "status": status,
+        "channel": channel or "",
         "notes": notes.strip(),
         "date_added": date.today().isoformat(),
         "date_updated": date.today().isoformat(),
@@ -74,9 +79,22 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
     return rec
 
 
+def _validate_channel(channel: str | None) -> str:
+    """Validate an application channel name. Returns normalized or raises."""
+    if channel is None:
+        return ""
+    from candid import channels as CH
+    ch = (channel or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if ch and ch not in CH.CHANNELS:
+        raise TrackerError(
+            f"Unknown channel '{channel}'. Choose from: {', '.join(CH.CHANNELS)}")
+    return ch
+
+
 def update(app_id: int, *, status: str | None = None, notes: str | None = None,
-           prep_pack: str | None = None, path: str | Path | None = None) -> dict:
-    """Update an application's status/notes/prep_pack. Returns the record."""
+           prep_pack: str | None = None, channel: str | None = None,
+           path: str | Path | None = None) -> dict:
+    """Update an application's status/notes/prep_pack/channel. Returns the record."""
     apps = _load(path)
     rec = next((a for a in apps if a.get("id") == app_id), None)
     if rec is None:
@@ -89,6 +107,8 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
         rec["notes"] = notes
     if prep_pack is not None:
         rec["prep_pack"] = prep_pack
+    if channel is not None:
+        rec["channel"] = _validate_channel(channel)
     rec["date_updated"] = date.today().isoformat()
     _save(apps, path)
     return rec
@@ -184,6 +204,9 @@ def render_list(apps: list[dict]) -> str:
             f"{a['id']:<4}{a['company'][:21]:<22}{a['role'][:33]:<34}"
             f"{a['status']:<22}{a.get('date_updated', '')}"
         )
+        ch = (a.get("channel") or "").strip()
+        if ch:
+            lines.append(f"      channel: {ch}")
         hint = NEXT_ACTIONS.get(a.get("status", ""), "")
         if hint and hint != "—":
             lines.append(f"      → next: {hint}")
