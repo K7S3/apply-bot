@@ -61,6 +61,7 @@ one ends with the exact next command to run.
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
+| `equity` | Equity deep-dives (educational, not tax advice): RSU vs options vs ISO vs NSO explainers, grant-to-sell lifecycles, ISO/NSO tax basics, glossary, vesting-schedule math, cliff calculator, price scenarios, exercise-cost calculator, refresh stacking, dilution/ownership math, offer-equity checklist, and a literacy quiz. See [docs/equity.md](docs/equity.md). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
@@ -157,7 +158,7 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+307 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
@@ -165,6 +166,9 @@ salary (LCA import variants, title aggregation), judge verdicts (incl.
 infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
 STAR prompts), offers (sign-on amortization, markdown export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
+equity deep-dives (type cards, lifecycles, ISO/NSO basics, vesting/cliff
+math, scenarios, exercise costs, refresh stacking, dilution, checklist,
+quiz),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
 errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,

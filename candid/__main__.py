@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "negotiate", "salary", "equity", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -43,6 +43,9 @@ SUBCOMMANDS = {
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
+    "equity": ["types", "lifecycle", "iso-nso", "glossary", "vest",
+               "cliff", "scenarios", "exercise", "refresh", "dilution",
+               "checklist", "quiz"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
@@ -53,7 +56,7 @@ SUBCOMMANDS = {
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "SalaryError", "EquityError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
 }
@@ -358,6 +361,49 @@ def cmd_salary(a):
             print(f"Stored range: ${parsed['low']:,.0f}–${parsed['high']:,.0f}/yr")
         else:
             print("No pay range found in that text.")
+
+
+def cmd_equity(a):
+    from candid import equity as E
+    if a.what == "types":
+        if a.json:
+            import json as _j
+            print(_j.dumps({k: E.get_type(k) for k in sorted(E.EQUITY_TYPES)}, indent=2))
+        else:
+            print(E.render_types(a.kind or ""))
+    elif a.what == "lifecycle":
+        print(E.get_lifecycle(a.kind))
+    elif a.what == "iso-nso":
+        print(E.render_iso_nso())
+    elif a.what == "glossary":
+        print(E.render_glossary(a.term or ""))
+    elif a.what == "vest":
+        if a.json:
+            import json as _j
+            print(_j.dumps(E.vesting_timeline(a.total, a.price, a.schedule,
+                                              a.start or "", a.frequency,
+                                              a.cliff_months), indent=2))
+        else:
+            print(E.render_vest(a.total, a.price, a.schedule, a.start or "",
+                                a.frequency, a.cliff_months))
+    elif a.what == "cliff":
+        print(E.render_cliff(a.shares, a.months, a.cliff_months))
+    elif a.what == "scenarios":
+        prices = E.parse_prices(a.prices)
+        print(E.render_scenarios(a.kind, a.shares, a.count, a.strike, prices))
+    elif a.what == "exercise":
+        print(E.render_exercise(E.exercise_cost(a.count, a.strike, a.fmv,
+                                                a.kind, a.marginal_rate)))
+    elif a.what == "refresh":
+        print(E.render_refresh(E.parse_grants(a.grants)))
+    elif a.what == "dilution":
+        res = E.ownership(a.your_shares, a.fully_diluted, a.new_pool_pct)
+        print(E.render_dilution(res, a.your_shares, a.new_pool_pct))
+    elif a.what == "checklist":
+        print(E.render_checklist(as_json=a.json))
+    elif a.what == "quiz":
+        answers = E.parse_answers(a.answers) if a.answers else None
+        print(E.render_quiz(answers))
 
 
 def cmd_mock(a):
@@ -748,6 +794,92 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--jd", default=""); t.add_argument("--text", default="")
     t.add_argument("--location", default="")
     s.set_defaults(func=cmd_salary)
+
+    # equity
+    s = _sub(sub, "equity", "Equity deep-dives: RSUs, options, ISO/NSO, vesting math.", [
+        "python -m candid equity types",
+        "python -m candid equity vest --total 200000 --price 50 --schedule 25/25/25/25",
+        "python -m candid equity exercise --count 10000 --strike 5 --fmv 25 --kind nso",
+        "python -m candid equity checklist",
+    ])
+    es = _nested(s)
+    t = _sub(es, "types", "RSU vs options vs ISO vs NSO explainer cards.", [
+        "python -m candid equity types",
+        "python -m candid equity types --kind iso",
+    ])
+    t.add_argument("--kind", default="", help="rsu, options, iso, or nso (default: all)")
+    t.add_argument("--json", action="store_true")
+    t = _sub(es, "lifecycle", "Grant -> vest -> exercise -> sell walkthrough.", [
+        "python -m candid equity lifecycle --kind rsu",
+        "python -m candid equity lifecycle --kind options",
+    ])
+    t.add_argument("--kind", required=True, choices=["rsu", "options"])
+    _sub(es, "iso-nso", "ISO vs NSO tax-basics comparison (educational).", [
+        "python -m candid equity iso-nso",
+    ])
+    t = _sub(es, "glossary", "Equity term glossary.", [
+        "python -m candid equity glossary",
+        "python -m candid equity glossary --term cliff",
+    ])
+    t.add_argument("--term", default="")
+    t = _sub(es, "vest", "Vesting schedule math: timeline of vest events.", [
+        "python -m candid equity vest --total 200000 --price 50 --schedule 25/25/25/25",
+        "python -m candid equity vest --total 200000 --price 50 --schedule 25/25/25/25 --frequency monthly --cliff-months 12",
+    ])
+    t.add_argument("--total", type=float, required=True, help="Grant value in $ at grant price")
+    t.add_argument("--price", type=float, required=True, help="Share price at grant")
+    t.add_argument("--schedule", default="25/25/25/25", help="Yearly pct parts, e.g. 25/25/25/25")
+    t.add_argument("--start", default="", help="Grant date YYYY-MM-DD (default: today)")
+    t.add_argument("--frequency", default="annual", choices=["annual", "quarterly", "monthly"])
+    t.add_argument("--cliff-months", dest="cliff_months", type=int, default=0)
+    t.add_argument("--json", action="store_true")
+    t = _sub(es, "cliff", "Cliff explainer + calculator.", [
+        "python -m candid equity cliff --shares 4000 --months 48 --cliff-months 12",
+    ])
+    t.add_argument("--shares", type=float, required=True)
+    t.add_argument("--months", type=int, default=48)
+    t.add_argument("--cliff-months", dest="cliff_months", type=int, default=12)
+    t = _sub(es, "scenarios", "What is this grant worth at different share prices?", [
+        "python -m candid equity scenarios --kind rsu --shares 4000 --prices 40,60,80",
+        "python -m candid equity scenarios --kind options --count 10000 --strike 5 --prices 10,25,50",
+    ])
+    t.add_argument("--kind", default="rsu", choices=["rsu", "options"])
+    t.add_argument("--shares", type=float, default=0, help="RSU share count")
+    t.add_argument("--count", type=float, default=0, help="Option count")
+    t.add_argument("--strike", type=float, default=0, help="Option strike price")
+    t.add_argument("--prices", default="", help="Share prices, e.g. 40,60,80")
+    t = _sub(es, "exercise", "Options exercise cost calculator.", [
+        "python -m candid equity exercise --count 10000 --strike 5 --fmv 25 --kind nso",
+        "python -m candid equity exercise --count 10000 --strike 5 --fmv 25 --kind iso --marginal-rate 0.35",
+    ])
+    t.add_argument("--count", type=float, required=True)
+    t.add_argument("--strike", type=float, required=True)
+    t.add_argument("--fmv", type=float, required=True, help="Current fair market value per share")
+    t.add_argument("--kind", default="nso", choices=["nso", "iso"])
+    t.add_argument("--marginal-rate", dest="marginal_rate", type=float, default=0.32,
+                   help="Estimated marginal ordinary-income rate (placeholder)")
+    t = _sub(es, "refresh", "Refresh grants: concept + stacking math.", [
+        "python -m candid equity refresh --grants 400000:2026:4,100000:2027:4",
+    ])
+    t.add_argument("--grants", default="", help="total:start_year[:years], comma-separated")
+    t = _sub(es, "dilution", "Dilution explainer + ownership-pct calculator.", [
+        "python -m candid equity dilution --your-shares 10000 --fully-diluted 10000000",
+        "python -m candid equity dilution --your-shares 10000 --fully-diluted 10000000 --new-pool-pct 0.15",
+    ])
+    t.add_argument("--your-shares", dest="your_shares", type=float, required=True)
+    t.add_argument("--fully-diluted", dest="fully_diluted", type=float, required=True)
+    t.add_argument("--new-pool-pct", dest="new_pool_pct", type=float, default=0,
+                   help="Option pool target as fraction, e.g. 0.15")
+    t = _sub(es, "checklist", "Questions to ask about equity in an offer.", [
+        "python -m candid equity checklist",
+    ])
+    t.add_argument("--json", action="store_true")
+    t = _sub(es, "quiz", "Equity literacy self-check.", [
+        "python -m candid equity quiz",
+        "python -m candid equity quiz --answers 1,2,1,1,1,2",
+    ])
+    t.add_argument("--answers", default="", help="0-based answer indices, e.g. 1,2,1,1,1,2")
+    s.set_defaults(func=cmd_equity)
 
     # mock
     s = _sub(sub, "mock", "Mock interviews: coding judge, AI interviewer, behavioral, design.", [
