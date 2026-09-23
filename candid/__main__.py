@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "ritual",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "ritual": ["logistics", "timeline", "materials", "dossier", "warmup",
+               "techcheck", "calm", "countdown", "interviewers", "cooldown"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "RitualError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "RitualError": "python -m candid ritual --help",
 }
 
 
@@ -484,6 +487,11 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_ritual(a):
+    from candid import ritual as R
+    return R.run(a)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +926,95 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # ritual (pre-interview confidence routine)
+    s = _sub(sub, "ritual", "Pre-interview confidence routine: calm, prep, debrief.", [
+        "python -m candid ritual interviewers --company Acme --role \"Data Scientist\" --add \"Jane Doe, Hiring Manager\"",
+        "python -m candid ritual interviewers --company Acme --role \"Data Scientist\" --list",
+        "python -m candid ritual cooldown --company Acme --role \"Data Scientist\"",
+    ])
+    rs = _nested(s)
+
+    def _ritual_sub(name, help, examples, id_required=True):
+        t = _sub(rs, name, help, examples)
+        t.add_argument("--company", required=id_required)
+        t.add_argument("--role", required=id_required)
+        t.add_argument("--ritual-id", default=None,
+                       help="Override the default company-role[-date] id")
+        return t
+
+    _rt = ("virtual", "onsite", "phone")
+
+    t = _ritual_sub("logistics", "Day-of logistics checklist (when/where/what to bring).", [
+        "python -m candid ritual logistics --company Acme --role \"Data Scientist\" --date 2026-09-25 --round-type virtual",
+    ])
+    t.add_argument("--date", default=None, help="Interview date YYYY-MM-DD")
+    t.add_argument("--round-type", default=None, choices=_rt)
+    t.add_argument("--check", type=int, default=None,
+                   help="Check off item N (1-based) instead of generating")
+    t.add_argument("--uncheck", action="store_true",
+                   help="With --check: mark the item not done instead")
+    t = _ritual_sub("timeline", "Interview-day timeline, backwards from start time.", [
+        "python -m candid ritual timeline --start \"2026-09-25 14:00\" --round-type virtual",
+    ], id_required=False)
+    t.add_argument("--start", required=True,
+                   help="Interview start, e.g. '2026-09-25 14:00'")
+    t.add_argument("--round-type", required=True, choices=_rt)
+    t.add_argument("--timezone", default=None, help="IANA name, e.g. America/New_York")
+    t.add_argument("--wake", default=None, help="Wake time 'HH:MM' override")
+    t.add_argument("--duration", type=int, default=60,
+                   help="Interview length in minutes (default 60)")
+    t.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+    t = _ritual_sub("materials", "Materials checklist: resume copies, questions, notes.", [
+        "python -m candid ritual materials --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--check", type=int, default=None,
+                   help="Mark review item N (1-based) as reviewed")
+    t.add_argument("--uncheck", action="store_true",
+                   help="With --check: mark the item not reviewed instead")
+    _ritual_sub("dossier", "Interviewer/company dossier at a glance.", [
+        "python -m candid ritual dossier --company Acme --role \"Data Scientist\"",
+    ])
+    t = _ritual_sub("warmup", "Warm-up routine: quick drills before the interview.", [
+        "python -m candid ritual warmup",
+    ], id_required=False)
+    t.add_argument("--minutes", type=int, default=15,
+                   help="Total drill length in minutes (default 15)")
+    t.add_argument("--seed", type=int, default=42,
+                   help="RNG seed for reproducible drills (default 42)")
+    t.add_argument("--no-wait", action="store_true",
+                   help="Skip the short pacing pauses between stations")
+    t = _ritual_sub("techcheck", "Tech check for video interviews (audio/video/net).", [
+        "python -m candid ritual techcheck --round-type virtual",
+    ], id_required=False)
+    t.add_argument("--round-type", required=True, choices=_rt)
+    t.add_argument("--no-net", action="store_true",
+                   help="Skip the network reachability probe")
+    t = _ritual_sub("calm", "Short calming exercise for pre-interview nerves.", [
+        "python -m candid ritual calm",
+    ], id_required=False)
+    t.add_argument("--cycles", type=int, default=4,
+                   help="Breathing cycles (default 4)")
+    t.add_argument("--no-wait", action="store_true",
+                   help="Skip the real waiting (instant, for tests)")
+    t = _ritual_sub("countdown", "Countdown checklist for the final minutes before start.", [
+        "python -m candid ritual countdown --start \"2026-09-25 14:00\"",
+    ], id_required=False)
+    t.add_argument("--start", required=True,
+                   help="Interview start, e.g. '2026-09-25 14:00'")
+    t.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+    t = _ritual_sub("interviewers", "Record the interview panel; see likely question angles.", [
+        "python -m candid ritual interviewers --company Acme --role \"Data Scientist\" --add \"Jane Doe, Hiring Manager\"",
+        "python -m candid ritual interviewers --company Acme --role \"Data Scientist\" --list",
+    ])
+    t.add_argument("--add", default="", metavar='"Name, Title"',
+                   help='Add an interviewer, e.g. --add "Jane Doe, Hiring Manager"')
+    t.add_argument("--round", default="", help="Round label for --add (e.g. \"1\", \"onsite\")")
+    t.add_argument("--list", action="store_true", help="Show quick-glance interviewer cards")
+    _ritual_sub("cooldown", "Post-interview 5-minute cooldown + guided debrief capture.", [
+        "python -m candid ritual cooldown --company Acme --role \"Data Scientist\"",
+    ])
+    s.set_defaults(func=cmd_ritual)
 
     return p
 
