@@ -164,8 +164,16 @@ def pending_nudges(apps: list[dict] | None = None,
             except Exception:
                 pass  # date parsing must never break the nudge list
 
-    order = {"interview_soon": 0, "follow_up_due": 1, "quiet_applied": 2,
-             "stale_saved": 3}
+    order = {"interview_soon": 0, "debrief_due": 1, "follow_up_due": 2,
+             "quiet_applied": 3, "stale_saved": 4}
+    nudges.sort(key=lambda n: order.get(n["kind"], 9))
+
+    # interviews that happened but were never debriefed
+    try:
+        from candid import debrief_due as DD
+        nudges.extend(DD.debrief_nudges(apps=apps, today=today))
+    except Exception:
+        pass  # debrief reminders are best-effort; never break the list
     nudges.sort(key=lambda n: order.get(n["kind"], 9))
     return nudges
 

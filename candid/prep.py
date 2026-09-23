@@ -239,6 +239,43 @@ def _comp_talking_points(company: str, role: str, location: str) -> str:
     ])
 
 
+# ---------------------------------------------------------------------------
+# debrief → prep integration
+# ---------------------------------------------------------------------------
+
+def weak_spots_for_prep(app_id: int | None) -> list[str]:
+    """Weak spots from past debriefs for this app (or all apps when None).
+
+    Pulls from the debrief store defensively: any missing store, missing
+    path, or corrupt data yields [] — prep never breaks for lack of a
+    debrief store.
+    """
+    if app_id is None:
+        return []
+    try:
+        from candid import debrief as D
+    except ImportError:
+        return []
+    try:
+        return [str(w) for w in (D.weak_spots(app_id=app_id) or []) if str(w).strip()]
+    except Exception:
+        return []
+
+
+def get_debrief_context(app_id: int | None) -> str:
+    """Render the 'Based on your past debriefs, drill these:' section.
+
+    Empty string when there is no debrief store or no weak spots — the
+    caller can include it unconditionally.
+    """
+    spots = weak_spots_for_prep(app_id)
+    if not spots:
+        return ""
+    lines = ["Based on your past debriefs, drill these:", ""]
+    lines += [f"- {w}" for w in spots[:8]]
+    return "\n".join(lines)
+
+
 def build_pack(profile: dict, company: str, role: str, jd: str = "",
                app_id: int | None = None, location: str = "",
                gaps: list[str] | None = None) -> tuple[str, Path]:
@@ -298,6 +335,19 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
         lines += [f"- {g}" for g in gaps[:8]]
         if gap_cats:
             lines += ["", f"_Targeted topics: {', '.join(c.replace('_', ' ') for c in gap_cats)}._"]
+        lines += [""]
+
+    # past-debrief weak spots steer the next round of prep
+    debrief_ctx = get_debrief_context(app_id)
+    if debrief_ctx:
+        lines += [
+            "## Based on your past debriefs, drill these:",
+            "",
+            "_Weak spots pulled from your recorded debriefs for this "
+            "application — hit these before anything else._",
+            "",
+        ]
+        lines += debrief_ctx.splitlines()[2:]  # skip the repeated header line
         lines += [""]
 
     lines += [

@@ -33,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
+    "dashboard", "import", "gmail", "linkedin", "patterns", "debrief",
 ]
 
 SUBCOMMANDS = {
@@ -54,6 +54,7 @@ SUBCOMMANDS = {
     "linkedin": ["import", "guide"],
     "patterns": ["list", "tags", "plan", "log", "due", "review",
                  "drill", "mastery", "cheatsheet", "reset"],
+    "debrief": ["start", "show", "list", "export", "due"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -61,7 +62,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError",
+    "PatternsError", "DebriefError",
     "ValueError",
 }
 
@@ -81,6 +82,7 @@ _NEXT_COMMAND = {
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
+    "DebriefError": "python -m candid debrief --help",
 }
 
 
@@ -689,6 +691,50 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def cmd_debrief(a):
+    from candid import debrief_voice as V
+    if a.what == "start":
+        app_id, company, role = V.resolve_company_role(a.app, a.company, a.role)
+        if not company or not role:
+            sys.exit("Need --company and --role, or --app <id> of a tracked job.\n"
+                     "Next: run `python -m candid debrief start --help`.")
+        V.start_session(app_id, company, role, typed=a.typed)
+    elif a.what == "show":
+        print(V.render_transcript(V.load_transcript(a.debrief_id)))
+    elif a.what == "list":
+        entries = V.list_transcripts(app_id=a.app)
+        if not entries:
+            print("No debrief sessions yet. "
+                  "Run `python -m candid debrief start --app <id>` after your next interview.")
+            return
+        for e in entries:
+            app = f" · App #{e['app_id']}" if e.get("app_id") else ""
+            when = (e.get("ended_at") or "")[:10]
+            print(f"{e['id']}  {e['company'] or '-'} / {e['role'] or '-'}{app}  "
+                  f"{e['num_turns']} turns  {when}")
+    elif a.what == "export":
+        try:
+            data = V.load_transcript(a.debrief_id)
+        except V.DebriefError:
+            # not a voice-session id: maybe a recorded debrief id (numeric)
+            # or a tracker app id with a recorded debrief
+            from candid import debrief_due as DD
+            try:
+                path = DD.export_debrief_markdown(int(a.debrief_id),
+                                                  fmt=a.format,
+                                                  out=a.out or None)
+            except (ValueError, DD.DebriefDueError) as e:
+                sys.exit(str(e))
+            print(f"Exported recorded debrief to {path}")
+            return
+        out = V.export_transcript(data, a.format, dest=a.out or None)
+        print(f"Exported debrief {data['id']} to {out}")
+    elif a.what == "due":
+        from candid import debrief_due as DD
+        due = DD.interviews_due(days=a.days)
+        print(DD.render_due(due, days=a.days))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -1295,6 +1341,53 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # debrief
+    s = _sub(sub, "debrief", "Guided interview debrief sessions (voice or typed).", [
+        "python -m candid debrief start --app 3",
+        "python -m candid debrief start --app 3 --typed",
+        "python -m candid debrief list",
+        "python -m candid debrief show deb-20260922-201212",
+        "python -m candid debrief export deb-20260922-201212 --format md",
+        "python -m candid debrief due",
+    ])
+    ds = _nested(s)
+    t = _sub(ds, "start", "Start a guided debrief session after an interview.", [
+        "python -m candid debrief start --app 3",
+        "python -m candid debrief start --app 3 --typed   # skip voice, type answers",
+        "python -m candid debrief start --company Acme --role \"Data Scientist\"",
+    ])
+    t.add_argument("--app", type=int, default=None,
+                   help="Tracked job id — pulls company/role from the tracker")
+    t.add_argument("--company", default="")
+    t.add_argument("--role", default="")
+    t.add_argument("--typed", action="store_true",
+                   help="Use typed answers instead of voice input")
+    t = _sub(ds, "show", "Show a debrief transcript.", [
+        "python -m candid debrief show deb-20260922-201212",
+    ])
+    t.add_argument("debrief_id", help="Debrief id (as shown by `debrief list`)")
+    t = _sub(ds, "list", "List debrief sessions (newest first).", [
+        "python -m candid debrief list",
+        "python -m candid debrief list --app 3",
+    ])
+    t.add_argument("--app", type=int, default=None,
+                   help="Only show debriefs for this tracked application")
+    t = _sub(ds, "export", "Export a debrief transcript to markdown or txt.", [
+        "python -m candid debrief export deb-20260922-201212 --format md",
+        "python -m candid debrief export deb-20260922-201212 --format txt",
+    ])
+    t.add_argument("debrief_id", help="Debrief id (as shown by `debrief list`)")
+    t.add_argument("--format", default="md", choices=["md", "txt"],
+                   help="Export format (default: md)")
+    t.add_argument("--out", default="", help="Output path (default: candid_data/<id>_debrief.<fmt>)")
+    t = _sub(ds, "due", "List recent interviews missing a debrief.", [
+        "python -m candid debrief due",
+        "python -m candid debrief due --days 14",
+    ])
+    t.add_argument("--days", type=int, default=7,
+                   help="Look back this many days for interviews (default: 7)")
+    s.set_defaults(func=cmd_debrief)
 
     return p
 
