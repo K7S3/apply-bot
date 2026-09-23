@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
 
@@ -429,7 +430,7 @@ def cmd_jobs(a):
 
 def cmd_dashboard(a):
     from candid import dashboard as D
-    D.serve(port=a.port, open_browser=not a.no_browser)
+    D.serve(port=a.port, host=a.host, open_browser=not a.no_browser)
 
 
 def cmd_import(a):
@@ -844,12 +845,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_jobs)
 
     # dashboard
-    s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 only).", [
+    s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 by default).", [
         "python -m candid dashboard",
         "python -m candid dashboard --port 8888",
         "python -m candid dashboard --no-browser",
+        "python -m candid dashboard --host 0.0.0.0 --no-browser  # expose (Docker)",
     ])
     s.add_argument("--port", type=int, default=8765, help="Preferred port (tries the next 10 if busy)")
+    s.add_argument("--host", default=os.environ.get("CANDID_DASHBOARD_HOST", "127.0.0.1"),
+                   help="Bind address (default: 127.0.0.1; set to 0.0.0.0 to expose, e.g. inside Docker)")
     s.add_argument("--no-browser", action="store_true", help="Don't auto-open the browser")
     s.set_defaults(func=cmd_dashboard)
 

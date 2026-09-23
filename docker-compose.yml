@@ -1,0 +1,41 @@
+# candid — one-command Docker run.
+#
+#   docker compose build                    # build image candid:local
+#   docker compose run --rm candid onboard   # run any CLI command (one-off)
+#   docker compose up dashboard              # run the web dashboard on :8765
+#   make docker-build / docker-run / docker-dashboard  (see Makefile)
+#
+# Data: a named volume (candid-data) holds /data inside the container, so your
+# profile, tracker DB, and tailored outputs persist across runs. To import
+# files from the host (resumes, job descriptions, Takeout exports), uncomment
+# the ./imports bind mount below and drop files into ./imports/.
+
+services:
+  candid:
+    build: .
+    image: candid:local
+    stdin_open: true   # keep TTY support for the interactive `onboard` wizard
+    tty: true
+    environment:
+      CANDID_DATA_DIR: /data
+    volumes:
+      - candid-data:/data
+      # - ./imports:/imports:ro   # uncomment to import resumes/exports from the host
+    command: ["--help"]   # override with any CLI command, e.g. ["onboard"]
+
+  dashboard:
+    build: .
+    image: candid:local
+    environment:
+      CANDID_DATA_DIR: /data
+    volumes:
+      - candid-data:/data
+      # - ./imports:/imports:ro   # uncomment to import resumes/exports from the host
+    ports:
+      - "8765:8765"
+    # --host 0.0.0.0 is required inside Docker so the port mapping is reachable
+    # from the host. The dashboard warns that it listens on all interfaces.
+    command: ["dashboard", "--host", "0.0.0.0", "--no-browser"]
+
+volumes:
+  candid-data:

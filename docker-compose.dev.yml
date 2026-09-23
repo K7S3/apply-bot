@@ -1,0 +1,16 @@
+# Dev override for candid: bind-mount the repo source over /app so code changes
+# take effect without rebuilding the image.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up dashboard
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm candid match --jd jd.txt
+#
+# (or: make docker-dev)
+
+services:
+  candid:
+    volumes:
+      - .:/app
+
+  dashboard:
+    volumes:
+      - .:/app

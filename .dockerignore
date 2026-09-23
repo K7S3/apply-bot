@@ -1,0 +1,24 @@
+# Keep the image slim: VCS, caches, local data, CI, and tests stay out.
+
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+
+# Local user data and generated output.
+candid_data/
+output/
+profile.yaml
+
+# Dev-only tooling.
+run_ollama_shim.py
+.venv
+venv/
+node_modules/
+
+# CI config and tests (the image ships the app, not its test suite).
+.github
+tests

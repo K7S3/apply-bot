@@ -42,6 +42,24 @@ python -m candid prep --company "Capital One" --role "Senior Data Scientist" --a
 
 All commands are `python -m candid <command> --help`. No accounts, no keys.
 
+## Docker: the one-command run
+
+Prefer Docker over a local Python install? The full guide is
+[docs/docker.md](docs/docker.md). The short version:
+
+```bash
+git clone https://github.com/K7S3/candid.git
+cd candid
+docker compose up --build
+```
+
+That builds the image, runs the interactive onboard wizard on first run, and
+starts the dashboard at <http://localhost:8765>. Your profile, tracker, and
+imports persist in a Docker named volume (`candid-data`) via
+`CANDID_DATA_DIR=/data`, and the image runs as a non-root user. A
+`compose.dev.yml` overlay adds bind mounts for development (live code
+reload, no rebuild).
+
 CLI niceties: `python -m candid --version`, typo-tolerant commands
 (`candid macth` suggests `match`), `--json` on `match`, `track list`,
 `jobs list`, and `salary lookup` for scripting, and `--jd -` reads the JD
@@ -65,6 +83,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `docker compose` | Containerized one-command run: build the image, run the onboard wizard, and serve the dashboard at localhost:8765, with your data persisted in a Docker named volume. Full guide in [docs/docker.md](docs/docker.md). |
 
 ## Job-source coverage (honest)
 

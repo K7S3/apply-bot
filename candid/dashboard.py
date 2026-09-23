@@ -679,14 +679,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def serve(port: int = 8765, open_browser: bool = True,
+def serve(port: int = 8765, host: str = "127.0.0.1", open_browser: bool = True,
           handler_class=DashboardHandler):
-    """Start the dashboard server (blocking). Binds 127.0.0.1 only."""
+    """Start the dashboard server (blocking). Binds *host* (default 127.0.0.1)."""
     server = None
     last_err = None
     for p in range(port, port + 10):
         try:
-            server = http.server.ThreadingHTTPServer(("127.0.0.1", p),
+            server = http.server.ThreadingHTTPServer((host, p),
                                                      handler_class)
             port = p
             break
@@ -694,9 +694,12 @@ def serve(port: int = 8765, open_browser: bool = True,
             last_err = e
     if server is None:
         raise DashboardError(f"Could not bind a port near {port}: {last_err}")
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://{host}:{port}/"
     print(f"📊 candid dashboard: {url}")
-    print("   Local only — nothing leaves your machine. Ctrl+C to stop.")
+    if host == "0.0.0.0":
+        print("   WARNING: listening on all network interfaces - only do this on a trusted network.")
+    else:
+        print("   Local only — nothing leaves your machine. Ctrl+C to stop.")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
