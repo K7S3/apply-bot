@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "network", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -40,6 +40,10 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
+    "network": ["add-contact", "contacts", "contact", "log-touch", "touches",
+                "start-sequence", "templates", "sequence", "complete-step",
+                "skip-step", "due", "warmth", "value-add", "intro",
+                "intro-checklist", "checkin-plan", "thank", "report"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
@@ -292,6 +296,96 @@ def cmd_followup(a):
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def cmd_network(a):
+    from candid.network import (contacts as CT, sequences as SQ,
+                                touchpoints as TP, warmth as W,
+                                valueadd as VA, reminders as R,
+                                intros as IN, checkins as CH,
+                                thanks as TH, report as RP)
+
+    def _your_name():
+        try:
+            return _profile().get("name") or "Your Name"
+        except Exception:
+            return "Your Name"
+
+    w = a.what
+    if w == "add-contact":
+        rec = CT.add_contact(a.name, role=a.role, company=a.company,
+                             email=a.email, met_at=a.met_at or None,
+                             met_at_event=a.event, notes=a.notes,
+                             tags=a.tags, value=a.value)
+        print(f"Added contact #{rec['id']}: {rec['name']}")
+    elif w == "contacts":
+        print(CT.render_contacts(CT.search_contacts(a.search or "")))
+    elif w == "contact":
+        c = CT.get_contact(a.id)
+        s = W.warmth_summary(a.id)
+        print(f"#{c['id']} {c['name']}")
+        print(f"  {c['role']}{', ' if c['role'] and c['company'] else ''}{c['company']}"
+              + (f"  <{c['email']}>" if c['email'] else ""))
+        print(f"  Met: {c['met_at']}" + (f" @ {c['met_at_event']}" if c['met_at_event'] else ""))
+        if c['tags']: print(f"  Tags: {', '.join(c['tags'])}")
+        if c['notes']: print(f"  Notes: {c['notes']}")
+        print(f"  Warmth: {s['score']}/100 ({s['tier']}), value {c['value']}/5")
+    elif w == "log-touch":
+        rec = TP.log_touch(a.id, a.kind, notes=a.notes, happened_on=a.on or None)
+        print(f"Logged {rec['kind']} with contact #{a.id} on {rec['happened_on']}.")
+    elif w == "touches":
+        print(TP.render_touchpoints(a.id))
+    elif w == "start-sequence":
+        rec = SQ.start_sequence(a.id, a.template, start_on=a.on or None)
+        print(f"Started '{a.template}' sequence #{rec['id']} for contact #{a.id}.")
+        print(SQ.render_sequence(rec))
+    elif w == "sequence":
+        print(SQ.render_sequence(SQ.get_sequence(a.id)))
+    elif w == "complete-step":
+        seq = SQ.complete_step(a.seq, a.step)
+        done, total = SQ.sequence_progress(seq)
+        print(f"Step {a.step} of sequence #{a.seq} marked done ({done}/{total}).")
+    elif w == "skip-step":
+        SQ.skip_step(a.seq, a.step)
+        print(f"Step {a.step} of sequence #{a.seq} skipped.")
+    elif w == "due":
+        print(R.render_due(upcoming_days=a.days))
+    elif w == "warmth":
+        if a.id is not None:
+            print(W.render_warmth(W.warmth_summary(a.id)))
+        else:
+            for s in W.all_warmth():
+                print(W.render_warmth(s))
+    elif w == "value-add":
+        if a.kind:
+            print(VA.draft_value_add(_your_name(), a.id,
+                                     a.kind, detail=a.detail or ""))
+        else:
+            print(VA.render_ideas(a.id, VA.suggest_ideas(a.id, n=a.n)))
+    elif w == "intro":
+        name = _your_name()
+        if a.mode == "ask":
+            print(IN.intro_ask(name, a.asker, a.target, context=a.context or ""))
+        else:
+            print(IN.intro_email(name, a.a, a.b,
+                                 shared_context=a.context or "",
+                                 ask=a.ask or ""))
+    elif w == "checkin-plan":
+        print(CH.render_plan(CH.build_plan(batch_size=a.n)))
+    elif w == "thank":
+        print(TH.thank_you(_your_name(), a.helper,
+                           kind=a.kind, what=a.what_for or "",
+                           specifics=a.specifics or "", tone=a.tone))
+    elif w == "report":
+        if a.out:
+            path = RP.export_report(path=a.out)
+            print(f"Networking report exported to {path}")
+        else:
+            print(RP.render_report(RP.stats()))
+    elif w == "templates":
+        print("Sequence templates: " + ", ".join(SQ.templates()))
+    elif w == "intro-checklist":
+        print(IN.intro_checklist())
 
 
 def cmd_offer(a):
@@ -652,6 +746,115 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--tone", default="warm", choices=["warm", "formal", "concise"])
     t.add_argument("--topics", default="", help="Your connection to them")
     s.set_defaults(func=cmd_followup)
+
+    # network
+    s = _sub(sub, "network", "Networking follow-up cadence manager: contacts, sequences, warmth, intros.", [
+        "python -m candid network add-contact --name \"Jane Doe\" --role \"Eng Manager\" --company Acme --event \"DataConf 2026\"",
+        "python -m candid network start-sequence 1 --template conference",
+        "python -m candid network due",
+        "python -m candid network warmth",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "add-contact", "Add someone to your network contact book.", [
+        "python -m candid network add-contact --name \"Jane Doe\" --role \"Eng Manager\" --company Acme --event \"DataConf 2026\" --value 4",
+    ])
+    t.add_argument("--name", required=True)
+    t.add_argument("--role", default=""); t.add_argument("--company", default="")
+    t.add_argument("--email", default=""); t.add_argument("--met-at", default="")
+    t.add_argument("--event", default=""); t.add_argument("--notes", default="")
+    t.add_argument("--tags", nargs="*", default=[])
+    t.add_argument("--value", type=int, default=3, help="1-5: how valuable keeping this warm is")
+    t = _sub(ns, "contacts", "List / search contacts.", [
+        "python -m candid network contacts",
+        "python -m candid network contacts --search acme",
+    ])
+    t.add_argument("--search", default="")
+    t = _sub(ns, "contact", "Show a contact with warmth summary.", [
+        "python -m candid network contact 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ns, "log-touch", "Log an interaction with a contact.", [
+        "python -m candid network log-touch 1 --kind coffee --notes \"Talked about their new team\"",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--kind", required=True,
+                   choices=["email", "call", "coffee", "event", "note", "value_add", "intro_made", "congrats"])
+    t.add_argument("--notes", default=""); t.add_argument("--on", default="")
+    t = _sub(ns, "touches", "Show touchpoint history for a contact.", [
+        "python -m candid network touches 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ns, "start-sequence", "Start a post-event follow-up sequence.", [
+        "python -m candid network start-sequence 1 --template conference",
+        "python -m candid network templates",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--template", required=True,
+                   choices=["conference", "meetup", "informational", "recruiter_call", "coffee_chat", "referral_intro"])
+    t.add_argument("--on", default="", help="Start date YYYY-MM-DD (default today)")
+    t = _sub(ns, "templates", "List available sequence templates.", [
+        "python -m candid network templates",
+    ])
+    t = _sub(ns, "sequence", "Show a sequence's steps and progress.", [
+        "python -m candid network sequence 1",
+    ])
+    t.add_argument("id", type=int)
+    t = _sub(ns, "complete-step", "Mark a sequence step done.", [
+        "python -m candid network complete-step 1 0",
+    ])
+    t.add_argument("seq", type=int); t.add_argument("step", type=int)
+    t = _sub(ns, "skip-step", "Skip a sequence step.", [
+        "python -m candid network skip-step 1 2",
+    ])
+    t.add_argument("seq", type=int); t.add_argument("step", type=int)
+    t = _sub(ns, "due", "Show due follow-ups and re-engagement nudges.", [
+        "python -m candid network due",
+        "python -m candid network due --days 14",
+    ])
+    t.add_argument("--days", type=int, default=7, help="Upcoming horizon in days")
+    t = _sub(ns, "warmth", "Relationship warmth scores (one contact or all).", [
+        "python -m candid network warmth",
+        "python -m candid network warmth 1",
+    ])
+    t.add_argument("id", type=int, nargs="?")
+    t = _sub(ns, "value-add", "Value-add touch ideas, or draft one.", [
+        "python -m candid network value-add 1",
+        "python -m candid network value-add 1 --kind article --detail \"the new scaling-laws paper\"",
+    ])
+    t.add_argument("id", type=int)
+    t.add_argument("--kind", default="",
+                   choices=["", "article", "intro", "congrats", "resource", "event", "ask_advice"])
+    t.add_argument("--detail", default=""); t.add_argument("-n", type=int, default=3)
+    t = _sub(ns, "intro", "Double opt-in introduction drafts.", [
+        "python -m candid network intro ask --asker 1 --target 2 --context \"ML infra roles\"",
+        "python -m candid network intro email --a 1 --b 2 --context \"ML infra\"",
+        "python -m candid network intro-checklist",
+    ])
+    t.add_argument("mode", choices=["ask", "email"])
+    t.add_argument("--asker", type=int, default=None); t.add_argument("--target", type=int, default=None)
+    t.add_argument("--a", type=int, default=None); t.add_argument("--b", type=int, default=None)
+    t.add_argument("--context", default=""); t.add_argument("--ask", default="")
+    t = _sub(ns, "intro-checklist", "Double opt-in intro checklist.", [
+        "python -m candid network intro-checklist",
+    ])
+    t = _sub(ns, "checkin-plan", "Quarterly re-engagement plan.", [
+        "python -m candid network checkin-plan",
+        "python -m candid network checkin-plan -n 3",
+    ])
+    t.add_argument("-n", type=int, default=5, help="This week's batch size")
+    t = _sub(ns, "thank", "Thank-you draft after help / referral / intro.", [
+        "python -m candid network thank --helper \"Jane Doe\" --kind referral --what-for \"Data Scientist @ Acme\"",
+    ])
+    t.add_argument("--helper", required=True)
+    t.add_argument("--kind", default="help", choices=["referral", "intro", "advice", "help"])
+    t.add_argument("--what-for", default=""); t.add_argument("--specifics", default="")
+    t.add_argument("--tone", default="warm", choices=["warm", "formal", "concise"])
+    t = _sub(ns, "report", "Networking activity report.", [
+        "python -m candid network report",
+        "python -m candid network report --out /tmp/network-report.md",
+    ])
+    t.add_argument("--out", default="")
+    s.set_defaults(func=cmd_network)
 
     # offer
     s = _sub(sub, "offer", "Record and compare offers.", [
