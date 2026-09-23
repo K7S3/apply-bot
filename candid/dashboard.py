@@ -425,6 +425,10 @@ def salary_lookup(company: str, title: str, location: str = "") -> dict:
 # HTTP server
 # ---------------------------------------------------------------------------
 
+# Localhost only — never 0.0.0.0. The dashboard is a local tool; binding a
+# public interface would expose tracker data to the whole network.
+BIND_HOST = "127.0.0.1"
+
 HTML_PATH = C.PACKAGE_ROOT / "data" / "dashboard.html"
 
 
@@ -551,7 +555,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                         f"Can't detect source for {filename!r} — "
                         "use a .mbox (Gmail Takeout) or .zip (LinkedIn export)."}, 400)
                     return
-                tmp = Path(tempfile.gettempdir()) / f"candid-import-{filename}"
+                # Windows forbids <>:"/\|?* in file names; sanitize the
+                # client-supplied filename before joining it to the temp dir.
+                safe_name = re.sub(r'[<>:"/\\|?*]', "_", filename).strip(". ")
+                tmp = Path(tempfile.gettempdir()) / f"candid-import-{safe_name}"
                 tmp.write_bytes(data)
                 try:
                     _send_json(self, {**run_import(source, tmp),
@@ -679,6 +686,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def _open_browser(url: str) -> None:
+    """Open *url* in the default browser; never crash the dashboard.
+
+    On Windows a missing or broken default-browser association can make
+    ``webbrowser.open`` raise — the server keeps running either way.
+    """
+    try:
+        webbrowser.open(url)
+    except Exception as e:  # noqa: BLE001 — browser launch is best-effort
+        log.debug("Could not open browser: %s: %s", type(e).__name__, e)
+
+
 def serve(port: int = 8765, open_browser: bool = True,
           handler_class=DashboardHandler):
     """Start the dashboard server (blocking). Binds 127.0.0.1 only."""
@@ -686,7 +705,7 @@ def serve(port: int = 8765, open_browser: bool = True,
     last_err = None
     for p in range(port, port + 10):
         try:
-            server = http.server.ThreadingHTTPServer(("127.0.0.1", p),
+            server = http.server.ThreadingHTTPServer((BIND_HOST, p),
                                                      handler_class)
             port = p
             break
@@ -694,11 +713,11 @@ def serve(port: int = 8765, open_browser: bool = True,
             last_err = e
     if server is None:
         raise DashboardError(f"Could not bind a port near {port}: {last_err}")
-    url = f"http://127.0.0.1:{port}/"
+    url = f"http://{BIND_HOST}:{port}/"
     print(f"📊 candid dashboard: {url}")
     print("   Local only — nothing leaves your machine. Ctrl+C to stop.")
     if open_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.6, _open_browser, args=(url,)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

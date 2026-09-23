@@ -107,11 +107,21 @@ def _run_single_test(workdir: Path, fn_name: str, compare_mode: str,
     wall_timeout = per_test_timeout + max(1.0, per_test_timeout * 0.5)
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONNOUSERSITE": "1",
            "COPILOT_CPU_LIMIT": str(int(per_test_timeout) + 5)}
+    # Sandboxing model: bubblewrap/firejail-style namespace isolation is
+    # POSIX-only, so on Windows the judge runs the code directly in a
+    # subprocess with only the wall-clock timeout as the guard. This is an
+    # honest fallback, not a sandbox: do not run untrusted third-party code.
+    # CREATE_NO_WINDOW keeps the interpreter from popping up a console
+    # window on Windows; it does not exist on POSIX, hence the getattr.
     try:
         proc = subprocess.run(
             [sys.executable, "-I", "runner.py"],
-            cwd=str(workdir), env=env, capture_output=True, text=True,
+            shell=False,
+            cwd=str(workdir.resolve()),
+            env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=wall_timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             preexec_fn=_child_limits if os.name == "posix" else None,
         )
     except subprocess.TimeoutExpired:

@@ -41,7 +41,7 @@ class RunLogger:
         output_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.path = output_dir / f"run_{stamp}.log"
-        self._fh = open(self.path, "w", encoding="utf-8")
+        self._fh = open(self.path, "w", encoding="utf-8", newline="\n")
 
     def log(self, msg: str) -> None:
         line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"

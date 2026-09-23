@@ -7,7 +7,7 @@ search), nudges.py (interview_soon), gmail.py (classification kinds,
 multipart, proposal dedupe), linkedin.py (position bullets, endorsements),
 salary.py (LCA variant hardening, aggregate_by_title).
 
-Run: CANDID_DATA_DIR=/tmp/candid-test-ingest python3 -m unittest discover -s tests -v
+Run: CANDID_DATA_DIR=<system-temp-dir>/candid-test-ingest python3 -m unittest discover -s tests -v
 """
 import csv
 import io
@@ -20,7 +20,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-os.environ["CANDID_DATA_DIR"] = "/tmp/candid-test-ingest"
+os.environ["CANDID_DATA_DIR"] = str(
+    Path(tempfile.gettempdir()) / "candid-test-ingest")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

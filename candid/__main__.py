@@ -20,10 +20,31 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
 
+from pathlib import Path
+
 from candid import __version__
+
+# Windows console compatibility (UTF-8 output + ANSI colors); the guarded
+# import keeps the CLI working even if console.py is ever removed.
+try:
+    from candid.console import color, setup_console
+except ImportError:  # pragma: no cover
+    def setup_console() -> None:  # type: ignore[misc]
+        pass
+
+    def color(text: str, name: str) -> str:  # type: ignore[misc]
+        return text
+
+
+def _user_path(p):
+    """Resolve a user-supplied CLI path: expand env vars (%USERPROFILE% on
+    Windows, $VAR elsewhere) and ~, so home-relative and env-based paths
+    work cross-platform."""
+    return Path(os.path.expandvars(str(p))).expanduser()
 
 # ---------------------------------------------------------------------------
 # command inventory (kept in sync with build_parser below)
@@ -137,7 +158,9 @@ def _profile():
 
 def cmd_onboard(a):
     from candid import profile as P
-    prof = P.onboard(resume_path=a.resume, linkedin_path=a.linkedin, out_path=a.out)
+    prof = P.onboard(resume_path=_user_path(a.resume) if a.resume else None,
+                     linkedin_path=_user_path(a.linkedin) if a.linkedin else None,
+                     out_path=_user_path(a.out) if a.out else None)
     print("Profile saved.")
     print(P.profile_card(prof))
     if not prof.get("name"):
@@ -218,9 +241,10 @@ def cmd_tailor(a):
         out = T.build_cover_letter(prof, jd, company=company, role=role,
                                    tone=a.tone, hook=a.hook or "")
     if a.out:
-        with open(a.out, "w", encoding="utf-8") as f:
+        out_path = _user_path(a.out)
+        with open(out_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(out)
-        print(f"Saved to {a.out}")
+        print(f"Saved to {out_path}")
     else:
         print(out)
 
@@ -306,7 +330,7 @@ def cmd_offer(a):
         print(O.render_comparison(O.list_offers()))
     elif a.what == "export":
         path = O.export_comparison(O.list_offers(),
-                                   path=a.out or None)
+                                   path=_user_path(a.out) if a.out else None)
         print(f"Offer comparison exported to {path}")
 
 
@@ -337,14 +361,14 @@ def cmd_salary(a):
             print(S.render_lookup(result, company=a.company or "",
                                   title=a.title or "", location=a.location or ""))
     elif a.what == "import-lca":
-        print(f"Importing {a.file} ...")
-        res = S.import_lca(a.file, limit=a.limit)
+        print(f"Importing {_user_path(a.file)} ...")
+        res = S.import_lca(_user_path(a.file), limit=a.limit)
         print(f"Imported {res['imported']} rows, skipped {res['skipped']}.")
     elif a.what == "parse-range":
         if a.text:
             text = a.text
         elif a.jd:
-            with open(a.jd, encoding="utf-8") as f:
+            with open(_user_path(a.jd), encoding="utf-8") as f:
                 text = f.read()
         else:
             text = None
@@ -372,9 +396,10 @@ def cmd_mock(a):
             print(f"{p['id']:<20}{p['title'][:45]:<46}{p['topic']:<14}{p['difficulty']}")
     elif a.what == "coding":
         M.interactive_coding(topic=a.topic, difficulty=a.difficulty,
-                             problem_id=a.problem, solution_file=a.file)
+                             problem_id=a.problem,
+                             solution_file=_user_path(a.file) if a.file else None)
     elif a.what == "run":
-        code = open(a.file, encoding="utf-8").read()
+        code = open(_user_path(a.file), encoding="utf-8").read()
         result = M.run_problem(a.problem, code)
         print(M.render_verdict(a.problem, result))
         sys.exit(0 if result["verdict"] == "accepted" else 1)
@@ -441,11 +466,11 @@ def cmd_import(a):
     """
     if a.gmail_takeout:
         from candid import gmail as G
-        res = G.import_mbox(a.gmail_takeout, max_messages=a.max)
+        res = G.import_mbox(_user_path(a.gmail_takeout), max_messages=a.max)
         print(G.render_import_summary(res))
     elif a.linkedin_zip:
         from candid import linkedin as L
-        res = L.import_zip(a.linkedin_zip, mode=a.mode)
+        res = L.import_zip(_user_path(a.linkedin_zip), mode=a.mode)
         prof = res["profile"]
         print(f"✅ LinkedIn import ({res['mode']}): {res['positions']} positions, "
               f"{res['skills']} skills, {res['education']} education entries.")
@@ -459,7 +484,7 @@ def cmd_import(a):
 def cmd_gmail(a):
     from candid import gmail as G
     if a.what == "import":
-        res = G.import_mbox(a.file, max_messages=a.max)
+        res = G.import_mbox(_user_path(a.file), max_messages=a.max)
         print(G.render_import_summary(res))
     elif a.what == "proposals":
         print(G.render_proposals(G.list_proposals(status="pending")))
@@ -478,7 +503,7 @@ def cmd_linkedin(a):
     if a.what == "guide":
         print(L.EXPORT_GUIDE)
     elif a.what == "import":
-        res = L.import_zip(a.zip, mode=a.mode)
+        res = L.import_zip(_user_path(a.zip), mode=a.mode)
         prof = res["profile"]
         print(f"✅ LinkedIn import ({res['mode']}): {res['positions']} positions, "
               f"{res['skills']} skills, {res['education']} education entries.")
@@ -934,20 +959,21 @@ def _next_command(args, etype: str) -> str:
 
 
 def main(argv=None):
+    setup_console()  # UTF-8 + ANSI on Windows; no-op elsewhere
     args = build_parser().parse_args(argv)
     try:
         args.func(args)
     except SystemExit as e:
         # sys.exit("message") from helpers → friendly error + next step
         if isinstance(e.code, str):
-            sys.stderr.write(f"Error: {e.code}\n")
+            sys.stderr.write(color(f"Error: {e.code}\n", "red"))
             sys.stderr.write(f"Next: run `{_next_command(args, '')}`\n")
             sys.exit(1)
         raise
     except Exception as e:  # friendly errors, no tracebacks
         etype = type(e).__name__
         if etype in _EXPECTED_ERRORS:
-            sys.stderr.write(f"Error: {e}\n")
+            sys.stderr.write(color(f"Error: {e}\n", "red"))
             sys.stderr.write(f"Next: run `{_next_command(args, etype)}`\n")
             sys.exit(1)
         raise

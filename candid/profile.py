@@ -29,6 +29,7 @@ import re
 from pathlib import Path
 
 from candid import config as C
+from candid.atomic import atomic_write
 
 SECTION_HEADERS = [
     "experience", "work experience", "employment", "professional experience",
@@ -528,8 +529,7 @@ def onboard(resume_path: str | Path | None = None,
     profile = build_profile(texts, sources)
     C.ensure_data_dirs()
     dest = Path(out_path) if out_path else C.PROFILE_PATH
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    atomic_write(dest, json.dumps(profile, indent=2))
     return profile
 
 

@@ -1,6 +1,6 @@
 """Tests for the interview-prep + offers + mock-interview improvements.
 
-Run: CANDID_DATA_DIR=/tmp/candid-test-prep python -m unittest discover -s tests
+Run: CANDID_DATA_DIR=<system-temp-dir>/candid-test-prep python -m unittest discover -s tests
 (also honored when set in-process below).
 """
 import os
@@ -11,13 +11,14 @@ import time
 import unittest
 from pathlib import Path
 
-os.environ.setdefault("CANDID_DATA_DIR", "/tmp/candid-test-prep")
+_CANDID_TEST_PREP = str(Path(tempfile.gettempdir()) / "candid-test-prep")
+os.environ.setdefault("CANDID_DATA_DIR", _CANDID_TEST_PREP)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 SAMPLES = ROOT / "samples" / "candid"
 
-TEST_DIR = Path("/tmp/candid-test-prep")
+TEST_DIR = Path(_CANDID_TEST_PREP)
 
 
 def _clean():

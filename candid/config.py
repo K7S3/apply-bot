@@ -12,24 +12,30 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from . import platform as _platform
+
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
 
 def _data_dir() -> Path:
-    """User data dir. Overridable via CANDID_DATA_DIR (used by tests)."""
+    """User data dir. Overridable via CANDID_DATA_DIR (used by tests).
+
+    Defaults to the project-local ``candid_data/`` folder (unchanged
+    behavior); env overrides go through platform.normalize_path.
+    """
     override = os.environ.get("CANDID_DATA_DIR")
     if override:
-        return Path(override).expanduser()
-    return PROJECT_ROOT / "candid_data"
+        return _platform.normalize_path(override)
+    return _platform.long_path(PROJECT_ROOT / "candid_data")
 
 
 def _config_dir() -> Path:
     """Per-user config dir. Overridable via CANDID_CONFIG_DIR."""
     override = os.environ.get("CANDID_CONFIG_DIR")
     if override:
-        return Path(override).expanduser()
-    return Path.home() / ".config" / "candid"
+        return _platform.normalize_path(override)
+    return _platform.long_path(_platform.config_dir())
 
 
 # --- user data (git-ignored) -------------------------------------------------

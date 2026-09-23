@@ -5,15 +5,16 @@ evidence snippets, missing-skill pointers, title-alignment variants, the ATS
 keyword check, the what-changed summary, the never-invent guarantee, and
 score_match() backward compatibility.
 
-Run: CANDID_DATA_DIR=/tmp/candid-test-match python3 -m unittest tests.test_match_tailor -v
+Run: CANDID_DATA_DIR=<system-temp-dir>/candid-test-match python3 -m unittest tests.test_match_tailor -v
 """
 import os
-
-os.environ["CANDID_DATA_DIR"] = "/tmp/candid-test-match"
-
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+
+os.environ["CANDID_DATA_DIR"] = str(
+    Path(tempfile.gettempdir()) / "candid-test-match")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))

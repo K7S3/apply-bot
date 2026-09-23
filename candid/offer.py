@@ -215,7 +215,7 @@ def export_comparison(offers: list[dict], path: str | Path | None = None) -> Pat
                   TAX_NOTE,
                   ""]
         md = "\n".join(lines)
-    path.write_text(md, encoding="utf-8")
+    path.write_text(md, encoding="utf-8", newline="\n")
     return path
 
 

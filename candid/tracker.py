@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from candid import config as C
+from candid.atomic import atomic_write, file_lock
 
 
 class TrackerError(Exception):
@@ -34,7 +35,9 @@ def _save(apps: list[dict], path: str | Path | None = None) -> Path:
     p = Path(path) if path else C.TRACKER_PATH
     C.ensure_data_dirs()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(apps, indent=2), encoding="utf-8")
+    # lock + atomic write: never leave a half-written tracker.json
+    with file_lock(p):
+        atomic_write(p, json.dumps(apps, indent=2))
     return p
 
 

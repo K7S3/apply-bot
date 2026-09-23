@@ -150,6 +150,7 @@ No analytics, no telemetry, no accounts.
 - [docs/adding_problems.md](docs/adding_problems.md) — add coding problems to the mock judge
 - [docs/adding_questions.md](docs/adding_questions.md) — add reported interview questions (source + URL required)
 - [docs/adding_sources.md](docs/adding_sources.md) — add a public job feed
+- [docs/windows.md](docs/windows.md) — Windows install, PowerShell tips, known limitations
 
 ## Tests
 
@@ -157,7 +158,7 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+330 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
@@ -169,8 +170,13 @@ Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
 errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
 `/api/import` multipart upload, import guides, and an HTML↔API
-cross-check). The mock judge is also verified by running every problem's
-reference solution through it (`python scripts/seed_problems.py --verify`).
+cross-check), plus Windows hardening: platform paths (`%APPDATA%`, `\\?\`
+long paths, `%VAR%` expansion, safe filenames), console UTF-8 + ANSI/VT
+colors, subprocess hardening, atomic writes with file locking, line-ending
+correctness in exports, and dashboard localhost binding. The mock judge is
+also verified by running every problem's reference solution through it
+(`python scripts/seed_problems.py --verify`). CI runs the suite on
+`windows-latest`, `ubuntu-latest`, and `macos-latest`.
 
 ## Legacy automation
 

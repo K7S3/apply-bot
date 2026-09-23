@@ -23,6 +23,7 @@ salary data exists - the market range for the role (see candid.salary).
 
 from __future__ import annotations
 
+import os
 import re
 import urllib.request
 
@@ -55,7 +56,9 @@ def fetch_jd(source: str, timeout: int = 25) -> str:
             raise
         except Exception as exc:
             raise MatchError(f"Could not fetch JD from URL: {exc}") from exc
-    p = Path(s)
+    # File path: expand ~ and env vars (%USERPROFILE% on Windows) before
+    # checking existence, so home-relative / env-based paths resolve.
+    p = Path(os.path.expandvars(os.path.expanduser(s)))
     if p.exists() and p.is_file():
         text = p.read_text(encoding="utf-8", errors="replace")
         if len(text.strip()) < 50:
