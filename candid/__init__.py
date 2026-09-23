@@ -16,8 +16,6 @@ Modules:
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
     jobs      curated job discovery → tracker pipeline
-    patterns  coding patterns curriculum: taxonomy, gap-driven Blind-75-style
-              study plans, spaced repetition, drills, mastery, cheat sheets
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.

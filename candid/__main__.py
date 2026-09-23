@@ -22,7 +22,6 @@ import difflib
 import json
 import re
 import sys
-from pathlib import Path
 
 from candid import __version__
 
@@ -32,8 +31,8 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
+    "followup", "offer", "negotiate", "salary", "mock", "jobs", "events",
+    "dashboard", "import", "gmail", "linkedin",
 ]
 
 SUBCOMMANDS = {
@@ -47,18 +46,17 @@ SUBCOMMANDS = {
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
+    "events": ["list", "rank", "show", "plan", "save", "watch", "upcoming",
+               "debrief", "calendar", "budget", "topics"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
-    "patterns": ["list", "tags", "plan", "log", "due", "review",
-                 "drill", "mastery", "cheatsheet", "reset"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
-    "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError",
+    "GmailError", "LinkedInError", "DashboardError", "JobsError", "EventsError",
     "ValueError",
 }
 
@@ -76,7 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
-    "PatternsError": "python -m candid patterns --help",
+    "EventsError": "python -m candid events --help",
 }
 
 
@@ -398,112 +396,6 @@ def cmd_mock(a):
         M.design_session(level=a.level, ai_feedback=a.ai)
 
 
-def cmd_patterns(a):
-    from candid import patterns as P
-    if a.what == "list":
-        if a.pattern:
-            p = P.get_pattern(a.pattern)
-            print(f"{p['name']} (`{p['id']}`)\n\n{p['blurb']}\n")
-            print("Recognize it:")
-            for c in p["cues"]:
-                print(f"  - {c}")
-            print(f"\nComplexity: {p['complexity']}")
-            banked = P.problems_for_pattern(a.pattern)
-            if banked:
-                print("\nBank problems:")
-                for b in banked:
-                    print(f"  {b['id']:<20}{b['title'][:40]:<42}{b['difficulty']}")
-            else:
-                print("\nNo bank problems tagged with this pattern yet.")
-        else:
-            cov = P.coverage()
-            print(f"{'ID':<20}{'Name':<34}{'Bank':>5}")
-            for p in P.PATTERNS:
-                n = len(cov.get(p["id"], []))
-                print(f"{p['id']:<20}{p['name'][:33]:<34}{n:>5}")
-    elif a.what == "tags":
-        if a.by_pattern:
-            problems = P.problems_for_pattern(a.by_pattern)
-            if not problems:
-                print(f"No bank problems tagged '{a.by_pattern}' yet.")
-            for b in problems:
-                print(f"{b['id']:<20}{b['title'][:45]:<47}{b['difficulty']}")
-        else:
-            r = P.validate_bank()
-            if r["errors"]:
-                sys.exit("Tag errors:\n" + "\n".join(f"- {e}" for e in r["errors"]))
-            print(f"{r['problems']} problems tagged across "
-                  f"{len(r['patterns_used'])} patterns.")
-            if r["patterns_unused"]:
-                print("No bank problems yet for: "
-                      + ", ".join(r["patterns_unused"]))
-    elif a.what == "plan":
-        gaps = [g.strip() for g in a.gaps.split(",") if g.strip()] \
-            if a.gaps else None
-        plan = P.build_plan(gaps=gaps, total=a.total, weeks=a.weeks)
-        if a.json:
-            print(json.dumps(plan, indent=2))
-        elif a.out:
-            fp = P.export_plan(plan, a.out)
-            print(f"Wrote {plan['total']}-problem plan to {fp}")
-        else:
-            print(P.render_plan(plan))
-    elif a.what == "log":
-        rec = P.log_attempt(a.problem, solved=a.solved, quality=a.quality,
-                            minutes=a.minutes,
-                            at=a.date if a.date else None)
-        status = "solved" if rec["solved"] else "not solved"
-        print(f"Logged {a.problem}: {status}, quality {rec['quality']}/5 "
-              f"on {rec['date']}.")
-    elif a.what == "due":
-        due = P.due_cards(as_of=a.as_of if a.as_of else None)
-        if a.json:
-            print(json.dumps(due, indent=2))
-        elif not due:
-            print("Nothing due for review.")
-        else:
-            print(f"{'Problem':<20}{'Next due':<12}Interval  Ease")
-            for c in due:
-                print(f"{c['problem_id']:<20}{c['next_due']:<12}"
-                      f"{c['interval']:>5}d  {c['easiness']}")
-    elif a.what == "review":
-        card = P.review(a.problem, a.quality,
-                        today=a.date if a.date else None)
-        print(f"{a.problem}: quality {a.quality}/5 -> next review "
-              f"{card['next_due']} (interval {card['interval']}d, "
-              f"ease {card['easiness']}).")
-    elif a.what == "drill":
-        drill = P.build_drill(minutes_per_day=a.minutes_per_day, days=a.days,
-                              seed=a.seed,
-                              start=a.start if a.start else None)
-        if a.json:
-            print(json.dumps(drill, indent=2))
-        else:
-            print(P.render_drill(drill))
-    elif a.what == "mastery":
-        report = P.mastery_report()
-        if a.json:
-            print(json.dumps(report, indent=2))
-        else:
-            print(P.render_mastery(report))
-    elif a.what == "cheatsheet":
-        text = P.cheatsheet(a.pattern)
-        if a.out:
-            fp = Path(a.out).expanduser()
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(text, encoding="utf-8")
-            print(f"Wrote cheat sheet to {fp}")
-        else:
-            print(text)
-    elif a.what == "reset":
-        if not a.yes:
-            sys.exit("This deletes your patterns attempts and review cards.\n"
-                     "Re-run with --yes to confirm.")
-        removed = P.reset_progress()
-        print(f"Removed {removed['attempts']} attempts and "
-              f"{removed['cards']} review cards.")
-
-
 def cmd_jobs(a):
     from candid import jobs as J
     from candid import tracker as T
@@ -536,6 +428,82 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+
+
+def cmd_events(a):
+    from candid import events as E
+    what = a.what
+    if what == "list":
+        evs = E.list_events(city=a.city, virtual_only=a.virtual, topic=a.topic,
+                            free_only=a.free, days=a.days,
+                            include_past=a.include_past, limit=a.limit)
+        if a.json:
+            print(json.dumps([{k: ev.get(k) for k in
+                               ("id", "name", "edition", "city", "country", "format",
+                                "start", "end", "date_confidence", "topics", "roles",
+                                "cost_usd", "url", "audience")}
+                              for ev in evs], indent=2))
+        else:
+            print(E.render_list(evs))
+    elif what == "rank":
+        ranked = E.rank_events(_profile(), limit=a.limit)
+        if a.json:
+            print(json.dumps(ranked, indent=2))
+        else:
+            print(E.render_ranked(ranked))
+    elif what == "show":
+        print(E.render_show(E.get_event(a.event_id)))
+    elif what == "plan":
+        plan = E.plan_event(_profile(), a.event_id,
+                            goals=a.goal or None, target_contacts=a.contacts)
+        print(E.render_plan(plan))
+        print(f"\n✅ Plan saved to candid_data/event_plans/{a.event_id}.md")
+    elif what == "save":
+        rec = E.save_to_tracker(a.event_id)
+        if rec.get("duplicate"):
+            print(f"Already in tracker #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['status']}]")
+        else:
+            print(f"✅ Saved to tracker #{rec['id']}: {rec['role']} @ {rec['company']} [saved]")
+    elif what == "watch":
+        if a.action == "add":
+            if not a.event_id:
+                sys.exit("Provide an event id: `python -m candid events watch add <id>`.")
+            E.watch_add(a.event_id)
+            print(f"👀 Watching {a.event_id}.")
+        elif a.action == "remove":
+            if not a.event_id:
+                sys.exit("Provide an event id: `python -m candid events watch remove <id>`.")
+            E.watch_remove(a.event_id)
+            print(f"Removed {a.event_id} from watchlist.")
+        else:
+            evs = E.watch_list()
+            print(E.render_list(evs, today=None) if evs else
+                  "Watchlist is empty. Add one: `python -m candid events watch add <id>`.")
+    elif what == "upcoming":
+        evs = E.upcoming_digest(days=a.days, watched_only=a.watched_only)
+        title = "Watched events coming up" if a.watched_only else f"Events in the next {a.days} days"
+        print(E.render_digest(evs, title=title))
+    elif what == "debrief":
+        contacts = E.parse_contacts(a.contacts)
+        if not contacts:
+            sys.exit("No contacts parsed. Use --contacts \"Name, Role, Company; ...\" (name required).\n"
+                     "Next: run `python -m candid events debrief --help`.")
+        result = E.debrief(_profile(), a.event_id, contacts)
+        print(E.render_debrief(result))
+    elif what == "calendar":
+        pool = E.watch_list() if a.watched_only else None
+        evs = E.list_events(days=a.days, limit=500, events=pool)
+        dest = E.export_ics(evs, a.out)
+        print(f"✅ Wrote {len(evs)} events to {dest} — import it into any calendar app.")
+    elif what == "budget":
+        b = E.budget_plan(a.event_id, travel_usd=a.travel, nights=a.nights,
+                          hotel_per_night=a.hotel, per_diem=a.per_diem,
+                          budget=a.budget)
+        print(E.render_budget(b))
+    elif what == "topics":
+        print(E.render_topics(E.topics()))
+    else:
+        raise EventsError(f"Unknown events subcommand '{what}'")
 
 
 def cmd_dashboard(a):
@@ -910,84 +878,6 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
 
-    # patterns
-    s = _sub(sub, "patterns", "Coding patterns curriculum: study plans, spaced repetition, drills.", [
-        "python -m candid patterns list",
-        "python -m candid patterns plan --gaps sliding-window,dp-1d",
-        "python -m candid patterns log --problem two-sum --solved --quality 4",
-        "python -m candid patterns drill --minutes-per-day 45",
-        "python -m candid patterns mastery",
-    ])
-    ps = _nested(s)
-    t = _sub(ps, "list", "List the pattern taxonomy (or detail one pattern).", [
-        "python -m candid patterns list",
-        "python -m candid patterns list --pattern sliding-window",
-    ])
-    t.add_argument("--pattern", default=None, help="Pattern id for detail view")
-    t = _sub(ps, "tags", "Validate problem pattern tags / list by pattern.", [
-        "python -m candid patterns tags",
-        "python -m candid patterns tags --by-pattern hashmap",
-    ])
-    t.add_argument("--by-pattern", default=None, help="List bank problems for a pattern")
-    t = _sub(ps, "plan", "Blind-75-style study plan from your skill gaps.", [
-        "python -m candid patterns plan",
-        "python -m candid patterns plan --gaps sliding-window,dp-1d --total 30",
-        "python -m candid patterns plan --out plan.md",
-    ])
-    t.add_argument("--gaps", default=None,
-                   help="Comma-separated pattern ids, weakest first (default: from your attempts)")
-    t.add_argument("--total", type=int, default=75, help="Cap on problems (default: 75)")
-    t.add_argument("--weeks", type=int, default=None, help="Weeks to spread over")
-    t.add_argument("--out", default=None, help="Write plan markdown to file")
-    t.add_argument("--json", action="store_true", help="Print the raw plan as JSON")
-    t = _sub(ps, "log", "Log a practice attempt (updates spaced repetition).", [
-        "python -m candid patterns log --problem two-sum --solved --quality 4",
-        "python -m candid patterns log --problem coin-change --failed --minutes 30",
-    ])
-    t.add_argument("--problem", required=True)
-    g = t.add_mutually_exclusive_group(required=True)
-    g.add_argument("--solved", action="store_true")
-    g.add_argument("--failed", action="store_true")
-    t.add_argument("--quality", type=int, default=None, help="Self-rating 0-5")
-    t.add_argument("--minutes", type=float, default=None)
-    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
-    t = _sub(ps, "due", "Show spaced-repetition cards due for review.", [
-        "python -m candid patterns due",
-        "python -m candid patterns due --as-of 2026-10-01",
-    ])
-    t.add_argument("--as-of", default=None, help="YYYY-MM-DD (default: today)")
-    t.add_argument("--json", action="store_true")
-    t = _sub(ps, "review", "Record a review and reschedule (SM-2).", [
-        "python -m candid patterns review --problem two-sum --quality 5",
-    ])
-    t.add_argument("--problem", required=True)
-    t.add_argument("--quality", type=int, required=True, help="Recall quality 0-5")
-    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
-    t = _sub(ps, "drill", "Day-by-day drill: new weak-pattern problems + due reviews.", [
-        "python -m candid patterns drill",
-        "python -m candid patterns drill --minutes-per-day 30 --days 5",
-    ])
-    t.add_argument("--minutes-per-day", type=int, default=45)
-    t.add_argument("--days", type=int, default=7)
-    t.add_argument("--seed", type=int, default=0)
-    t.add_argument("--start", default=None, help="YYYY-MM-DD (default: today)")
-    t.add_argument("--json", action="store_true")
-    t = _sub(ps, "mastery", "Per-pattern mastery dashboard.", [
-        "python -m candid patterns mastery",
-    ])
-    t.add_argument("--json", action="store_true")
-    t = _sub(ps, "cheatsheet", "One-page pattern cheat sheet.", [
-        "python -m candid patterns cheatsheet sliding-window",
-        "python -m candid patterns cheatsheet heap-top-k --out heap.md",
-    ])
-    t.add_argument("pattern", help="Pattern id")
-    t.add_argument("--out", default=None, help="Write markdown to file")
-    t = _sub(ps, "reset", "Delete patterns attempts and review cards.", [
-        "python -m candid patterns reset --yes",
-    ])
-    t.add_argument("--yes", action="store_true", help="Confirm deletion")
-    s.set_defaults(func=cmd_patterns)
-
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
         "python -m candid jobs curate --role \"Data Scientist\" --location \"New York\" --remote",
@@ -1031,6 +921,87 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
     s.set_defaults(func=cmd_jobs)
+
+    # events
+    s = _sub(sub, "events", "Find tech conferences/meetups, rank them, plan networking.", [
+        "python -m candid events list --city \"New York\" --free",
+        "python -m candid events rank --limit 10",
+        "python -m candid events plan kubecon-eu-2027",
+        "python -m candid events debrief nyc-python-meetup --contacts \"Jane Doe, Engineer, Acme\"",
+    ])
+    es = _nested(s)
+    t = _sub(es, "list", "List upcoming events (public listings, no login).", [
+        "python -m candid events list",
+        "python -m candid events list --topic python --free --days 60",
+        "python -m candid events list --city \"New York\" --virtual --json",
+    ])
+    t.add_argument("--city", default="")
+    t.add_argument("--virtual", action="store_true", help="Virtual or hybrid events only")
+    t.add_argument("--topic", default="")
+    t.add_argument("--free", action="store_true")
+    t.add_argument("--days", type=int, default=None, help="Only events starting within N days")
+    t.add_argument("--all", dest="include_past", action="store_true", help="Include past events")
+    t.add_argument("--limit", type=int, default=25)
+    t.add_argument("--json", action="store_true")
+    t = _sub(es, "rank", "Rank upcoming events by fit to your profile.", [
+        "python -m candid events rank",
+        "python -m candid events rank --limit 5 --json",
+    ])
+    t.add_argument("--limit", type=int, default=10)
+    t.add_argument("--json", action="store_true")
+    t = _sub(es, "show", "Show the full detail card for one event.", [
+        "python -m candid events show kubecon-eu-2027",
+    ])
+    t.add_argument("event_id")
+    t = _sub(es, "plan", "Build a networking-goal plan for an event (saved locally).", [
+        "python -m candid events plan kubecon-eu-2027",
+        "python -m candid events plan nyc-python-meetup --contacts 8 --goal \"find a referral\"",
+    ])
+    t.add_argument("event_id")
+    t.add_argument("--contacts", type=int, default=5, help="Target number of new contacts")
+    t.add_argument("--goal", action="append", default=[], help="Extra goal (repeatable)")
+    t = _sub(es, "save", "Park an event in the tracker (status: saved).", [
+        "python -m candid events save kubecon-eu-2027",
+    ])
+    t.add_argument("event_id")
+    t = _sub(es, "watch", "Watchlist: events you're considering.", [
+        "python -m candid events watch add kubecon-eu-2027",
+        "python -m candid events watch list",
+        "python -m candid events watch remove kubecon-eu-2027",
+    ])
+    t.add_argument("action", choices=["add", "list", "remove"], nargs="?", default="list")
+    t.add_argument("event_id", nargs="?", default="")
+    t = _sub(es, "upcoming", "Digest of what's next (optionally watchlist-only).", [
+        "python -m candid events upcoming",
+        "python -m candid events upcoming --days 60 --watched-only",
+    ])
+    t.add_argument("--days", type=int, default=90)
+    t.add_argument("--watched-only", action="store_true")
+    t = _sub(es, "debrief", "Draft follow-up emails for contacts you met.", [
+        "python -m candid events debrief nyc-python-meetup --contacts \"Jane Doe, Engineer, Acme; Sam Lee\"",
+    ])
+    t.add_argument("event_id")
+    t.add_argument("--contacts", default="", help="'Name, Role, Company; ...' (name required)")
+    t = _sub(es, "calendar", "Export events as an .ics file (import into any calendar).", [
+        "python -m candid events calendar --out events.ics",
+        "python -m candid events calendar --watched-only --out watched.ics",
+    ])
+    t.add_argument("--out", default="candid_events.ics")
+    t.add_argument("--watched-only", action="store_true")
+    t.add_argument("--days", type=int, default=365)
+    t = _sub(es, "budget", "Estimate total attendance cost vs your budget.", [
+        "python -m candid events budget reinvent-2026 --travel 400 --nights 4 --hotel 180 --budget 3000",
+    ])
+    t.add_argument("event_id")
+    t.add_argument("--travel", type=float, default=0.0)
+    t.add_argument("--nights", type=int, default=0)
+    t.add_argument("--hotel", type=float, default=0.0, help="Hotel $ per night")
+    t.add_argument("--per-diem", dest="per_diem", type=float, default=75.0)
+    t.add_argument("--budget", type=float, default=None)
+    t = _sub(es, "topics", "Topic taxonomy with event counts.", [
+        "python -m candid events topics",
+    ])
+    s.set_defaults(func=cmd_events)
 
     # dashboard
     s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 only).", [
