@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "offer", "negotiate", "leverage", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -42,6 +42,8 @@ SUBCOMMANDS = {
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
+    "leverage": ["add", "list", "playbook", "timeline", "script", "batna",
+                 "extend", "deadlines", "log", "score", "decide", "brief"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "LeverageError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "LeverageError": "python -m candid leverage --help",
 }
 
 
@@ -324,6 +327,50 @@ def cmd_negotiate(a):
                               base_ask_reason=a.base_ask, second_item=a.second_item,
                               second_ask_reason=a.second_ask or "",
                               target_summary=a.target or "", call_time=a.call_time))
+
+
+def cmd_leverage(a):
+    from candid import leverage as L
+    if a.what == "add":
+        rec = L.register(a.offer_id, status=a.status, deadline=a.deadline or None,
+                         contact=a.contact, contact_email=a.contact_email,
+                         notes=a.notes)
+        dl = f", deadline {rec['deadline']}" if rec["deadline"] else ""
+        print(f"Registered leverage for offer #{rec['offer_id']} "
+              f"({rec['company']}): {rec['status']}{dl}")
+    elif a.what == "list":
+        print(L.render_register(L.list_registered()))
+    elif a.what == "playbook":
+        print(L.ethical_playbook())
+    elif a.what == "timeline":
+        print(L.render_timeline(L.build_timeline()))
+    elif a.what == "script":
+        if a.which == "index":
+            print(L.render_script_index())
+        else:
+            fields = dict(kv.split("=", 1) for kv in (a.set or []))
+            print(L.get_script(a.which, **fields))
+    elif a.what == "batna":
+        print(L.batna_report()["report"])
+    elif a.what == "extend":
+        prof = _profile()
+        print(L.extension_email_for(a.offer_id, days=a.days, reason=a.reason,
+                                    name=prof.get("name") or "Your Name"))
+    elif a.what == "deadlines":
+        print(L.render_deadlines(L.deadline_report()))
+    elif a.what == "log":
+        if a.list:
+            print(L.render_disclosures(L.list_disclosures()))
+        else:
+            rec = L.log_disclosure(a.company, a.person, a.channel, a.said)
+            print(f"Logged disclosure: {rec['company']} / {rec['person']} "
+                  f"({rec['channel']}) @ {rec['ts']}")
+    elif a.what == "score":
+        print(L.render_score(L.leverage_score()))
+    elif a.what == "decide":
+        print(L.render_decision(L.decision_plan()))
+    elif a.what == "brief":
+        print(L.negotiation_brief(a.offer_id))
 
 
 def cmd_salary(a):
@@ -718,6 +765,77 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--second-ask", default=""); t.add_argument("--target", default="")
     t.add_argument("--call-time", default="tomorrow")
     s.set_defaults(func=cmd_negotiate)
+
+    # leverage
+    s = _sub(sub, "leverage", "Competing-offer leverage playbook.", [
+        "python -m candid leverage add --offer-id 1 --status written --deadline 2026-10-15 --contact Jane",
+        "python -m candid leverage timeline",
+        "python -m candid leverage score",
+        "python -m candid leverage decide",
+    ])
+    ls = _nested(s)
+    t = _sub(ls, "add", "Register leverage metadata for an offer.", [
+        "python -m candid leverage add --offer-id 1 --status written --deadline 2026-10-15 --contact Jane",
+    ])
+    t.add_argument("--offer-id", type=int, required=True)
+    t.add_argument("--status", default="written",
+                   choices=["verbal", "written", "signed", "declined", "expired"])
+    t.add_argument("--deadline", default="", help="Decision deadline YYYY-MM-DD")
+    t.add_argument("--contact", default="", help="Recruiter/contact name")
+    t.add_argument("--contact-email", default="")
+    t.add_argument("--notes", default="")
+    _sub(ls, "list", "List the competing-offer register.", [
+        "python -m candid leverage list",
+    ])
+    _sub(ls, "playbook", "The ethical competing-offer playbook.", [
+        "python -m candid leverage playbook",
+    ])
+    _sub(ls, "timeline", "Coordinate all offer deadlines into an action plan.", [
+        "python -m candid leverage timeline",
+    ])
+    t = _sub(ls, "script", "Get a script for a leverage scenario.", [
+        "python -m candid leverage script --which first_disclosure",
+        "python -m candid leverage script --which match_ask --set company=Acme",
+    ])
+    t.add_argument("--which", required=True,
+        choices=["index", "first_disclosure", "accelerate_process",
+                 "extension_request", "share_offer_letter", "match_ask",
+                 "best_and_final", "exploding_response", "decline_graceful"],
+        help="'index' lists all eight scripts")
+    t.add_argument("--set", action="append", default=[], help="key=value template fields")
+    _sub(ls, "batna", "Compute your BATNA from real offers.", [
+        "python -m candid leverage batna",
+    ])
+    t = _sub(ls, "extend", "Draft a deadline-extension email for an offer.", [
+        "python -m candid leverage extend --offer-id 1 --days 7 --reason final-rounds",
+    ])
+    t.add_argument("--offer-id", type=int, required=True)
+    t.add_argument("--days", type=int, default=7)
+    t.add_argument("--reason", default="final-rounds",
+                   help="final-rounds | family-decision | logistics | free text")
+    _sub(ls, "deadlines", "Deadline tracker with urgency warnings.", [
+        "python -m candid leverage deadlines",
+    ])
+    t = _sub(ls, "log", "Log a competing-offer disclosure (honesty log).", [
+        "python -m candid leverage log --company Acme --person Jane --channel call --said \"told her about the $235k Beta offer\"",
+        "python -m candid leverage log --list",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--person", default="")
+    t.add_argument("--channel", default="call",
+                   choices=["call", "email", "in-person", "text"])
+    t.add_argument("--said", default="", help="What you actually said")
+    t.add_argument("--list", action="store_true", help="Show the disclosure log")
+    _sub(ls, "score", "0-100 leverage strength score + next levers.", [
+        "python -m candid leverage score",
+    ])
+    _sub(ls, "decide", "Accept / negotiate / hold / decline plan per offer.", [
+        "python -m candid leverage decide",
+    ])
+    t = _sub(ls, "brief", "One-page negotiation brief for an offer.", [
+        "python -m candid leverage brief --offer-id 1",
+    ])
+    t.add_argument("--offer-id", type=int, required=True)
+    s.set_defaults(func=cmd_leverage)
 
     # salary
     s = _sub(sub, "salary", "Salary intelligence database.", [
