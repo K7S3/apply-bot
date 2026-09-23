@@ -111,6 +111,14 @@
 
 <section id="sec-nudges"><h2>Due nudges</h2><div id="nudges"></div></section>
 
+<!-- 1b. career capital -->
+<section id="sec-wins"><h2>Career capital</h2>
+  <div class="statcards" id="winCards"></div>
+  <div id="winRecent"></div>
+  <p style="color:var(--muted);font-size:13px">Log wins as they happen:
+  <code>python -m candid wins add --title "..." --competency leadership</code></p>
+</section>
+
 <!-- 2. applications -->
 <section id="sec-apps"><h2>Applications</h2>
   <div class="toolbar">
@@ -239,6 +247,20 @@ function loadNudges(nudges){
     d.innerHTML=`<b>[${pretty(n.kind)}]</b> ${esc(n.message)}<br>→ ${esc(n.action)}<code>${esc(n.command)}</code>`;
     w.appendChild(d);
   }
+}
+
+/* ---------- 1b. career capital ---------- */
+async function loadWins(){
+  const w=await api.get("/api/wins");
+  $("winCards").innerHTML=[
+    ["Wins logged",w.total],
+    ["With quantified impact",w.with_impact],
+    ["Top competency",w.top_competencies.length?w.top_competencies[0].competency.replace(/-/g," "):"—"],
+  ].map(([l,n])=>`<div class="statcard"><div class="n">${esc(n)}</div><div class="l">${l}</div></div>`).join("");
+  $("winRecent").innerHTML=w.recent.length?
+    `<table><thead><tr><th>Date</th><th>Win</th><th>Competencies</th></tr></thead><tbody>`+
+    w.recent.map(r=>`<tr><td>${esc(r.date||"")}</td><td>${esc(r.title)}</td><td>${esc((r.competencies||[]).join(", "))}</td></tr>`).join("")+
+    `</tbody></table>`:`<p style="color:var(--muted)">No wins logged yet.</p>`;
 }
 
 /* ---------- 2. applications: chips, search, sortable table ---------- */
@@ -491,7 +513,7 @@ $("btnSalary").onclick=async()=>{
 
 /* ---------- boot ---------- */
 renderChips();
-loadOverview(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
+loadOverview(); loadWins(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
 </script>
 </body>
 </html>

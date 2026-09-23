@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -33,6 +34,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
+    "wins", "brag", "star",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +50,10 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "wins": ["add", "list", "show", "update", "delete", "impact-add",
+             "impact-remove", "timeline", "rollup", "gap"],
+    "brag": ["sheet", "coverage"],
+    "star": ["kit", "bullets"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +61,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "StarError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +78,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "StarError": "python -m candid star kit",
 }
 
 
@@ -451,6 +458,149 @@ def cmd_import(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _parse_num(value):
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return float(value)
+
+
+def cmd_wins(a):
+    from candid import wins as W
+    from candid import impact as I
+    if a.what == "add":
+        rec = W.add_win(title=a.title, win_date=a.date,
+                        description=a.description or "", role=a.role or "",
+                        competencies=a.competency or [], tags=a.tag or [])
+        print(f"Logged win {rec['id']}: {rec['title']} [{rec['date']}]")
+    elif a.what == "list":
+        wins = W.list_wins(competency=a.competency, tag=a.tag, since=a.since,
+                           until=a.until, query=a.query, role=a.role)
+        if a.json:
+            print(json.dumps(wins, indent=2))
+            return
+        if not wins:
+            print("No wins logged yet. Add one with: python -m candid wins add --title ...")
+            return
+        for w in wins:
+            comps = ",".join(w.get("competencies") or ())
+            line = f"{w['id']}  {w.get('date', '')}  {w['title']}"
+            if comps:
+                line += f"  [{comps}]"
+            print(line)
+    elif a.what == "show":
+        w = W.get_win(a.id)
+        if not w:
+            sys.exit(f"No win with id {a.id}. Run `python -m candid wins list` to see ids.")
+        print(json.dumps(w, indent=2))
+    elif a.what == "update":
+        fields = {}
+        if a.title:
+            fields["title"] = a.title
+        if a.date:
+            fields["date"] = a.date
+        if a.description is not None:
+            fields["description"] = a.description
+        if a.role is not None:
+            fields["role"] = a.role
+        if a.competency:
+            fields["competencies"] = a.competency
+        if a.tag:
+            fields["tags"] = a.tag
+        if not fields:
+            sys.exit("Nothing to update. Pass at least one of --title/--date/--description/--role/--competency/--tag.")
+        rec = W.update_win(a.id, **fields)
+        print(f"Updated win {rec['id']}: {rec['title']}")
+    elif a.what == "delete":
+        w = W.get_win(a.id)
+        if not w:
+            sys.exit(f"No win with id {a.id}.")
+        if not a.yes:
+            sys.exit(f"Refusing to delete {a.id} ({w['title']}) without --yes.")
+        W.delete_win(a.id)
+        print(f"Deleted win {a.id}.")
+    elif a.what == "impact-add":
+        rec = I.add_impact(a.id, metric=a.metric, before=_parse_num(a.before),
+                           after=_parse_num(a.after), unit=a.unit or "",
+                           category=a.category or "")
+        print(f"Added impact to {rec['id']}: {a.metric}")
+    elif a.what == "impact-remove":
+        rec = I.remove_impact(a.id, a.index)
+        print(f"Removed impact #{a.index} from {rec['id']}.")
+    elif a.what == "timeline":
+        rows = I.impact_timeline(category=a.category)
+        if a.json:
+            print(json.dumps(rows, indent=2))
+            return
+        if not rows:
+            print("No quantified impacts logged yet.")
+            return
+        for r in rows:
+            delta = f" ({r['delta_pct']:+.1f}%)" if r["delta_pct"] is not None else ""
+            print(f"{r['date']}  {r['metric']}: {r['before']} -> {r['after']}"
+                  f"{(' ' + r['unit']) if r['unit'] else ''}{delta}  [{r['title']}]")
+    elif a.what == "rollup":
+        r = I.impact_rollup()
+        print(f"{r['wins_with_impact']}/{r['total_wins']} wins have quantified impact")
+        for cat, info in sorted(r["by_category"].items()):
+            print(f"  {cat}: {info['count']} metric(s)")
+    elif a.what == "gap":
+        from candid import brag as B
+        jd = Path(a.jd).read_text() if a.jd else (a.jd_text or "")
+        if not jd.strip():
+            sys.exit("Provide a JD with --jd <file> or --jd-text <text>.")
+        r = B.competency_gap(jd)
+        print(f"Competency coverage vs JD: {r['coverage_pct']}%")
+        if r["covered"]:
+            print("Covered: " + ", ".join(r["covered"]))
+        if r["missing"]:
+            print("Missing: " + ", ".join(r["missing"]))
+            print("Log wins tagged with the missing competencies to close the gap.")
+
+
+def cmd_brag(a):
+    from candid import brag as B
+    if a.what == "sheet":
+        if a.out:
+            path = B.export_brag_sheet(a.out, since=a.since, until=a.until)
+            print(f"Wrote brag sheet to {path}")
+        else:
+            print(B.brag_sheet(since=a.since, until=a.until))
+    elif a.what == "coverage":
+        cov = B.competency_coverage()
+        for comp in sorted(cov):
+            print(f"{cov[comp]:3d}  {comp}")
+
+
+def cmd_star(a):
+    from candid import star as S
+    from candid import wins as W
+    if a.what == "kit":
+        wins = W.list_wins(competency=a.competency)
+        kit = S.answer_kit(wins, competency=a.competency)
+        if a.json:
+            print(json.dumps(kit, indent=2))
+            return
+        if not kit:
+            print("No wins to build stories from. Log wins first: python -m candid wins add --title ...")
+            return
+        for entry in kit:
+            print(f"Q: {entry['question']}")
+            s = entry["story"]
+            for key in ("situation", "task", "action", "result"):
+                if s.get(key):
+                    print(f"  {key.title()}: {s[key]}")
+            print()
+    elif a.what == "bullets":
+        w = W.get_win(a.id)
+        if not w:
+            sys.exit(f"No win with id {a.id}.")
+        for b in S.bullet_drafts(w):
+            print(f"- {b}")
     else:
         raise ValueError("Nothing to import. Use --gmail-takeout FILE.mbox "
                          "or --linkedin-zip FILE.zip")
@@ -918,6 +1068,118 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # wins (career-capital ledger)
+    s = _sub(sub, "wins", "Log wins and impact as they happen (career-capital ledger).", [
+        "python -m candid wins add --title \"Cut p99 latency 8x\" --competency system-design",
+        "python -m candid wins list --competency leadership",
+        "python -m candid wins timeline",
+        "python -m candid wins gap --jd jd.txt",
+    ])
+    ws = _nested(s)
+    t = _sub(ws, "add", "Log a win.", [
+        "python -m candid wins add --title \"Shipped reranker\" --competency ml-modeling --tag promo",
+        "python -m candid wins add --title \"Mentored intern\" --date 2026-08-01 --competency mentoring",
+    ])
+    t.add_argument("--title", required=True)
+    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
+    t.add_argument("--description", default="")
+    t.add_argument("--role", default="")
+    t.add_argument("--competency", action="append", default=None,
+                   help="Repeatable; see candid.wins.COMPETENCIES")
+    t.add_argument("--tag", action="append", default=None, help="Repeatable free-form tag")
+    t = _sub(ws, "list", "List wins, newest first.", [
+        "python -m candid wins list",
+        "python -m candid wins list --competency leadership --json",
+        "python -m candid wins list --since 2026-01-01 --query latency",
+    ])
+    t.add_argument("--competency", default=None); t.add_argument("--tag", default=None)
+    t.add_argument("--since", default=None); t.add_argument("--until", default=None)
+    t.add_argument("--query", default=None); t.add_argument("--role", default=None)
+    t.add_argument("--json", action="store_true")
+    t = _sub(ws, "show", "Show one win as JSON.", [
+        "python -m candid wins show w-0001",
+    ])
+    t.add_argument("id")
+    t = _sub(ws, "update", "Update a win's fields.", [
+        "python -m candid wins update w-0001 --title \"Cut p99 latency 10x\"",
+    ])
+    t.add_argument("id")
+    t.add_argument("--title", default=None); t.add_argument("--date", default=None)
+    t.add_argument("--description", default=None); t.add_argument("--role", default=None)
+    t.add_argument("--competency", action="append", default=None)
+    t.add_argument("--tag", action="append", default=None)
+    t = _sub(ws, "delete", "Delete a win (requires --yes).", [
+        "python -m candid wins delete w-0001 --yes",
+    ])
+    t.add_argument("id")
+    t.add_argument("--yes", action="store_true")
+    t = _sub(ws, "impact-add", "Attach a quantified impact to a win.", [
+        "python -m candid wins impact-add w-0001 --metric \"p99 latency\" --before 800 --after 120 --unit ms --category performance",
+    ])
+    t.add_argument("id")
+    t.add_argument("--metric", required=True)
+    t.add_argument("--before", default=None); t.add_argument("--after", default=None)
+    t.add_argument("--unit", default="")
+    t.add_argument("--category", default="",
+                   help="revenue|cost|performance|quality|scale|time")
+    t = _sub(ws, "impact-remove", "Remove an impact from a win by index.", [
+        "python -m candid wins impact-remove w-0001 --index 0",
+    ])
+    t.add_argument("id")
+    t.add_argument("--index", type=int, required=True)
+    t = _sub(ws, "timeline", "Chronological view of quantified impacts.", [
+        "python -m candid wins timeline",
+        "python -m candid wins timeline --category revenue",
+    ])
+    t.add_argument("--category", default=None)
+    t.add_argument("--json", action="store_true")
+    t = _sub(ws, "rollup", "Impact totals by category.", [
+        "python -m candid wins rollup",
+    ])
+    t = _sub(ws, "gap", "Competency coverage of your wins vs a JD.", [
+        "python -m candid wins gap --jd jd.txt",
+    ])
+    t.add_argument("--jd", default=None, help="Path to JD text file")
+    t.add_argument("--jd-text", default=None, help="JD text inline")
+    s.set_defaults(func=cmd_wins)
+
+    # brag
+    s = _sub(sub, "brag", "Performance-review brag sheet from your wins.", [
+        "python -m candid brag sheet",
+        "python -m candid brag sheet --since 2026-01-01 --out brag-h1.md",
+        "python -m candid brag coverage",
+    ])
+    bs = _nested(s)
+    t = _sub(bs, "sheet", "Render the brag sheet as Markdown.", [
+        "python -m candid brag sheet",
+        "python -m candid brag sheet --since 2026-01-01 --until 2026-06-30 --out brag.md",
+    ])
+    t.add_argument("--since", default=None); t.add_argument("--until", default=None)
+    t.add_argument("--out", default=None, help="Write to file instead of stdout")
+    t = _sub(bs, "coverage", "Win counts per competency.", [
+        "python -m candid brag coverage",
+    ])
+    s.set_defaults(func=cmd_brag)
+
+    # star
+    s = _sub(sub, "star", "STAR stories and resume bullets from your wins.", [
+        "python -m candid star kit",
+        "python -m candid star kit --competency leadership",
+        "python -m candid star bullets w-0001",
+    ])
+    ss = _nested(s)
+    t = _sub(ss, "kit", "Interview answer kit: behavioral Qs paired with your stories.", [
+        "python -m candid star kit",
+        "python -m candid star kit --competency ownership --json",
+    ])
+    t.add_argument("--competency", default=None)
+    t.add_argument("--json", action="store_true")
+    t = _sub(ss, "bullets", "Grounded resume bullet drafts for one win.", [
+        "python -m candid star bullets w-0001",
+    ])
+    t.add_argument("id")
+    s.set_defaults(func=cmd_star)
 
     return p
 

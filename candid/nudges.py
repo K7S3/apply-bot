@@ -178,3 +178,32 @@ def render(nudges: list[dict]) -> str:
         lines.append(f"• [{n['kind']}] {n['message']}")
         lines.append(f"  → {n['action']}: {n['command']}")
     return "\n".join(lines)
+
+
+# --- win logging nudges --------------------------------------------------------
+# After this many days without a logged win, suggest logging one. Wins feed
+# the performance brag sheet (candid.brag) and resume bullets, so a fresh
+# record is the cheapest career-capital habit.
+
+WIN_LOG_AFTER_DAYS = 7
+
+
+def win_nudges(today: date | None = None) -> list[dict]:
+    """Nudge shape matches existing nudges: {kind, message, action}."""
+    today = today or date.today()
+    try:
+        from candid.wins import load_wins
+        wins = load_wins()
+    except Exception:
+        wins = []
+    dates = sorted(((w.get("date") or ""))[:10] for w in wins if w.get("date"))
+    fresh = any(_days_since(d, today) is not None and
+                _days_since(d, today) <= WIN_LOG_AFTER_DAYS for d in dates)
+    if fresh:
+        return []
+    return [{
+        "kind": "log_win",
+        "message": (f"No wins logged in the last {WIN_LOG_AFTER_DAYS} days. "
+                    "Take 2 minutes: candid wins add ..."),
+        "action": "candid wins add",
+    }]

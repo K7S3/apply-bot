@@ -416,6 +416,28 @@ def run_tailor(kind: str, company: str, role: str, jd: str,
     return {"path": str(out), "text": text}
 
 
+def wins_summary() -> dict:
+    """Career-capital ledger snapshot for the dashboard."""
+    try:
+        from candid import wins as W, impact as I, brag as B
+        wins = W.list_wins()
+        rollup = I.impact_rollup(wins)
+        cov = B.competency_coverage(wins)
+        top = sorted(cov.items(), key=lambda kv: kv[1], reverse=True)[:6]
+        recent = [{"id": w.get("id"), "date": w.get("date"),
+                   "title": w.get("title"),
+                   "competencies": w.get("competencies") or []}
+                  for w in wins[:8]]
+        return {"total": len(wins),
+                "with_impact": rollup["wins_with_impact"],
+                "top_competencies": [{"competency": c, "count": n}
+                                     for c, n in top if n],
+                "recent": recent}
+    except Exception:
+        return {"total": 0, "with_impact": 0, "top_competencies": [],
+                "recent": []}
+
+
 def salary_lookup(company: str, title: str, location: str = "") -> dict:
     from candid import salary as S
     return S.lookup(company=company, title=title, location=location)
@@ -517,6 +539,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             elif path == "/api/nudges":
                 from candid import nudges as N
                 _send_json(self, N.pending_nudges())
+            elif path == "/api/wins":
+                _send_json(self, wins_summary())
             elif path == "/api/salary":
                 _send_json(self, salary_lookup(
                     qs.get("company", [""])[0], qs.get("title", [""])[0],

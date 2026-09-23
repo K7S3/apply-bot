@@ -8,6 +8,7 @@ attributes (same approach as tests/test_dashboard.py).
 import contextlib
 import io
 import json
+import os
 import re
 import sys
 import tempfile
@@ -407,6 +408,7 @@ ROUTES = [
     "/api/apps/<id>", "/api/prep", "/api/match", "/api/tailor",
     "/api/proposals/<id>/confirm", "/api/proposals/<id>/reject",
     "/api/import", "/api/curate", "/api/jobs/dismiss", "/api/tailor-diff",
+    "/api/wins",
 ]
 
 
@@ -441,8 +443,94 @@ class HtmlApiTest(unittest.TestCase):
 
     def test_html_wires_new_endpoints(self):
         html = (ROOT / "candid" / "data" / "dashboard.html").read_text()
-        for ep in ("/api/curate", "/api/jobs/dismiss", "/api/tailor-diff"):
+        for ep in ("/api/curate", "/api/jobs/dismiss", "/api/tailor-diff",
+                   "/api/wins"):
             self.assertIn(ep, html, f"{ep} not wired in the HTML")
+
+
+class WinsCliTest(CLIBase):
+    """End-to-end CLI coverage for wins / brag / star (batch-60)."""
+
+    def setUp(self):
+        super().setUp()
+        self._env_saved = os.environ.get("CANDID_DATA_DIR")
+        os.environ["CANDID_DATA_DIR"] = str(self.tmp)
+
+    def tearDown(self):
+        if self._env_saved is None:
+            os.environ.pop("CANDID_DATA_DIR", None)
+        else:
+            os.environ["CANDID_DATA_DIR"] = self._env_saved
+        super().tearDown()
+
+    def test_wins_add_list_show(self):
+        code, out, _ = self.run_cli(["wins", "add", "--title", "Shipped X",
+                                    "--competency", "ownership"])
+        self.assertEqual(code, 0)
+        self.assertIn("w-0001", out)
+        code, out, _ = self.run_cli(["wins", "list"])
+        self.assertEqual(code, 0)
+        self.assertIn("Shipped X", out)
+        code, out, _ = self.run_cli(["wins", "show", "w-0001"])
+        self.assertEqual(code, 0)
+        self.assertIn("ownership", out)
+
+    def test_wins_update_delete(self):
+        self.run_cli(["wins", "add", "--title", "Old"])
+        code, out, _ = self.run_cli(["wins", "update", "w-0001",
+                                      "--title", "New"])
+        self.assertEqual(code, 0)
+        self.assertIn("New", out)
+        code, _, err = self.run_cli(["wins", "delete", "w-0001"])
+        self.assertNotEqual(code, 0)  # needs --yes
+        code, out, _ = self.run_cli(["wins", "delete", "w-0001", "--yes"])
+        self.assertEqual(code, 0)
+
+    def test_wins_impact_timeline_rollup(self):
+        self.run_cli(["wins", "add", "--title", "Latency"])
+        code, out, _ = self.run_cli(
+            ["wins", "impact-add", "w-0001", "--metric", "p99",
+             "--before", "800", "--after", "120", "--unit", "ms",
+             "--category", "performance"])
+        self.assertEqual(code, 0)
+        code, out, _ = self.run_cli(["wins", "timeline"])
+        self.assertEqual(code, 0)
+        self.assertIn("-85.0%", out)
+        code, out, _ = self.run_cli(["wins", "rollup"])
+        self.assertEqual(code, 0)
+        self.assertIn("1/1 wins have quantified impact", out)
+
+    def test_wins_gap(self):
+        self.run_cli(["wins", "add", "--title", "Built model",
+                      "--competency", "ml-modeling"])
+        jd = self.tmp / "jd.txt"
+        jd.write_text("Seeking machine learning and system design expertise.")
+        code, out, _ = self.run_cli(["wins", "gap", "--jd", str(jd)])
+        self.assertEqual(code, 0)
+        self.assertIn("ml-modeling", out)
+        self.assertIn("system-design", out)  # in JD, no tagged win
+
+    def test_brag_sheet_and_coverage(self):
+        self.run_cli(["wins", "add", "--title", "Led launch",
+                      "--competency", "leadership"])
+        code, out, _ = self.run_cli(["brag", "sheet"])
+        self.assertEqual(code, 0)
+        self.assertIn("## Leadership (1)", out)
+        code, out, _ = self.run_cli(["brag", "coverage"])
+        self.assertEqual(code, 0)
+        self.assertIn("leadership", out)
+
+    def test_star_kit_and_bullets(self):
+        self.run_cli(["wins", "add", "--title", "Cut latency",
+                      "--competency", "system-design",
+                      "--description", "Reworked batching. Deployed fix."])
+        code, out, _ = self.run_cli(["star", "kit",
+                                      "--competency", "system-design"])
+        self.assertEqual(code, 0)
+        self.assertIn("Tell me about a time", out)
+        code, out, _ = self.run_cli(["star", "bullets", "w-0001"])
+        self.assertEqual(code, 0)
+        self.assertIn("-", out)
 
 
 if __name__ == "__main__":

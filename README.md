@@ -64,7 +64,10 @@ one ends with the exact next command to run.
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
-| `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, a **Career capital** section (wins logged, quantified impact, recent wins), and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `wins` | Career-capital ledger: log wins and impact as they happen, tagged by competency (18 seeded tags, extendable). `add` / `list` / `show` / `update` / `delete`, `impact-add` / `impact-remove` for quantified before/after metrics, `timeline`, `rollup`, and `gap` (competency coverage of your wins vs a JD). See [docs/career_ledger.md](docs/career_ledger.md). |
+| `brag` | Performance-review brag sheet from your wins: Markdown grouped by competency with quantified impacts inline and peer quotes blockquoted (`brag sheet --out brag.md`), plus per-competency win counts (`brag coverage`). |
+| `star` | Interview kit from your wins: behavioral "tell me about a time" Q&A paired with your STAR stories (`star kit`), and grounded resume bullet drafts that only quantify what you logged (`star bullets`). |
 
 ## Job-source coverage (honest)
 
