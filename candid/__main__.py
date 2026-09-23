@@ -21,8 +21,10 @@ import argparse
 import difflib
 import json
 import re
+import subprocess
 import sys
-from pathlib import Path
+import urllib.request
+from dataclasses import asdict
 
 from candid import __version__
 
@@ -32,9 +34,8 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
-    "dashboard", "import", "gmail", "linkedin", "tracks",
+    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "dashboard", "import", "gmail", "linkedin", "update",
 ]
 
 SUBCOMMANDS = {
@@ -43,9 +44,6 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
-    "benefits": ["health", "healthcare", "match", "vesting", "pto", "espp",
-                 "hsa", "fsa", "commute", "leave", "stipends",
-                 "normalize", "compare"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -53,20 +51,16 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
-    "patterns": ["list", "tags", "plan", "log", "due", "review",
-                 "drill", "mastery", "cheatsheet", "reset"],
-    "tracks": ["list", "show", "questions", "concepts", "drills", "plan",
-               "progress", "done", "undone", "reset", "mock", "suggest"],
+    "update": ["check", "notes", "on", "off", "version"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
-    "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError", "AlumniError",
+    "UpdateCheckError",
     "ValueError",
-    "TrackError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -76,7 +70,6 @@ _NEXT_COMMAND = {
     "TrackerError": "python -m candid track list",
     "PrepError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
-    "BenefitsError": "python -m candid benefits --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
@@ -84,8 +77,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
-    "PatternsError": "python -m candid patterns --help",
-    "TrackError": "python -m candid tracks list",
+    "UpdateCheckError": "python -m candid update check",
 }
 
 
@@ -324,94 +316,6 @@ def cmd_offer(a):
         print(f"Offer comparison exported to {path}")
 
 
-def _money(value: float) -> str:
-    return f"${value:,.0f}"
-
-
-def cmd_benefits(a):
-    from candid import benefits as B
-    if a.what == "health":
-        r = B.health_plan_cost(a.premium, a.deductible, a.coinsurance,
-                               a.oop_max, a.spend)
-        print(f"Annual premium: {_money(r['annual_premium'])}")
-        print(f"Out-of-pocket at {_money(a.spend)} spend: {_money(r['oop_cost'])}")
-        print(f"Total annual cost: {_money(r['total_cost'])}")
-    elif a.what == "healthcare":
-        scenarios = None
-        if a.scenario:
-            scenarios = []
-            for spec in a.scenario:
-                try:
-                    p, s = spec.split(":")
-                    scenarios.append((float(p), float(s)))
-                except ValueError:
-                    raise B.BenefitsError(
-                        f"bad --scenario {spec!r}: use prob:spend, e.g. 0.5:1500")
-        r = B.healthcare_expected_cost(a.premium, a.deductible, a.coinsurance,
-                                       a.oop_max, scenarios=scenarios)
-        for row in r["scenarios"]:
-            print(f"  p={row['probability']:.0%} spend={_money(row['spend'])} "
-                  f"-> cost={_money(row['cost'])}")
-        print(f"Expected annual cost: {_money(r['expected_cost'])}")
-    elif a.what == "match":
-        r = B.match_401k(a.salary, a.contrib_pct, a.formula)
-        print(f"Eligible pay: {_money(r['eligible_pay'])}")
-        for t in r["tiers"]:
-            print(f"  {t['tier']}: {_money(t['amount'])}")
-        print(f"Annual employer match: {_money(r['annual_match'])}")
-    elif a.what == "vesting":
-        r = B.vesting_value(a.balance, a.years, a.schedule)
-        print(f"Vested: {r['vested_pct']:.0%} = {_money(r['vested_value'])} "
-              f"(unvested {_money(r['unvested_value'])})")
-    elif a.what == "pto":
-        r = B.pto_value(a.salary, a.pto_days, a.sick_days, a.holidays)
-        print(f"{r['paid_days_off']:.0f} paid days off at {_money(r['daily_rate'])}/day "
-              f"= {_money(r['value'])}/yr")
-    elif a.what == "espp":
-        r = B.espp_value(a.salary, a.contrib_pct, a.discount_pct,
-                         lookback=a.lookback)
-        print(f"Annual contribution: {_money(r['annual_contribution'])}")
-        print(f"Estimated annual gain: {_money(r['estimated_annual_gain'])}"
-              + (" (with lookback)" if a.lookback else ""))
-    elif a.what == "hsa":
-        r = B.hsa_value(a.seed, a.contribution, a.tax_rate)
-        print(f"Employer seed: {_money(r['employer_seed'])} + "
-              f"tax savings {_money(r['tax_savings'])} = {_money(r['total_value'])}/yr")
-    elif a.what == "fsa":
-        r = B.fsa_value(a.election, a.tax_rate)
-        print(f"FSA tax savings on {_money(r['election'])}: {_money(r['tax_savings'])}/yr")
-        print(f"Note: {r['note']}")
-    elif a.what == "commute":
-        r = B.commute_value(a.pretax, a.subsidy, a.tax_rate)
-        print(f"Tax savings: {_money(r['tax_savings'])} + "
-              f"subsidy {_money(r['subsidy_value'])} = {_money(r['total_value'])}/yr")
-    elif a.what == "leave":
-        r = B.leave_value(a.salary, a.full_weeks, a.partial_weeks, a.partial_pct)
-        print(f"Paid leave value: {_money(r['value'])} "
-              f"({r['weeks_full_pay']:.0f} wks full + {r['weeks_partial_pay']:.0f} wks "
-              f"at {a.partial_pct:.0%})")
-    elif a.what == "stipends":
-        stipends = {}
-        for spec in a.set or []:
-            try:
-                k, v = spec.split("=", 1)
-                stipends[k.strip()] = float(v)
-            except ValueError:
-                raise B.BenefitsError(
-                    f"bad --set {spec!r}: use name=amount, e.g. wellness=1200")
-        r = B.stipends_value(stipends)
-        for item in r["stipends"]:
-            print(f"  {item['name']}: {_money(item['amount'])}")
-        print(f"Total stipends: {_money(r['total_value'])}/yr")
-    elif a.what == "normalize":
-        pkg = B.load_package(a.package)
-        print(B.render_normalized(B.normalize_package(pkg)))
-    elif a.what == "compare":
-        pa = B.load_package(a.package_a)
-        pb = B.load_package(a.package_b)
-        print(B.render_comparison(B.compare_packages(pa, pb)))
-
-
 def cmd_negotiate(a):
     from candid import negotiate as N
     if a.what == "playbook":
@@ -493,174 +397,6 @@ def cmd_mock(a):
         M.behavioral_session(theme=a.theme, ai_feedback=a.ai)
     elif a.what == "design":
         M.design_session(level=a.level, ai_feedback=a.ai)
-
-
-def cmd_patterns(a):
-    from candid import patterns as P
-    if a.what == "list":
-        if a.pattern:
-            p = P.get_pattern(a.pattern)
-            print(f"{p['name']} (`{p['id']}`)\n\n{p['blurb']}\n")
-            print("Recognize it:")
-            for c in p["cues"]:
-                print(f"  - {c}")
-            print(f"\nComplexity: {p['complexity']}")
-            banked = P.problems_for_pattern(a.pattern)
-            if banked:
-                print("\nBank problems:")
-                for b in banked:
-                    print(f"  {b['id']:<20}{b['title'][:40]:<42}{b['difficulty']}")
-            else:
-                print("\nNo bank problems tagged with this pattern yet.")
-        else:
-            cov = P.coverage()
-            print(f"{'ID':<20}{'Name':<34}{'Bank':>5}")
-            for p in P.PATTERNS:
-                n = len(cov.get(p["id"], []))
-                print(f"{p['id']:<20}{p['name'][:33]:<34}{n:>5}")
-    elif a.what == "tags":
-        if a.by_pattern:
-            problems = P.problems_for_pattern(a.by_pattern)
-            if not problems:
-                print(f"No bank problems tagged '{a.by_pattern}' yet.")
-            for b in problems:
-                print(f"{b['id']:<20}{b['title'][:45]:<47}{b['difficulty']}")
-        else:
-            r = P.validate_bank()
-            if r["errors"]:
-                sys.exit("Tag errors:\n" + "\n".join(f"- {e}" for e in r["errors"]))
-            print(f"{r['problems']} problems tagged across "
-                  f"{len(r['patterns_used'])} patterns.")
-            if r["patterns_unused"]:
-                print("No bank problems yet for: "
-                      + ", ".join(r["patterns_unused"]))
-    elif a.what == "plan":
-        gaps = [g.strip() for g in a.gaps.split(",") if g.strip()] \
-            if a.gaps else None
-        plan = P.build_plan(gaps=gaps, total=a.total, weeks=a.weeks)
-        if a.json:
-            print(json.dumps(plan, indent=2))
-        elif a.out:
-            fp = P.export_plan(plan, a.out)
-            print(f"Wrote {plan['total']}-problem plan to {fp}")
-        else:
-            print(P.render_plan(plan))
-    elif a.what == "log":
-        rec = P.log_attempt(a.problem, solved=a.solved, quality=a.quality,
-                            minutes=a.minutes,
-                            at=a.date if a.date else None)
-        status = "solved" if rec["solved"] else "not solved"
-        print(f"Logged {a.problem}: {status}, quality {rec['quality']}/5 "
-              f"on {rec['date']}.")
-    elif a.what == "due":
-        due = P.due_cards(as_of=a.as_of if a.as_of else None)
-        if a.json:
-            print(json.dumps(due, indent=2))
-        elif not due:
-            print("Nothing due for review.")
-        else:
-            print(f"{'Problem':<20}{'Next due':<12}Interval  Ease")
-            for c in due:
-                print(f"{c['problem_id']:<20}{c['next_due']:<12}"
-                      f"{c['interval']:>5}d  {c['easiness']}")
-    elif a.what == "review":
-        card = P.review(a.problem, a.quality,
-                        today=a.date if a.date else None)
-        print(f"{a.problem}: quality {a.quality}/5 -> next review "
-              f"{card['next_due']} (interval {card['interval']}d, "
-              f"ease {card['easiness']}).")
-    elif a.what == "drill":
-        drill = P.build_drill(minutes_per_day=a.minutes_per_day, days=a.days,
-                              seed=a.seed,
-                              start=a.start if a.start else None)
-        if a.json:
-            print(json.dumps(drill, indent=2))
-        else:
-            print(P.render_drill(drill))
-    elif a.what == "mastery":
-        report = P.mastery_report()
-        if a.json:
-            print(json.dumps(report, indent=2))
-        else:
-            print(P.render_mastery(report))
-    elif a.what == "cheatsheet":
-        text = P.cheatsheet(a.pattern)
-        if a.out:
-            fp = Path(a.out).expanduser()
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(text, encoding="utf-8")
-            print(f"Wrote cheat sheet to {fp}")
-        else:
-            print(text)
-    elif a.what == "reset":
-        if not a.yes:
-            sys.exit("This deletes your patterns attempts and review cards.\n"
-                     "Re-run with --yes to confirm.")
-        removed = P.reset_progress()
-        print(f"Removed {removed['attempts']} attempts and "
-              f"{removed['cards']} review cards.")
-def cmd_tracks(a):
-    from candid import prep_tracks as PT
-    if a.what == "list":
-        tracks = PT.list_tracks()
-        print(f"{'ID':<14}{'Title':<28}{'Q':>4}{'Concepts':>9}{'Drills':>7}  Tagline")
-        for t in tracks:
-            print(f"{t['id']:<14}{t['title'][:27]:<28}{t['questions']:>4}"
-                  f"{t['concepts']:>9}{t['drills']:>7}  {t['tagline'][:60]}")
-    elif a.what == "show":
-        print(PT.render_track(a.track, include_deep_dives=a.deep_dives))
-    elif a.what == "questions":
-        if a.sample:
-            qs = PT.sample_questions(a.track, n=a.sample, seed=a.seed,
-                                     difficulty=a.difficulty)
-        else:
-            qs = PT.track_questions(a.track, category=a.category,
-                                    difficulty=a.difficulty, round_name=a.round)
-        if not qs:
-            print("No questions match those filters.")
-            return
-        for q in qs:
-            print(f"{q['n']}. [{q['category']} · {q['difficulty']} · {q['round']}]")
-            print(f"   {q['q']}\n")
-    elif a.what == "concepts":
-        for c in PT.track_concepts(a.track):
-            print(f"### {c['tag'].replace('_', ' ')}")
-            print(f"Why this track: {c['why']}\n")
-            if a.deep_dives:
-                print(c["deep_dive"] + "\n")
-    elif a.what == "drills":
-        drills = PT.track_drills(a.track, kind=a.kind)
-        for d in drills:
-            print(f"### {d['name']} ({d['minutes']} min) [{d['kind']}]")
-            print(f"id: {d['id']}\n{d['instructions']}\n")
-            for item in d["checklist"]:
-                print(f"  - [ ] {item}")
-            print()
-        print(f"Total drill time: {PT.total_drill_minutes(a.track)} minutes.")
-    elif a.what == "plan":
-        plan = PT.build_plan(a.track, days=a.days, hours_per_day=a.hours)
-        print(PT.render_plan(plan))
-    elif a.what == "progress":
-        print(PT.render_coverage(PT.coverage(a.track)))
-    elif a.what == "done":
-        print(PT.render_coverage(PT.mark_done(a.track, a.kind, a.key)))
-    elif a.what == "undone":
-        print(PT.render_coverage(PT.mark_undone(a.track, a.kind, a.key)))
-    elif a.what == "reset":
-        PT.reset_progress(a.track)
-        print(f"Progress reset for track '{a.track}'.")
-    elif a.what == "mock":
-        for m in PT.mock_preset(a.track):
-            print(f"### {m['round']}\n  {m['command']}\n  {m['note']}\n")
-    elif a.what == "suggest":
-        gaps = (a.gaps or "").split(";") if a.gaps else []
-        suggestions = PT.suggest_tracks([g.strip() for g in gaps if g.strip()])
-        if not suggestions:
-            print("No gap text given. Try: tracks suggest --gaps \"Missing must-have skill: sql; Seniority gap: leadership\"")
-            return
-        for s in suggestions:
-            print(f"- {s['id']}: {s['title']} ({s['hits']} gap hit(s))")
-            print(f"  {s['tagline']}")
 
 
 def cmd_jobs(a):
@@ -756,104 +492,206 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
-def _alumni_profile():
-    """Profile for alumni features — optional; features degrade gracefully."""
-    from candid import profile as P
+# ---------------------------------------------------------------------------
+# update (auto-update checker wiring; logic lives in candid/update_check.py)
+# ---------------------------------------------------------------------------
+
+_UPDATE_RELEASES_URL = "https://api.github.com/repos/K7S3/candid/releases"
+_UPDATE_REPO_URL = "https://github.com/K7S3/candid"
+_UPDATE_USER_AGENT = "candid-update-check"
+_UPDATE_NOTES_TRUNC = 1500
+
+
+def _update_fetch_releases(timeout: float = 8.0) -> list:
+    """Fetch the public releases list for `candid update notes`.
+
+    Same graceful rules as update_check: stdlib urllib, no auth, public
+    api.github.com, short timeout. Raises on network/parse failure; the
+    caller turns that into a friendly CLI error (no tracebacks).
+    """
+    req = urllib.request.Request(
+        _UPDATE_RELEASES_URL,
+        headers={"User-Agent": _UPDATE_USER_AGENT,
+                 "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8", "replace"))
+    if not isinstance(data, list):
+        raise ValueError("unexpected release feed format")
+    return data
+
+
+def _update_check_cmd(a, UC):
+    info = UC.check_now()
     try:
-        return P.load_profile()
-    except P.OnboardError:
-        return {}
+        UC.save_cache(info)
+    except Exception:
+        pass  # cache is best-effort; the result still prints
+    if a.json:
+        print(json.dumps(asdict(info), indent=2))
+        return
+    print(f"candid {info.current_version}")
+    if info.update_available is None:
+        print(f"Could not check for updates: {info.error or 'unknown error'}")
+        print("Try again later, or browse releases at "
+              + _UPDATE_REPO_URL + "/releases")
+    elif info.update_available:
+        line = (f"Update available: {info.latest_version} "
+                f"(you have {info.current_version})")
+        if info.security:
+            line += " [security release]"
+        print(line)
+        print("Release notes: "
+              + (info.release_url or _UPDATE_REPO_URL + "/releases"))
+        print("Run `python -m candid update` for upgrade steps.")
+    else:
+        print(f"Up to date (latest: {info.latest_version}).")
 
 
-def cmd_alumni(a):
-    from candid import alumni as A
-    net = A.load_network()
-    if a.what == "import":
-        src = a.csv or a.zip
-        if not src:
-            sys.exit("Give --csv <Connections.csv> or --zip <LinkedIn export>.zip.")
-        res = A.import_connections(src, replace=a.replace)
-        print(f"✅ Imported {res['added']} new, updated {res['updated']} "
-              f"(total {res['total']} contacts).")
-        if not A.load_network()["contacts"]:
-            print("Tip: enrich with schools/past jobs: "
-                  "`python -m candid alumni enrich --csv schools.csv`")
-    elif a.what == "enrich":
-        rows = A.parse_enrichment_csv(a.csv)
-        res = A.enrich_contacts(rows)
-        print(f"✅ Enriched {res['matched']} contact(s) with {res['facts_added']} "
-              f"fact(s) ({res['unmatched']} name(s) not found in network).")
-    elif a.what == "overlap":
-        prof = _alumni_profile()
-        if a.json:
-            print(json.dumps({
-                "schools": [{"contact": h["contact"]["name"], "schools": h["schools"]}
-                            for h in A.school_overlap(net, prof)],
-                "companies": [{"contact": h["contact"]["name"],
-                                "companies": h["companies"]}
-                               for h in A.company_overlap(net, prof)],
-            }, indent=2))
+def _update_notes_cmd(a, UC):
+    try:
+        releases = _update_fetch_releases()
+    except Exception as e:
+        raise UC.UpdateCheckError(f"could not fetch release notes: {e}")
+    newer = [
+        r for r in releases
+        if isinstance(r, dict) and not r.get("draft")
+        and UC.is_newer(str(r.get("tag_name") or ""), __version__)
+    ]
+    if a.json:
+        print(json.dumps([
+            {"tag": str(r.get("tag_name") or ""),
+             "name": str(r.get("name") or ""),
+             "url": r.get("html_url"),
+             "security": UC.is_security_release(str(r.get("name") or ""),
+                                                str(r.get("body") or "")),
+             "body": str(r.get("body") or "")[:2000]}
+            for r in newer
+        ], indent=2))
+        return
+    print(f"Release notes from GitHub (newer than {__version__}):\n")
+    if not newer:
+        print("Nothing newer than your installed version.")
+        return
+    for r in newer:
+        tag = str(r.get("tag_name") or "")
+        name = str(r.get("name") or "")
+        title = f"{tag} - {name}" if name and name != tag else tag
+        print(title)
+        if r.get("html_url"):
+            print(r["html_url"])
+        body = str(r.get("body") or "").strip()
+        if len(body) > _UPDATE_NOTES_TRUNC:
+            body = body[:_UPDATE_NOTES_TRUNC] + "\n... (truncated)"
+        print()
+        print(body or "(no release notes)")
+        print("\n" + "-" * 40 + "\n")
+
+
+def _update_version_cmd(UC):
+    from candid import config as C
+    mode = UC.detect_install_mode()
+    cached = UC.load_cache() or {}
+    latest = cached.get("latest_version")
+    print(f"candid {__version__} (install mode: {mode})")
+    if latest:
+        checked = cached.get("checked_at") or "unknown time"
+        print(f"Latest known release: {latest} (checked {checked})")
+    else:
+        print("Latest known release: unknown - run `candid update check`.")
+    print(f"Data dir: {C._data_dir()}")
+
+
+def _update_backup_hint() -> str:
+    try:
+        from candid import backup
+        if callable(getattr(backup, "create", None)):
+            return "Back up first: python -m candid backup create"
+    except ImportError:
+        pass
+    return "Tip: back up candid_data/ before upgrading."
+
+
+def _update_bare_cmd(a, UC):
+    steps = UC.upgrade_steps()
+    print("Upgrade candid:\n")
+    for i, step in enumerate(steps, 1):
+        print(f"{i}. {step}")
+    print()
+    print(_update_backup_hint())
+    if not a.apply:
+        return
+    # --apply: run the upgrade step, but only after confirmation.
+    mode = UC.detect_install_mode()
+    if mode == "git":
+        from candid import config as C
+        cmd = ["git", "-C", str(C.PROJECT_ROOT), "pull", "--ff-only",
+               "origin", "main"]
+    elif mode == "pip":
+        cmd = ["pip", "install", "-U", "candid"]
+    else:
+        sys.exit("Automatic upgrade is not available for this install mode. "
+                 "Follow the steps above instead.")
+    if not a.yes:
+        print(f"\nThis will run: {' '.join(cmd)}")
+        try:
+            answer = input("Proceed? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Aborted - nothing changed.")
             return
-        if not a.companies:
-            print(A.render_overlap("School overlap", A.school_overlap(net, prof),
-                                   "schools"))
-        if not a.schools:
-            so = A.school_overlap(net, prof)
-            if so and not a.companies:
-                print()
-            print(A.render_overlap("Company overlap", A.company_overlap(net, prof),
-                                   "companies"))
-        if not prof.get("education") and not prof.get("experience"):
-            print("\nNote: no profile found — onboard first (`python -m candid "
-                  "onboard`) so school/company overlap has something to match.")
-    elif a.what == "warm-path":
-        wp = A.warm_paths(net, _alumni_profile(), a.company, a.role or "",
-                          limit=a.limit)
-        if a.json:
-            print(json.dumps(wp, indent=2, default=str))
-        else:
-            print(A.render_warm_paths(wp))
-    elif a.what == "prioritize":
-        targets = [(a.company, a.role or "")] if a.company else None
-        queue = A.prioritize(net, _alumni_profile(), targets=targets,
-                             limit=a.limit)
-        if a.json:
-            print(json.dumps(
-                [{**e, "contact": e["contact"]["name"]} for e in queue],
-                indent=2, default=str))
-        else:
-            print(A.render_queue(queue))
-    elif a.what == "draft":
-        c = A.find_contact(net, a.name)
-        print(A.draft_outreach(c, _alumni_profile(), kind=a.kind,
-                               target_company=a.company or "",
-                               target_role=a.role or ""))
-    elif a.what == "coverage":
-        if not a.company:
-            sys.exit("Give at least one --company (repeatable).")
-        cov = A.coverage(net, _alumni_profile(), a.company)
-        if a.json:
-            print(json.dumps(cov, indent=2, default=str))
-        else:
-            print(A.render_coverage(cov))
-    elif a.what == "log":
-        rec = A.log_interaction(a.name, a.kind, a.note or "", a.date or "")
-        print(f"✅ Logged {rec['kind']} with {rec['name']} on {rec['date']}.")
-    elif a.what == "freshness":
-        queue = A.freshness(net, _alumni_profile(),
-                            stale_days=a.stale_days, quiet_days=a.quiet_days)
-        if a.json:
-            print(json.dumps(
-                [{**e, "contact": e["contact"]["name"]} for e in queue],
-                indent=2, default=str))
-        else:
-            print(A.render_freshness(queue))
-    elif a.what == "stats":
-        s = A.stats(net)
-        if a.json:
-            print(json.dumps(s, indent=2, default=str))
-        else:
-            print(A.render_stats(s))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=300)
+    except Exception as e:
+        sys.exit(f"Upgrade failed to start: {e}")
+    if result.returncode == 0:
+        print("Upgrade succeeded.")
+        out = (result.stdout or "").strip()
+        if out:
+            print(out)
+    else:
+        detail = (result.stderr or result.stdout or "").strip()
+        sys.exit("Upgrade failed (exit %d).%s"
+                 % (result.returncode, f"\n{detail}" if detail else ""))
+
+
+def cmd_update(a):
+    from candid import update_check as UC
+    what = a.what
+    if what == "check":
+        _update_check_cmd(a, UC)
+    elif what == "notes":
+        _update_notes_cmd(a, UC)
+    elif what == "on":
+        UC.set_settings(enabled=True)
+        print("Update checks enabled. candid will nudge you when a new "
+              "release is out.")
+    elif what == "off":
+        UC.set_settings(enabled=False)
+        print("Update checks disabled. Re-enable with `candid update on`.")
+    elif what == "version":
+        _update_version_cmd(UC)
+    else:
+        _update_bare_cmd(a, UC)
+
+
+def _startup_update_nudge(args):
+    """Print the update nudge to stderr when one applies.
+
+    Never raises and never slows startup: the check itself is
+    cache-first with a short timeout, and everything here is guarded.
+    """
+    try:
+        if getattr(args, "cmd", None) == "update":
+            return
+        from candid import update_check as UC
+        line = UC.maybe_startup_nudge()
+        if line:
+            sys.stderr.write(line + "\n")
+    except Exception:
+        pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1061,102 +899,6 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--out", default="", help="Output path (default: candid_data/offer_comparisons/<date>_offer_comparison.md)")
     s.set_defaults(func=cmd_offer)
 
-    # benefits
-    s = _sub(sub, "benefits", "Normalize benefits into dollars and compare packages.", [
-        "python -m candid benefits health --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000 --spend 8000",
-        "python -m candid benefits match --salary 150000 --contrib-pct 0.10 --formula 100:3,50:2",
-        "python -m candid benefits pto --salary 150000 --pto-days 20 --sick-days 5",
-        "python -m candid benefits normalize --package samples/candid/sample_benefits_a.json",
-        "python -m candid benefits compare --package-a samples/candid/sample_benefits_a.json --package-b samples/candid/sample_benefits_b.json",
-    ])
-    bs = _nested(s)
-    t = _sub(bs, "health", "Annual cost of a health plan at a given spend level.", [
-        "python -m candid benefits health --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000 --spend 8000",
-    ])
-    t.add_argument("--premium", type=float, required=True, help="Employee monthly premium $")
-    t.add_argument("--deductible", type=float, required=True)
-    t.add_argument("--coinsurance", type=float, required=True, help="Fraction 0-1, e.g. 0.2")
-    t.add_argument("--oop-max", type=float, required=True)
-    t.add_argument("--spend", type=float, required=True, help="Expected annual medical spend $")
-    t = _sub(bs, "healthcare", "Scenario-weighted expected healthcare cost.", [
-        "python -m candid benefits healthcare --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000",
-        "python -m candid benefits healthcare --premium 300 --deductible 1500 --coinsurance 0.2 --oop-max 6000 --scenario 0.6:1000 --scenario 0.4:12000",
-    ])
-    t.add_argument("--premium", type=float, required=True)
-    t.add_argument("--deductible", type=float, required=True)
-    t.add_argument("--coinsurance", type=float, required=True)
-    t.add_argument("--oop-max", type=float, required=True)
-    t.add_argument("--scenario", action="append", default=[],
-                   help="prob:spend, repeatable (default low/mid/high mix)")
-    t = _sub(bs, "match", "Annual 401(k) employer match in dollars.", [
-        "python -m candid benefits match --salary 150000 --contrib-pct 0.10 --formula 100:3,50:2",
-    ])
-    t.add_argument("--salary", type=float, required=True)
-    t.add_argument("--contrib-pct", type=float, default=0.06,
-                   help="Your contribution as fraction of pay, e.g. 0.10")
-    t.add_argument("--formula", default="100:3,50:2",
-                   help="Tiered formula, e.g. '100:3,50:2'")
-    t = _sub(bs, "vesting", "Vested fraction of an employer-match balance.", [
-        "python -m candid benefits vesting --balance 20000 --years 2 --schedule cliff:3",
-    ])
-    t.add_argument("--balance", type=float, required=True)
-    t.add_argument("--years", type=float, required=True, help="Years of service")
-    t.add_argument("--schedule", default="graded:6", help="'cliff:N' or 'graded:N'")
-    t = _sub(bs, "pto", "Convert PTO / sick / holidays to dollars.", [
-        "python -m candid benefits pto --salary 150000 --pto-days 20 --sick-days 5",
-    ])
-    t.add_argument("--salary", type=float, required=True)
-    t.add_argument("--pto-days", type=float, default=0)
-    t.add_argument("--sick-days", type=float, default=0)
-    t.add_argument("--holidays", type=float, default=0)
-    t = _sub(bs, "espp", "Estimated annual ESPP gain.", [
-        "python -m candid benefits espp --salary 150000 --contrib-pct 0.10 --discount-pct 0.15",
-        "python -m candid benefits espp --salary 150000 --contrib-pct 0.10 --discount-pct 0.15 --lookback",
-    ])
-    t.add_argument("--salary", type=float, required=True)
-    t.add_argument("--contrib-pct", type=float, default=0.10)
-    t.add_argument("--discount-pct", type=float, default=0.15)
-    t.add_argument("--lookback", action="store_true")
-    t = _sub(bs, "hsa", "HSA annual value: employer seed + tax savings.", [
-        "python -m candid benefits hsa --seed 1000 --contribution 3000 --tax-rate 0.24",
-    ])
-    t.add_argument("--seed", type=float, default=0)
-    t.add_argument("--contribution", type=float, default=0)
-    t.add_argument("--tax-rate", type=float, default=0.24, help="Marginal rate 0-1")
-    t = _sub(bs, "fsa", "FSA annual value: tax savings on the election.", [
-        "python -m candid benefits fsa --election 3000 --tax-rate 0.24",
-    ])
-    t.add_argument("--election", type=float, required=True)
-    t.add_argument("--tax-rate", type=float, default=0.24)
-    t = _sub(bs, "commute", "Commuter/parking benefit annual value.", [
-        "python -m candid benefits commute --pretax 200 --subsidy 100 --tax-rate 0.24",
-    ])
-    t.add_argument("--pretax", type=float, default=0, help="Monthly pre-tax deduction $")
-    t.add_argument("--subsidy", type=float, default=0, help="Monthly employer subsidy $")
-    t.add_argument("--tax-rate", type=float, default=0.24)
-    t = _sub(bs, "leave", "Paid parental/family leave converted to dollars.", [
-        "python -m candid benefits leave --salary 150000 --full-weeks 12",
-        "python -m candid benefits leave --salary 150000 --partial-weeks 8 --partial-pct 0.6",
-    ])
-    t.add_argument("--salary", type=float, required=True)
-    t.add_argument("--full-weeks", type=float, default=0)
-    t.add_argument("--partial-weeks", type=float, default=0)
-    t.add_argument("--partial-pct", type=float, default=0.6)
-    t = _sub(bs, "stipends", "Sum named stipends into annual dollars.", [
-        "python -m candid benefits stipends --set wellness=1200 --set learning=3000",
-    ])
-    t.add_argument("--set", action="append", default=[], help="name=amount, repeatable")
-    t = _sub(bs, "normalize", "Roll a benefits package JSON into one annual $ number.", [
-        "python -m candid benefits normalize --package samples/candid/sample_benefits_a.json",
-    ])
-    t.add_argument("--package", required=True, help="Path to package JSON file")
-    t = _sub(bs, "compare", "Side-by-side comparison of two package JSON files.", [
-        "python -m candid benefits compare --package-a samples/candid/sample_benefits_a.json --package-b samples/candid/sample_benefits_b.json",
-    ])
-    t.add_argument("--package-a", required=True)
-    t.add_argument("--package-b", required=True)
-    s.set_defaults(func=cmd_benefits)
-
     # negotiate
     s = _sub(sub, "negotiate", "Negotiation playbook, scripts, counter drafts.", [
         "python -m candid negotiate playbook",
@@ -1264,163 +1006,6 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
-
-    # patterns
-    s = _sub(sub, "patterns", "Coding patterns curriculum: study plans, spaced repetition, drills.", [
-        "python -m candid patterns list",
-        "python -m candid patterns plan --gaps sliding-window,dp-1d",
-        "python -m candid patterns log --problem two-sum --solved --quality 4",
-        "python -m candid patterns drill --minutes-per-day 45",
-        "python -m candid patterns mastery",
-    ])
-    ps = _nested(s)
-    t = _sub(ps, "list", "List the pattern taxonomy (or detail one pattern).", [
-        "python -m candid patterns list",
-        "python -m candid patterns list --pattern sliding-window",
-    ])
-    t.add_argument("--pattern", default=None, help="Pattern id for detail view")
-    t = _sub(ps, "tags", "Validate problem pattern tags / list by pattern.", [
-        "python -m candid patterns tags",
-        "python -m candid patterns tags --by-pattern hashmap",
-    ])
-    t.add_argument("--by-pattern", default=None, help="List bank problems for a pattern")
-    t = _sub(ps, "plan", "Blind-75-style study plan from your skill gaps.", [
-        "python -m candid patterns plan",
-        "python -m candid patterns plan --gaps sliding-window,dp-1d --total 30",
-        "python -m candid patterns plan --out plan.md",
-    ])
-    t.add_argument("--gaps", default=None,
-                   help="Comma-separated pattern ids, weakest first (default: from your attempts)")
-    t.add_argument("--total", type=int, default=75, help="Cap on problems (default: 75)")
-    t.add_argument("--weeks", type=int, default=None, help="Weeks to spread over")
-    t.add_argument("--out", default=None, help="Write plan markdown to file")
-    t.add_argument("--json", action="store_true", help="Print the raw plan as JSON")
-    t = _sub(ps, "log", "Log a practice attempt (updates spaced repetition).", [
-        "python -m candid patterns log --problem two-sum --solved --quality 4",
-        "python -m candid patterns log --problem coin-change --failed --minutes 30",
-    ])
-    t.add_argument("--problem", required=True)
-    g = t.add_mutually_exclusive_group(required=True)
-    g.add_argument("--solved", action="store_true")
-    g.add_argument("--failed", action="store_true")
-    t.add_argument("--quality", type=int, default=None, help="Self-rating 0-5")
-    t.add_argument("--minutes", type=float, default=None)
-    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
-    t = _sub(ps, "due", "Show spaced-repetition cards due for review.", [
-        "python -m candid patterns due",
-        "python -m candid patterns due --as-of 2026-10-01",
-    ])
-    t.add_argument("--as-of", default=None, help="YYYY-MM-DD (default: today)")
-    t.add_argument("--json", action="store_true")
-    t = _sub(ps, "review", "Record a review and reschedule (SM-2).", [
-        "python -m candid patterns review --problem two-sum --quality 5",
-    ])
-    t.add_argument("--problem", required=True)
-    t.add_argument("--quality", type=int, required=True, help="Recall quality 0-5")
-    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
-    t = _sub(ps, "drill", "Day-by-day drill: new weak-pattern problems + due reviews.", [
-        "python -m candid patterns drill",
-        "python -m candid patterns drill --minutes-per-day 30 --days 5",
-    ])
-    t.add_argument("--minutes-per-day", type=int, default=45)
-    t.add_argument("--days", type=int, default=7)
-    t.add_argument("--seed", type=int, default=0)
-    t.add_argument("--start", default=None, help="YYYY-MM-DD (default: today)")
-    t.add_argument("--json", action="store_true")
-    t = _sub(ps, "mastery", "Per-pattern mastery dashboard.", [
-        "python -m candid patterns mastery",
-    ])
-    t.add_argument("--json", action="store_true")
-    t = _sub(ps, "cheatsheet", "One-page pattern cheat sheet.", [
-        "python -m candid patterns cheatsheet sliding-window",
-        "python -m candid patterns cheatsheet heap-top-k --out heap.md",
-    ])
-    t.add_argument("pattern", help="Pattern id")
-    t.add_argument("--out", default=None, help="Write markdown to file")
-    t = _sub(ps, "reset", "Delete patterns attempts and review cards.", [
-        "python -m candid patterns reset --yes",
-    ])
-    t.add_argument("--yes", action="store_true", help="Confirm deletion")
-    s.set_defaults(func=cmd_patterns)
-    # tracks
-    s = _sub(sub, "tracks", "Role-family prep tracks: questions, concepts, drills, plans.", [
-        "python -m candid tracks list",
-        "python -m candid tracks show mle",
-        "python -m candid tracks questions --track backend --difficulty medium",
-        "python -m candid tracks plan --track data-science --days 14",
-    ])
-    ts = s.add_subparsers(dest="what", required=True)
-    t = _sub(ts, "list", "List all prep tracks.", [
-        "python -m candid tracks list",
-    ])
-    t = _sub(ts, "show", "Show a track: loop, concepts, questions, drills, mock presets.", [
-        "python -m candid tracks show mle",
-        "python -m candid tracks show pm --deep-dives",
-    ])
-    t.add_argument("track", help="Track id: mle, backend, frontend, data-science, pm, em")
-    t.add_argument("--deep-dives", action="store_true",
-                   help="Include full concept deep-dive text")
-    t = _sub(ts, "questions", "Browse or sample a track's question bank.", [
-        "python -m candid tracks questions --track backend",
-        "python -m candid tracks questions --track mle --difficulty hard",
-        "python -m candid tracks questions --track frontend --sample 5 --seed 42",
-    ])
-    t.add_argument("--track", required=True)
-    t.add_argument("--category", default=None)
-    t.add_argument("--difficulty", default=None, choices=["easy", "medium", "hard"])
-    t.add_argument("--round", default=None, help="Filter by loop round name (substring)")
-    t.add_argument("--sample", type=int, default=0,
-                   help="Deterministic sample of N questions (use --seed to vary)")
-    t.add_argument("--seed", type=int, default=0)
-    t = _sub(ts, "concepts", "Concept deep-dives for a track.", [
-        "python -m candid tracks concepts --track data-science",
-        "python -m candid tracks concepts --track mle --deep-dives",
-    ])
-    t.add_argument("--track", required=True)
-    t.add_argument("--deep-dives", action="store_true")
-    t = _sub(ts, "drills", "Timed practice drills for a track.", [
-        "python -m candid tracks drills --track backend",
-        "python -m candid tracks drills --track em --kind qna",
-    ])
-    t.add_argument("--track", required=True)
-    t.add_argument("--kind", default=None, help="Filter by drill kind")
-    t = _sub(ts, "plan", "Build an N-day study plan spreading the track across days.", [
-        "python -m candid tracks plan --track frontend --days 14",
-        "python -m candid tracks plan --track pm --days 7 --hours 2",
-    ])
-    t.add_argument("--track", required=True)
-    t.add_argument("--days", type=int, default=14)
-    t.add_argument("--hours", type=float, default=1.0, help="Study hours per day")
-    t = _sub(ts, "progress", "Show completion coverage for a track.", [
-        "python -m candid tracks progress --track mle",
-    ])
-    t.add_argument("--track", required=True)
-    t = _sub(ts, "done", "Mark a concept, question, or drill done.", [
-        "python -m candid tracks done --track mle --kind concept --key ml_system_design",
-        "python -m candid tracks done --track backend --kind drill --key be-design-45",
-    ])
-    t.add_argument("--track", required=True)
-    t.add_argument("--kind", required=True, choices=["concept", "question", "drill"])
-    t.add_argument("--key", required=True, help="Concept tag, q<N>, or drill id")
-    t = _sub(ts, "undone", "Un-mark an item.", [
-        "python -m candid tracks undone --track mle --kind concept --key ml_system_design",
-    ])
-    t.add_argument("--track", required=True)
-    t.add_argument("--kind", required=True, choices=["concept", "question", "drill"])
-    t.add_argument("--key", required=True)
-    t = _sub(ts, "reset", "Clear all progress for a track.", [
-        "python -m candid tracks reset --track mle",
-    ])
-    t.add_argument("--track", required=True)
-    t = _sub(ts, "mock", "Suggested mock sessions aligned to the track's loop.", [
-        "python -m candid tracks mock --track data-science",
-    ])
-    t.add_argument("--track", required=True)
-    t = _sub(ts, "suggest", "Suggest tracks from match-gap text.", [
-        "python -m candid tracks suggest --gaps \"Missing must-have skill: sql; Seniority gap: leadership\"",
-    ])
-    t.add_argument("--gaps", default="", help="Semicolon-separated gap strings")
-    s.set_defaults(func=cmd_tracks)
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [
@@ -1542,87 +1127,29 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
-    # alumni
-    s = _sub(sub, "alumni", "Map your alumni network for warm outreach.", [
-        "python -m candid alumni import --csv Connections.csv",
-        "python -m candid alumni warm-path --company Stripe --role \"ML Engineer\"",
-        "python -m candid alumni prioritize --company Stripe --role \"ML Engineer\"",
+    # update
+    s = _sub(sub, "update", "Check for candid updates and upgrade.", [
+        "python -m candid update",
+        "python -m candid update check",
+        "python -m candid update notes",
+        "python -m candid update on",
+        "python -m candid update off",
+        "python -m candid update version",
+        "python -m candid update --apply --yes   # run the upgrade step now",
     ])
-    als = _nested(s)
-    t = _sub(als, "import", "Import LinkedIn Connections.csv or export ZIP.", [
-        "python -m candid alumni import --csv Connections.csv",
-        "python -m candid alumni import --zip LinkedIn-export.zip",
-        "python -m candid alumni import --csv samples/candid/sample_connections.csv",
-    ])
-    t.add_argument("--csv", default="", help="Path to Connections.csv")
-    t.add_argument("--zip", default="", help="Path to LinkedIn export .zip")
-    t.add_argument("--replace", action="store_true",
-                   help="Replace the network instead of merging")
-    t = _sub(als, "enrich", "Add schools/past jobs per contact from a CSV.", [
-        "python -m candid alumni enrich --csv schools.csv",
-        "python -m candid alumni enrich --csv samples/candid/sample_enrichment.csv",
-    ])
-    t.add_argument("--csv", required=True,
-                   help="CSV with name,school,grad_year,prev_company,start_year,end_year,notes")
-    t = _sub(als, "overlap", "Contacts sharing your schools/employers.", [
-        "python -m candid alumni overlap",
-        "python -m candid alumni overlap --schools",
-        "python -m candid alumni overlap --json",
-    ])
-    t.add_argument("--schools", action="store_true", help="Only school overlap")
-    t.add_argument("--companies", action="store_true", help="Only company overlap")
-    t.add_argument("--json", action="store_true")
-    t = _sub(als, "warm-path", "Ranked warm routes into a target company.", [
-        "python -m candid alumni warm-path --company Stripe",
-        "python -m candid alumni warm-path --company Stripe --role \"ML Engineer\"",
-    ])
-    t.add_argument("--company", required=True)
-    t.add_argument("--role", default="")
-    t.add_argument("--limit", type=int, default=10)
-    t.add_argument("--json", action="store_true")
-    t = _sub(als, "prioritize", "Ranked outreach queue with tiers.", [
-        "python -m candid alumni prioritize",
-        "python -m candid alumni prioritize --company Stripe --role \"ML Engineer\"",
-    ])
-    t.add_argument("--company", default="", help="Target company")
-    t.add_argument("--role", default="", help="Target role")
-    t.add_argument("--limit", type=int, default=25)
-    t.add_argument("--json", action="store_true")
-    t = _sub(als, "draft", "Draft a warm outreach message.", [
-        "python -m candid alumni draft --name \"David Kim\" --kind referral --company Stripe --role \"ML Engineer\"",
-        "python -m candid alumni draft --name \"Grace Liu\" --kind reconnect",
-    ])
-    t.add_argument("--name", required=True, help="Contact name")
-    t.add_argument("--kind", default="referral",
-                   choices=["referral", "info-chat", "reconnect"])
-    t.add_argument("--company", default="")
-    t.add_argument("--role", default="")
-    t = _sub(als, "coverage", "Warm-contact coverage vs target companies.", [
-        "python -m candid alumni coverage --company Stripe --company OpenAI",
-    ])
-    t.add_argument("--company", action="append", default=[],
-                   help="Target company (repeatable)")
-    t.add_argument("--json", action="store_true")
-    t = _sub(als, "log", "Log an interaction with a contact.", [
-        "python -m candid alumni log --name \"David Kim\" --kind coffee --note \"great chat about ML platform\"",
-    ])
-    t.add_argument("--name", required=True)
-    t.add_argument("--kind", default="coffee",
-                   choices=["met", "emailed", "called", "coffee", "messaged", "other"])
-    t.add_argument("--note", default="")
-    t.add_argument("--date", default="", help="YYYY-MM-DD (default: today)")
-    t = _sub(als, "freshness", "Stale contacts needing re-engagement.", [
-        "python -m candid alumni freshness",
-        "python -m candid alumni freshness --stale-days 180 --quiet-days 90",
-    ])
-    t.add_argument("--stale-days", type=int, default=365)
-    t.add_argument("--quiet-days", type=int, default=180)
-    t.add_argument("--json", action="store_true")
-    t = _sub(als, "stats", "Network overview.", [
-        "python -m candid alumni stats",
-    ])
-    t.add_argument("--json", action="store_true")
-    s.set_defaults(func=cmd_alumni)
+    s.add_argument("what", nargs="?", default=None,
+                   choices=["check", "notes", "on", "off", "version"],
+                   help=("check: check for a new release now · "
+                         "notes: changelog from GitHub releases · "
+                         "on/off: toggle update checks · "
+                         "version: show versions"))
+    s.add_argument("--json", action="store_true",
+                   help="Print check/notes output as JSON (for scripting)")
+    s.add_argument("--apply", action="store_true",
+                   help="Actually run the upgrade step (bare `candid update` only)")
+    s.add_argument("--yes", action="store_true",
+                   help="Skip the confirmation prompt for --apply")
+    s.set_defaults(func=cmd_update)
 
     return p
 
@@ -1640,6 +1167,7 @@ def _next_command(args, etype: str) -> str:
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    _startup_update_nudge(args)
     try:
         args.func(args)
     except SystemExit as e:

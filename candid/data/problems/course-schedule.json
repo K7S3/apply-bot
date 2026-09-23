@@ -2,10 +2,6 @@
   "id": "course-schedule",
   "title": "Course Schedule",
   "topic": "graphs",
-  "patterns": [
-    "topological-sort",
-    "graph-bfs-dfs"
-  ],
   "difficulty": "medium",
   "statement": "There are `numCourses` courses labeled 0..numCourses-1. `prerequisites[i] = [a, b]` means course a requires course b first. Return True if all courses can be finished, else False.\n\nExample: numCourses = 2, prerequisites = [[1, 0]] -> True",
   "function": "solve(numCourses, prerequisites)",

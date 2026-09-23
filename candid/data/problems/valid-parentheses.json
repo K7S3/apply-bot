@@ -2,9 +2,6 @@
   "id": "valid-parentheses",
   "title": "Valid Parentheses",
   "topic": "strings",
-  "patterns": [
-    "stack"
-  ],
   "difficulty": "easy",
   "statement": "Given a string `s` containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.\n\nA string is valid if open brackets are closed by the same type of bracket, in the correct order, and every close bracket has a matching open.\n\nExample: s = \"()[]{}\" -> True; s = \"(]\" -> False",
   "function": "solve(s)",

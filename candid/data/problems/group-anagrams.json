@@ -2,9 +2,6 @@
   "id": "group-anagrams",
   "title": "Group Anagrams",
   "topic": "hashmap",
-  "patterns": [
-    "hashmap"
-  ],
   "difficulty": "medium",
   "statement": "Given a list of strings `strs`, group the anagrams together. Return the groups in any order.\n\nExample: [\"eat\", \"tea\", \"tan\", \"ate\", \"nat\", \"bat\"] -> [[\"bat\"], [\"nat\", \"tan\"], [\"ate\", \"eat\", \"tea\"]]",
   "function": "solve(strs)",

@@ -422,6 +422,78 @@ def salary_lookup(company: str, title: str, location: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# update banner (from the cached update check — no network refresh here)
+# ---------------------------------------------------------------------------
+
+def update_banner() -> dict | None:
+    """Update-available banner info, or None when no banner should show.
+
+    Reads the cached update check only (no refresh, no network). Returns
+    {"version", "url", "security"} when the cache says an update is
+    available, else None. Never raises.
+    """
+    try:
+        from candid import update_check as UC
+        cached = UC.load_cache()
+        if not isinstance(cached, dict) or not cached.get("update_available"):
+            return None
+        version = cached.get("latest_version")
+        if not version:
+            return None
+        return {
+            "version": str(version),
+            "url": str(cached.get("release_url") or UC.REPO_URL),
+            "security": bool(cached.get("security")),
+        }
+    except Exception:
+        return None
+
+
+def _update_banner_html(banner: dict) -> str:
+    """Dismissible banner HTML for an available update."""
+    from html import escape
+    version = escape(banner["version"], quote=True)
+    url = escape(banner["url"], quote=True)
+    label = f"Update available: v{version}"
+    if banner["security"]:
+        label += " (security release)"
+    return (
+        '<div id="updateBanner" role="alert" style="background:#3d3a1e;'
+        'border:1px solid var(--amber);border-radius:10px;padding:10px 14px;'
+        'margin:12px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+        f'<strong style="color:#ffd97a">{label}</strong>'
+        f'<a href="{url}" target="_blank" rel="noopener">release notes</a>'
+        '<span style="color:var(--muted);font-size:13px">run '
+        '<code>python -m candid update</code> to upgrade</span>'
+        '<button id="updateBannerDismiss" class="ghost" '
+        'style="margin-left:auto;cursor:pointer">dismiss</button>'
+        '</div>'
+        '<script>(function(){var b='
+        'document.getElementById("updateBannerDismiss");'
+        'if(b){b.addEventListener("click",function(){'
+        'var d=document.getElementById("updateBanner");'
+        'if(d){d.remove();}});}})();</script>'
+    )
+
+
+def render_dashboard_html() -> bytes:
+    """Full dashboard HTML with the update banner injected when one applies.
+
+    Split out of DashboardHandler._serve_html so the banner injection is
+    unit-testable without HTTP. Reads the cache only (no network refresh).
+    """
+    try:
+        html = HTML_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return b""
+    banner = update_banner()
+    if banner is None:
+        return html.encode("utf-8")
+    return html.replace("<main>", _update_banner_html(banner) + "\n<main>", 1
+                        ).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # HTTP server
 # ---------------------------------------------------------------------------
 
@@ -667,9 +739,8 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 _send_json(self, {"error": f"{name}: {e}"}, 500)
 
     def _serve_html(self):
-        try:
-            body = HTML_PATH.read_bytes()
-        except OSError:
+        body = render_dashboard_html()
+        if not body:
             _send_json(self, {"error": "dashboard.html missing"}, 500)
             return
         self.send_response(200)
