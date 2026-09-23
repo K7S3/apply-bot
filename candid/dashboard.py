@@ -18,6 +18,7 @@ import tempfile
 import threading
 import urllib.parse
 import webbrowser
+from datetime import date
 from pathlib import Path
 
 from candid import config as C
@@ -371,6 +372,118 @@ def update_status(app_id: int, status: str) -> dict:
         raise DashboardError(str(e)) from e
 
 
+# ---------------------------------------------------------------------------
+# kanban + deadlines (pure logic — testable without HTTP)
+# ---------------------------------------------------------------------------
+
+def _days_in_stage(rec: dict, today: date | None = None) -> int:
+    """Whole days since the record last changed status (never negative)."""
+    today = today or date.today()
+    try:
+        updated = date.fromisoformat(str(rec.get("date_updated") or "")[:10])
+    except ValueError:
+        return 0
+    return max(0, (today - updated).days)
+
+
+def _days_remaining(deadline: str | None, today: date | None = None) -> int | None:
+    """Whole days until a YYYY-MM-DD deadline (negative when overdue).
+
+    Returns None when there is no deadline (or it is unparseable).
+    """
+    if not deadline:
+        return None
+    today = today or date.today()
+    try:
+        d = date.fromisoformat(str(deadline)[:10])
+    except (ValueError, TypeError):
+        return None
+    return (d - today).days
+
+
+def kanban_board(today: date | None = None) -> dict:
+    """Pipeline kanban: one column per status in ``C.STATUSES``.
+
+    ``today`` is injectable so tests don't depend on the wall clock.
+
+    Returns {status: {"label": str, "cards": [...]}}; each card carries
+    id, company, role, status, days_in_stage, next_action (from
+    ``tracker.NEXT_ACTIONS``), deadline, and days_remaining.
+    """
+    from candid import tracker as T
+    board = {s: {"label": s.replace("_", " "), "cards": []}
+             for s in C.STATUSES}
+    for a in T.list_apps():
+        st = a.get("status", "saved")
+        col = board.get(st)
+        if col is None:  # unknown status in data → don't 500 the view
+            continue
+        col["cards"].append({
+            "id": a.get("id"),
+            "company": a.get("company", ""),
+            "role": a.get("role", ""),
+            "status": st,
+            "days_in_stage": _days_in_stage(a, today),
+            "next_action": T.NEXT_ACTIONS.get(st, ""),
+            "deadline": a.get("deadline") or "",
+            "days_remaining": _days_remaining(a.get("deadline"), today),
+        })
+    return board
+
+
+DEADLINE_BUCKETS = (
+    ("overdue", "Overdue"),
+    ("due_3d", "Due within 3 days"),
+    ("due_7d", "Due within 7 days"),
+    ("later", "Later"),
+)
+
+
+def deadline_alerts(today: date | None = None) -> list[dict]:
+    """Applications with deadlines, sorted by urgency.
+
+    Buckets in order: overdue, due within 3 days, due within 7 days,
+    later. Each entry: app_id, company, role, status, deadline,
+    days_remaining (negative when overdue), bucket. Applications without
+    a deadline are skipped. ``today`` is injectable for tests.
+    """
+    from candid import tracker as T
+    rows = []
+    for a in T.list_apps():
+        dl = a.get("deadline") or ""
+        days = _days_remaining(dl, today)
+        if days is None:
+            continue
+        if days < 0:
+            bucket = "overdue"
+        elif days <= 3:
+            bucket = "due_3d"
+        elif days <= 7:
+            bucket = "due_7d"
+        else:
+            bucket = "later"
+        rows.append({
+            "app_id": a.get("id"),
+            "company": a.get("company", ""),
+            "role": a.get("role", ""),
+            "status": a.get("status", ""),
+            "deadline": dl,
+            "days_remaining": days,
+            "bucket": bucket,
+        })
+    order = {b: i for i, (b, _) in enumerate(DEADLINE_BUCKETS)}
+    return sorted(rows, key=lambda r: (order[r["bucket"]], r["days_remaining"]))
+
+
+def set_deadline(app_id: int, deadline: str) -> dict:
+    """Set (or clear, with an empty string) an application's deadline."""
+    from candid import tracker as T
+    try:
+        return T.update(app_id, deadline=deadline)
+    except T.TrackerError as e:
+        raise DashboardError(str(e)) from e
+
+
 def proposal_list(status: str = "pending") -> list[dict]:
     """Pending Gmail proposals awaiting confirmation."""
     from candid import gmail
@@ -514,6 +627,10 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 _send_json(self, curated_jobs())
             elif path == "/api/prep-status":
                 _send_json(self, prep_status())
+            elif path == "/api/kanban":
+                _send_json(self, kanban_board())
+            elif path == "/api/deadlines":
+                _send_json(self, deadline_alerts())
             elif path == "/api/nudges":
                 from candid import nudges as N
                 _send_json(self, N.pending_nudges())
@@ -577,6 +694,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             return
         body = _read_json(self)
         try:
+            m = re.fullmatch(r"/api/apps/(\d+)/deadline", path)
+            if m:
+                try:
+                    rec = set_deadline(int(m.group(1)),
+                                       body.get("deadline", ""))
+                except DashboardError as e:
+                    code = 404 if "No application" in str(e) else 400
+                    _send_json(self, {"error": str(e)}, code)
+                    return
+                _send_json(self, rec)
+                return
             m = re.fullmatch(r"/api/apps/(\d+)", path)
             if m:
                 try:

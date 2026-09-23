@@ -42,6 +42,24 @@ def _next_id(apps: list[dict]) -> int:
     return max((a.get("id", 0) for a in apps), default=0) + 1
 
 
+def _validate_deadline(value: str) -> str:
+    """Validate a YYYY-MM-DD deadline; return the normalized ISO string.
+
+    An empty string clears the deadline (returns ""). Raises TrackerError
+    on anything that is not an ISO calendar date.
+    """
+    v = (value or "").strip()
+    if not v:
+        return ""
+    try:
+        return date.fromisoformat(v).isoformat()
+    except (ValueError, TypeError, AttributeError):
+        raise TrackerError(
+            f"Bad deadline {value!r}: use YYYY-MM-DD "
+            f"(e.g. {date.today().isoformat()})."
+        ) from None
+
+
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         notes: str = "", path: str | Path | None = None) -> dict:
     """Add an application. Returns the new record.
@@ -75,8 +93,13 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
 
 
 def update(app_id: int, *, status: str | None = None, notes: str | None = None,
-           prep_pack: str | None = None, path: str | Path | None = None) -> dict:
-    """Update an application's status/notes/prep_pack. Returns the record."""
+           prep_pack: str | None = None, deadline: str | None = None,
+           path: str | Path | None = None) -> dict:
+    """Update an application's status/notes/prep_pack/deadline. Returns the record.
+
+    ``deadline`` is a YYYY-MM-DD date string stored as ISO; an empty string
+    clears it. Omitted (None) leaves it untouched.
+    """
     apps = _load(path)
     rec = next((a for a in apps if a.get("id") == app_id), None)
     if rec is None:
@@ -89,6 +112,8 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
         rec["notes"] = notes
     if prep_pack is not None:
         rec["prep_pack"] = prep_pack
+    if deadline is not None:
+        rec["deadline"] = _validate_deadline(deadline)
     rec["date_updated"] = date.today().isoformat()
     _save(apps, path)
     return rec
