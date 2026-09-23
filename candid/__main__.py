@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "narrative",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "narrative": ["arc", "pitch", "review", "approve", "status", "tailor",
+                  "hooks", "transitions", "why-us", "timing", "setbacks", "export"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "NarrativeError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "NarrativeError": "python -m candid narrative --help",
 }
 
 
@@ -484,6 +487,279 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+# ---------------------------------------------------------------------------
+# narrative: career story builder (arc, pitches, approval, hooks, timing...)
+# ---------------------------------------------------------------------------
+
+def _narrative_jd(a) -> str:
+    """Optional JD source: file path, raw text, or - for stdin ("" if not given)."""
+    from pathlib import Path
+    src = getattr(a, "jd", "") or ""
+    if not src:
+        return ""
+    if src == "-":
+        return sys.stdin.read()
+    p = Path(src)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    return src
+
+
+def _narrative_arc(a):
+    from candid import narrative_arc as NA
+    if a.sub == "build":
+        arc = NA.save_arc()
+        print("Narrative arc built and saved.")
+    else:
+        arc = NA.get_arc()
+        if arc is None:
+            sys.exit("No narrative arc yet. Build one first:\n"
+                     "    python -m candid narrative arc build")
+    if a.json:
+        print(json.dumps(arc, indent=2))
+        return
+    for seg in ("past", "present", "future"):
+        part = arc.get(seg, {}) if isinstance(arc, dict) else {}
+        print(f"\n## {seg.upper()}")
+        print(part.get("text", "") if isinstance(part, dict) else part)
+        srcs = part.get("sources", []) if isinstance(part, dict) else []
+        if srcs:
+            print(f"[sources: {', '.join(srcs)}]")
+
+
+def _narrative_pitch(a):
+    from candid import narrative_arc as NA
+    d = NA.generate_pitch(length=a.length, regenerate=a.regenerate)
+    if a.json:
+        print(json.dumps(d, indent=2, default=str))
+        return
+    print(d.get("text", ""))
+    rng = d.get("word_range") or ()
+    print(f"\n[{d.get('word_count', 0)} words"
+          + (f" (target {rng[0]}-{rng[1]})" if len(rng) == 2 else "") + "]")
+
+
+def _narrative_review(a):
+    from candid import narrative_review as NR
+    sentences = NR.review_pitch(a.length)
+    if a.json:
+        print(json.dumps(sentences, indent=2))
+        return
+    print(f"Review every sentence ({len(sentences)} total). "
+          "Approve, edit, or reject each one:\n")
+    for s in sentences:
+        print(f"[{s['index']}] {s['text']}")
+        cits = s.get("citations") or []
+        if cits:
+            print(f"     sources: {', '.join(cits)}")
+
+
+def _narrative_approve(a):
+    from candid import narrative_review as NR
+    sentences = NR.review_pitch(a.length)
+    decisions = {}
+    print("Type a = approve, e = edit, r = reject, s = skip (default a).\n")
+    for s in sentences:
+        print(f"[{s['index']}] {s['text']}")
+        try:
+            raw = input("  decision [a/e/r/s]: ").strip().lower()
+        except EOFError:
+            print("\nStopped (EOF). No decisions submitted.")
+            return
+        if raw in ("", "a"):
+            decisions[s["index"]] = "approve"
+        elif raw == "e":
+            try:
+                new = input("  replacement text: ")
+            except EOFError:
+                print("\nStopped (EOF). No decisions submitted.")
+                return
+            decisions[s["index"]] = f"edit:{new}"
+        elif raw == "r":
+            decisions[s["index"]] = "reject"
+        else:
+            continue
+    res = NR.submit_review(a.length, decisions)
+    st = NR.approval_status(a.length)
+    print(f"\nRecorded {len(decisions)} decisions. "
+          f"Approved: {st.get('approved', 0)}/{st.get('total', 0)}. "
+          f"Fully approved: {st.get('fully_approved', False)}.")
+    if st.get("fully_approved"):
+        print("\nCanonical text:\n" + st.get("approved_text", ""))
+
+
+def _narrative_status(a):
+    from candid import narrative_review as NR
+    key = a.key or a.length
+    st = NR.approval_status(key)
+    if a.json:
+        print(json.dumps(st, indent=2))
+        return
+    print(f"Key: {key}")
+    print(f"Fully approved: {st.get('fully_approved', False)} "
+          f"({st.get('approved', 0)} approved, {st.get('edited', 0)} edited, "
+          f"{st.get('rejected', 0)} rejected, {st.get('pending', 0)} pending "
+          f"of {st.get('total', 0)})")
+    if st.get("fully_approved") and st.get("approved_text"):
+        print("\n" + st["approved_text"])
+
+
+def _narrative_tailor(a):
+    from candid import narrative_review as NR
+    jd = _narrative_jd(a)
+    if not jd.strip():
+        sys.exit("Tailoring needs a JD: pass --jd <file | text | ->.\n"
+                 "Tip: `python -m candid narrative tailor --jd jd.txt "
+                 "--company X --role Y`")
+    rec = NR.tailor_pitch(jd, a.company, a.role, length=a.length)
+    print("⚠️  DRAFT — NOT approved. Review every sentence before using it.\n")
+    if a.json:
+        print(json.dumps(rec, indent=2, default=str))
+        return
+    for s in rec.get("sentences", []):
+        kw = s.get("matched_keywords") or []
+        tag = f"  <<{', '.join(kw)}>>" if kw else ""
+        print(f"[{s['index']}] {s['text']}{tag}")
+
+
+def _narrative_hooks(a):
+    from candid import narrative_hooks as NH
+    if a.sub == "suggest":
+        hooks = NH.suggest_hooks(n=a.n)
+        NH.store_suggestions(hooks)
+        if a.json:
+            print(json.dumps(hooks, indent=2))
+            return
+        for h in hooks:
+            print(f"[{h['id']}] {h['text']}")
+    elif a.sub == "save":
+        NH.save_hook(a.id)
+        print(f"Saved hook {a.id}.")
+    elif a.sub == "delete":
+        NH.delete_hook(a.id)
+        print(f"Deleted hook {a.id}.")
+    elif a.sub == "list":
+        hooks = NH.list_hooks()
+        if a.json:
+            print(json.dumps(hooks, indent=2))
+            return
+        if not hooks:
+            print("No saved hooks yet. Run `narrative hooks suggest` first.")
+        for h in hooks:
+            print(f"[{h['id']}] {h['text']}")
+
+
+def _narrative_transitions(a):
+    from candid import narrative_hooks as NH
+    if a.sub == "build":
+        trs = NH.build_transitions()
+        if a.json:
+            print(json.dumps(trs, indent=2))
+            return
+        for i, t in enumerate(trs):
+            print(f"[{i}] {t['text']}")
+    elif a.sub == "list":
+        trs = NH.list_transitions()
+        if a.json:
+            print(json.dumps(trs, indent=2))
+            return
+        for i, t in enumerate(trs):
+            print(f"[{i}] {t['text']}")
+    elif a.sub == "update":
+        NH.update_transition(a.index, a.text)
+        print(f"Updated transition [{a.index}].")
+
+
+def _narrative_why_us(a):
+    from candid import narrative_why as NW
+    if a.approve:
+        NW.approve_why_us(a.company)
+        print(f"Approved why-us draft for {a.company}.")
+        return
+    text = NW.why_us(a.company, a.role,
+                     jd_text=_narrative_jd(a) or None,
+                     company_facts=a.facts or None)
+    if a.json:
+        print(json.dumps({"company": a.company, "role": a.role, "text": text},
+                         indent=2))
+        return
+    print("⚠️  DRAFT — not approved. Review every word before using it.\n")
+    print(text)
+
+
+def _narrative_timing(a):
+    from candid import narrative_why as NW
+    if a.text:
+        rep = NW.timing(a.text, target=a.target)
+    else:
+        rep = NW.timing_report(a.length)
+    if a.json:
+        print(json.dumps(rep, indent=2, default=str))
+        return
+    print(f"Words: {rep.get('word_count')} (~{rep.get('seconds', 0):.0f}s "
+          f"at 140 wpm, target {a.target if a.text else a.length}: "
+          f"{rep.get('verdict', '')})")
+    for tip in rep.get("tips", []):
+        print(f"  - {tip}")
+    for f in rep.get("flagged_sentences", []) or []:
+        print(f"  ! long sentence ({f.get('words')} words): "
+              f"{str(f.get('text'))[:80]}...")
+    for f in rep.get("filler_hits", []) or []:
+        print(f"  ! filler '{f.get('phrase')}' x{f.get('count')}")
+
+
+def _narrative_setbacks(a):
+    from candid import narrative_setbacks as NS
+    if a.sub == "build":
+        stories = NS.build_setback_stories()
+        if a.json:
+            print(json.dumps(stories, indent=2))
+            return
+        for s in stories:
+            tag = "[TEMPLATE] " if s.get("is_template") else ""
+            print(f"[{s['id']}] {tag}{s['prompt']}")
+            print(f"     source: {s.get('source_citation', '')}")
+    elif a.sub == "list":
+        stories = NS.list_setback_stories()
+        if a.json:
+            print(json.dumps(stories, indent=2))
+            return
+        for s in stories:
+            status = "written" if s.get("user_text") else "not written"
+            print(f"[{s['id']}] {s['prompt']} ({status})")
+    elif a.sub == "update":
+        NS.update_setback_story(a.id, a.text)
+        print(f"Updated setback story {a.id}.")
+
+
+def _narrative_export(a):
+    from candid import narrative_setbacks as NS
+    if a.out:
+        res = NS.write_onepager(a.out, format=a.format)
+        print(f"Wrote {a.format} one-pager to {res.get('path', a.out)} "
+              f"({res.get('total_words', 0)} words).")
+    else:
+        print(NS.export_onepager(format=a.format))
+
+
+def cmd_narrative(a):
+    dispatch = {
+        "arc": _narrative_arc,
+        "pitch": _narrative_pitch,
+        "review": _narrative_review,
+        "approve": _narrative_approve,
+        "status": _narrative_status,
+        "tailor": _narrative_tailor,
+        "hooks": _narrative_hooks,
+        "transitions": _narrative_transitions,
+        "why-us": _narrative_why_us,
+        "timing": _narrative_timing,
+        "setbacks": _narrative_setbacks,
+        "export": _narrative_export,
+    }
+    dispatch[a.what](a)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1194,152 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # narrative: career story builder
+    s = _sub(sub, "narrative", "Career story builder: arc, pitches, hooks, timing.", [
+        "python -m candid narrative arc build",
+        "python -m candid narrative pitch --length 2min",
+        "python -m candid narrative review --length 2min",
+        "python -m candid narrative export --format markdown --out story.md",
+    ])
+    ns = _nested(s, dest="what")
+
+    t = _sub(ns, "arc", "Build or show your past/present/future narrative arc.", [
+        "python -m candid narrative arc build",
+        "python -m candid narrative arc show",
+    ])
+    t.add_argument("sub", choices=["build", "show"], default="show", nargs="?",
+                   help="build: regenerate the arc · show: print it (default)")
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "pitch", "Generate a 'tell me about yourself' pitch.", [
+        "python -m candid narrative pitch --length 2min",
+        "python -m candid narrative pitch --length 30s --regenerate",
+    ])
+    t.add_argument("--length", default="2min", choices=["30s", "2min", "5min"])
+    t.add_argument("--regenerate", action="store_true",
+                   help="Rebuild instead of reusing the saved draft")
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "review", "Break a pitch draft into sentences for approval.", [
+        "python -m candid narrative review --length 2min",
+    ])
+    t.add_argument("--length", default="2min", choices=["30s", "2min", "5min"])
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "approve", "Interactively approve/edit/reject each sentence.", [
+        "python -m candid narrative approve --length 2min",
+    ])
+    t.add_argument("--length", default="2min", choices=["30s", "2min", "5min"])
+
+    t = _sub(ns, "status", "Approval status of a pitch or tailored draft.", [
+        "python -m candid narrative status --length 2min",
+        "python -m candid narrative status --key 'Acme::MLE::2min'",
+    ])
+    t.add_argument("--length", default="2min", choices=["30s", "2min", "5min"])
+    t.add_argument("--key", default="",
+                   help="Composite key for a tailored draft (overrides --length)")
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "tailor", "Tailor a pitch to a JD (draft, never auto-approved).", [
+        "python -m candid narrative tailor --jd jd.txt --company Acme --role MLE",
+    ])
+    t.add_argument("--jd", default="", help=JD_HELP)
+    t.add_argument("--company", required=True)
+    t.add_argument("--role", required=True)
+    t.add_argument("--length", default="2min", choices=["30s", "2min", "5min"])
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "hooks", "Opening-line library from your strongest bullets.", [
+        "python -m candid narrative hooks suggest",
+        "python -m candid narrative hooks save <id>",
+    ])
+    hs = _nested(t, dest="sub")
+    h = _sub(hs, "suggest", "Suggest opening lines.", [
+        "python -m candid narrative hooks suggest --n 5",
+    ])
+    h.add_argument("--n", type=int, default=5)
+    h.add_argument("--json", action="store_true")
+    h = _sub(hs, "save", "Save a suggested hook.", [
+        "python -m candid narrative hooks save <id>",
+    ])
+    h.add_argument("id")
+    h = _sub(hs, "delete", "Delete a saved hook.", [
+        "python -m candid narrative hooks delete <id>",
+    ])
+    h.add_argument("id")
+    h = _sub(hs, "list", "List saved hooks.", [
+        "python -m candid narrative hooks list",
+    ])
+    h.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "transitions", "Bridge sentences between consecutive roles.", [
+        "python -m candid narrative transitions build",
+        "python -m candid narrative transitions update 0 --text \"...\"",
+    ])
+    ts2 = _nested(t, dest="sub")
+    h = _sub(ts2, "build", "Build transition lines from your work history.", [
+        "python -m candid narrative transitions build",
+    ])
+    h.add_argument("--json", action="store_true")
+    h = _sub(ts2, "list", "List transition lines.", [
+        "python -m candid narrative transitions list",
+    ])
+    h.add_argument("--json", action="store_true")
+    h = _sub(ts2, "update", "Edit a transition line.", [
+        "python -m candid narrative transitions update 0 --text \"...\"",
+    ])
+    h.add_argument("index", type=int)
+    h.add_argument("--text", required=True)
+
+    t = _sub(ns, "why-us", "'Why this company / role' paragraph.", [
+        "python -m candid narrative why-us --company Acme --role MLE --jd jd.txt",
+        "python -m candid narrative why-us --company Acme --approve",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--role", default="")
+    t.add_argument("--jd", default="", help=JD_HELP)
+    t.add_argument("--facts", default="",
+                   help="Your own facts about the company (quoted verbatim)")
+    t.add_argument("--approve", action="store_true",
+                   help="Approve the saved draft for --company")
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "timing", "Speaking-time coach for a pitch.", [
+        "python -m candid narrative timing --length 2min",
+        "python -m candid narrative timing --text \"pitch text\" --target 30s",
+    ])
+    t.add_argument("--length", default="2min", choices=["30s", "2min", "5min"])
+    t.add_argument("--text", default="", help="Time this text instead of the stored pitch")
+    t.add_argument("--target", default="2min", choices=["30s", "2min", "5min"])
+    t.add_argument("--json", action="store_true")
+
+    t = _sub(ns, "setbacks", "Failure/mistake story scaffolds.", [
+        "python -m candid narrative setbacks build",
+        "python -m candid narrative setbacks update <id> --text \"...\"",
+    ])
+    ss = _nested(t, dest="sub")
+    h = _sub(ss, "build", "Build scaffolds from debriefs/rejections (or templates).", [
+        "python -m candid narrative setbacks build",
+    ])
+    h.add_argument("--json", action="store_true")
+    h = _sub(ss, "list", "List setback stories.", [
+        "python -m candid narrative setbacks list",
+    ])
+    h.add_argument("--json", action="store_true")
+    h = _sub(ss, "update", "Write your version of a setback story.", [
+        "python -m candid narrative setbacks update <id> --text \"...\"",
+    ])
+    h.add_argument("id")
+    h.add_argument("--text", required=True)
+
+    t = _sub(ns, "export", "One-page narrative export for interview prep.", [
+        "python -m candid narrative export --format markdown --out story.md",
+        "python -m candid narrative export --format text",
+    ])
+    t.add_argument("--format", default="markdown", choices=["markdown", "text"])
+    t.add_argument("--out", default="", help="Write to file instead of stdout")
+    s.set_defaults(func=cmd_narrative)
 
     return p
 

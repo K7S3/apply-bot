@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `narrative` | Career story builder: past/present/future narrative arc with source citations, "tell me about yourself" pitches in 30s / 2min / 5min lengths, **sentence-by-sentence approval** (nothing becomes canonical until you approve every word), per-role JD tailoring (drafts never auto-approved), opening-line hook library, role-transition bridges, "why us / why this role" paragraphs (company facts come only from you), a 140-wpm timing coach with pacing tips, failure-story scaffolds from your debriefs, and a one-page interview-prep export. Everything is template-generated from your profile; unknowns become `[fill in: ...]` placeholders, never invented facts. |
 
 ## Job-source coverage (honest)
 
