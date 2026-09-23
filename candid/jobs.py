@@ -8,6 +8,13 @@ deliberately out of scope — for those, paste the JD into
 ``python -m candid match`` / ``tailor`` instead. See
 ``docs/adding_sources.md`` and the README for honest coverage notes.
 
+One deliberate exception: ``usajobs`` (USAJOBS.gov federal postings) is an
+*opt-in* source — it needs the free USAJOBS API key (developer.usajobs.gov)
+and raises a friendly error pointing at signup when the key is absent, so
+``jobs curate --sources usajobs`` degrades instead of crashing. Adapters
+that take a search keyword (like the USAJOBS one) receive the curate
+``role`` threaded through by ``_call_adapter``.
+
 Pipeline:
     jobs curate --role "Data Scientist" --location "New York" [--remote] [--level senior]
         → fetch from adapters → filter/rank → score vs profile →
@@ -22,6 +29,7 @@ Fetched listings are treated as *data* — never executed as code.
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import urllib.request
@@ -130,10 +138,42 @@ def _adapt_remoteok() -> list[dict]:
     return out
 
 
+def _adapt_usajobs(keyword: str = "software engineer") -> list[dict]:
+    """USAJOBS.gov federal postings — opt-in adapter for jobs.ADAPTERS.
+
+    ``curate`` threads the wanted role in as ``keyword`` (see
+    ``_call_adapter``). Without the free API key
+    (``CANDID_USAJOBS_KEY``, signup at developer.usajobs.gov) this raises
+    ``UsajobsError`` — a ``JobsError`` subclass, so the curate pipeline
+    records the friendly message and continues with the other sources
+    instead of crashing.
+    """
+    from candid import usajobs as U
+    return U.opt_in_adapter(keyword)()  # type: ignore[no-any-return]
+
+
 ADAPTERS: dict[str, object] = {
     "arbeitnow": _adapt_arbeitnow,
     "remoteok": _adapt_remoteok,
+    "usajobs": _adapt_usajobs,  # opt-in: needs CANDID_USAJOBS_KEY
 }
+
+
+def _call_adapter(fn, role: str) -> list[dict]:
+    """Call an adapter, threading the curate role into keyword-aware ones.
+
+    Most adapters are zero-arg. An adapter that declares a ``keyword`` (or
+    ``role``) parameter gets the wanted role passed; everything else is
+    called with no arguments, exactly as before.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return fn()
+    for name in ("keyword", "role"):
+        if name in params:
+            return fn(**{name: role})
+    return fn()  # type: ignore[operator]
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +413,7 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
     errors: list[str] = []
     for name in wanted:
         try:
-            raw.extend(ADAPTERS[name]())  # type: ignore[operator]
+            raw.extend(_call_adapter(ADAPTERS[name], role))
         except JobsError as e:
             errors.append(str(e))
 

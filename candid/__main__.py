@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "federal",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "federal": ["search", "translate", "series", "eligibility", "pay",
+                "resume-notes", "score", "announce"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "UsajobsError",
     "ValueError",
 }
 
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "UsajobsError": "python -m candid federal search --help",
 }
 
 
@@ -486,6 +490,215 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+# ---------------------------------------------------------------------------
+# federal (USAJOBS + GS-grade tools)
+# ---------------------------------------------------------------------------
+
+def _render_announcements(jobs: list[dict]) -> str:
+    """Human-readable rendering of normalized USAJOBS job dicts."""
+    lines = [f"{len(jobs)} announcement(s):"]
+    for i, j in enumerate(jobs, 1):
+        lines.append("")
+        lines.append(f"{i}. {j.get('title') or '(untitled)'}")
+        meta = " | ".join(p for p in
+                          [j.get('company') or "", j.get('location') or ""]
+                          if p)
+        if meta:
+            lines.append(f"   {meta}")
+        if j.get('salary_text'):
+            lines.append(f"   {j['salary_text']}")
+        if j.get('url'):
+            lines.append(f"   {j['url']}")
+        desc = (j.get('description') or "").strip()
+        if desc:
+            snippet = desc if len(desc) <= 280 else desc[:277] + "..."
+            lines.append(f"   {snippet}")
+    return "\n".join(lines)
+
+
+def _render_announcement_detail(d: dict) -> str:
+    lines = [f"{d.get('title') or '(untitled)'}"]
+    for key in ("agency", "pay_plan", "grade_range", "occupation_series",
+                "who_may_apply", "closing_date", "clearance_required",
+                "citizenship_required", "telework_eligible", "remote",
+                "questionnaire_required"):
+        lines.append(f"  {key.replace('_', ' ').title()}: {d.get(key)}")
+    locs = d.get('duty_locations') or []
+    lines.append(f"  Duty locations: {', '.join(locs) if locs else '(not listed)'}")
+    hp = d.get('hiring_paths') or {}
+    open_to = [k for k, v in hp.items() if v] or ["(not listed)"]
+    lines.append(f"  Hiring paths: {', '.join(open_to)}")
+    quals = d.get('qualification_summary') or ""
+    if quals:
+        lines.append("  Qualifications:")
+        lines.append(f"    {quals[:600]}{'...' if len(quals) > 600 else ''}")
+    return "\n".join(lines)
+
+
+def _render_translate(t: dict) -> str:
+    lines = [f"Estimated GS band: GS-{t['grade_low']} to GS-{t['grade_high']}"]
+    if t.get('rationale'):
+        lines.append("Why:")
+        lines.extend(f"  - {r}" for r in t['rationale'])
+    if t.get('caveats'):
+        lines.append("Caveats:")
+        lines.extend(f"  - {c}" for c in t['caveats'])
+    return "\n".join(lines)
+
+
+def _render_pay(pay: dict, band: dict) -> str:
+    loc = pay.get('locality') or 'base (no locality)'
+    lines = [
+        f"GS-{band['grade']}, Step {pay.get('step', 1)}: "
+        f"${pay['annual']:,}/yr ({pay.get('year')} rates)",
+        f"  Base: ${pay['base']:,}/yr · Locality: {loc}"
+        + (f" (+{pay['locality_pct']:.2f}%)" if pay.get('locality_pct') else ""),
+        f"  Grade {band['grade']} band: ${band['step1']:,}/yr (step 1) – "
+        f"${band['step10']:,}/yr (step 10)",
+    ]
+    if pay.get('capped'):
+        lines.append("  Note: pay is capped at the statutory maximum.")
+    if band.get('caveat'):
+        lines.append(f"  {band['caveat']}")
+    return "\n".join(lines)
+
+
+def _render_fed_score(s: dict) -> str:
+    lines = [f"Federal fit: {s.get('score', 0):.1f}/100 — {s.get('verdict', '?')}"]
+    if s.get('verdict_reason'):
+        lines.append(s['verdict_reason'])
+    gaps = s.get('gaps') or []
+    if gaps:
+        lines.append("Gaps:")
+        lines.extend(f"  - {g}" for g in gaps)
+    breakdown = s.get('breakdown') or {}
+    if breakdown:
+        lines.append("Breakdown:")
+        for k, v in breakdown.items():
+            lines.append(f"  {k}: {v}")
+    hints = s.get('ksa_hints') or []
+    if hints:
+        lines.append("Assessment (KSA) hints:")
+        for h in hints:
+            if isinstance(h, dict):
+                lines.append(f"  - {h.get('phrase')}: {h.get('prep_pointer', '')}")
+            else:
+                lines.append(f"  - {h}")
+    return "\n".join(lines)
+
+
+def _federal_search_no_key_msg() -> str:
+    return ("USAJOBS live search needs a free API key (none is set).\n"
+            "  1. Sign up free at https://developer.usajobs.gov/SignUp (~2 min, no approval wait)\n"
+            "  2. export CANDID_USAJOBS_KEY=<your key>\n"
+            "  3. Re-run the search.\n"
+            "No key, just exploring? Use --samples to see the bundled fictional demos.")
+
+
+def cmd_federal(a):
+    if a.what == "search":
+        from candid import usajobs as U
+        if a.samples:
+            jobs = U.sample_announcements()
+            if a.json:
+                print(json.dumps(jobs, indent=2, default=str))
+            else:
+                print("(Bundled fictional samples — not real postings.)")
+                print(_render_announcements(jobs))
+            return
+        try:
+            jobs = U.search(a.keyword, location=a.location or None,
+                            series=a.series or None, grade=a.grade or None,
+                            results_per_page=a.limit)
+        except U.UsajobsError:
+            sys.exit(_federal_search_no_key_msg())
+        if a.json:
+            print(json.dumps(jobs, indent=2, default=str))
+        else:
+            print(_render_announcements(jobs))
+    elif a.what == "translate":
+        from candid import federal as F
+        t = F.translate_to_gs(a.title, float(a.years),
+                              current_salary=a.salary)
+        if a.json:
+            print(json.dumps(t, indent=2, default=str))
+        else:
+            print(_render_translate(t))
+    elif a.what == "series":
+        from candid import federal as F
+        prof = _profile()
+        matches = F.match_series(prof.get("skills") or [], top_n=5)
+        if a.json:
+            print(json.dumps(matches, indent=2, default=str))
+        else:
+            if not matches:
+                print("No series matches — your profile has no skills to match on. "
+                      "Run `python -m candid onboard --resume resume.pdf` first.")
+            else:
+                print(F.render_series_matches(matches))
+    elif a.what == "eligibility":
+        from candid import federal as F
+        facts: dict = {}
+        if a.citizenship:
+            facts["citizenship"] = a.citizenship
+        if a.veteran:
+            facts["veteran_status"] = "veteran" if a.veteran == "yes" else "none"
+        if a.clearance:
+            facts["clearance"] = "active"
+        if a.federal_employee:
+            facts["federal_employee"] = True
+        print(F.render_eligibility(F.eligibility_checklist(facts)))
+    elif a.what == "pay":
+        from candid import fedpay as P
+        pay = P.gs_pay(a.grade, a.step, locality=a.locality or None)
+        pay["step"] = a.step
+        band = P.grade_salary_range(a.grade, locality=a.locality or None)
+        if a.json:
+            print(json.dumps({"pay": pay, "band": band}, indent=2, default=str))
+        else:
+            print(_render_pay(pay, band))
+    elif a.what == "resume-notes":
+        from candid import fedresume as R
+        notes = R.federal_resume_notes(_profile())
+        if a.json:
+            print(json.dumps(notes, indent=2, default=str))
+        else:
+            print(R.render_notes(notes))
+    elif a.what == "score":
+        from candid import fedresume as R
+        from pathlib import Path
+        p = Path(a.file)
+        if not p.exists():
+            sys.exit(f"File not found: {a.file}")
+        text = p.read_text(encoding="utf-8")
+        try:
+            payload = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            payload = text  # plain-text announcement
+        result = R.score_federal(_profile(), payload)
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(_render_fed_score(result))
+    elif a.what == "announce":
+        from candid import usajobs as U
+        from pathlib import Path
+        p = Path(a.file)
+        if not p.exists():
+            sys.exit(f"File not found: {a.file}")
+        text = p.read_text(encoding="utf-8")
+        try:
+            payload = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            sys.exit(f"{a.file} is not valid JSON — 'announce' expects a raw "
+                     f"USAJOBS API item (JSON). Use 'score' for plain-text JDs.")
+        parsed = U.parse_announcement(payload)
+        if a.json:
+            print(json.dumps(parsed, indent=2, default=str))
+        else:
+            print(_render_announcement_detail(parsed))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -816,7 +1029,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--remote", action="store_true")
     t.add_argument("--level", default=None, help="entry|junior|mid|senior|lead|staff|principal")
     t.add_argument("--limit", type=int, default=15)
-    t.add_argument("--sources", nargs="*", default=None, help="subset of: arbeitnow remoteok")
+    t.add_argument("--sources", nargs="*", default=None,
+                   help="subset of: arbeitnow remoteok usajobs (usajobs is opt-in: needs CANDID_USAJOBS_KEY)")
     t.add_argument("--days", type=int, default=None,
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
@@ -918,6 +1132,93 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # federal (USAJOBS + GS-grade tools)
+    s = _sub(sub, "federal", "Federal hiring tools: USAJOBS search, GS-grade mapping, pay, resume notes.", [
+        "python -m candid federal search --keyword \"data scientist\" --samples",
+        "python -m candid federal translate --title \"Software Engineer\" --years 5",
+        "python -m candid federal series",
+        "python -m candid federal eligibility --citizenship us_citizen",
+        "python -m candid federal pay --grade 13 --step 5 --locality \"Washington-Baltimore-Arlington, DC-MD-VA-WV-PA\"",
+        "python -m candid federal resume-notes",
+        "python -m candid federal score --file announcement.json",
+    ])
+    fs = _nested(s)
+    t = _sub(fs, "search", "Search USAJOBS announcements (needs free API key) or demo with bundled samples.", [
+        "python -m candid federal search --keyword \"data scientist\" --samples",
+        "python -m candid federal search --keyword \"data scientist\" --location \"New York\" --limit 10",
+        "python -m candid federal search --keyword engineer --series 1550 --grade 12-13",
+    ])
+    t.add_argument("--keyword", required=True, help="Search keyword / job title")
+    t.add_argument("--location", default="", help="City, state, or 'Remote'")
+    t.add_argument("--series", default="", help="4-digit occupation series (e.g. 1550)")
+    t.add_argument("--grade", default="", help="GS grade or range (e.g. 12 or 12-13)")
+    t.add_argument("--limit", type=int, default=25, help="Results per page (default: 25)")
+    t.add_argument("--samples", action="store_true",
+                   help="Show the bundled fictional demo announcements (no key needed)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw results as JSON (for scripting)")
+    t = _sub(fs, "translate", "Map a private-sector title + experience to a GS grade band.", [
+        "python -m candid federal translate --title \"Software Engineer\" --years 5",
+        "python -m candid federal translate --title \"Data Scientist\" --years 3 --salary 140000",
+    ])
+    t.add_argument("--title", required=True, help="Current job title")
+    t.add_argument("--years", type=float, required=True, help="Years of relevant experience")
+    t.add_argument("--salary", type=float, default=None, help="Current salary $/yr (optional sanity check)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw result as JSON (for scripting)")
+    t = _sub(fs, "series", "Match your profile skills to federal occupation series.", [
+        "python -m candid federal series",
+        "python -m candid federal series --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw matches as JSON (for scripting)")
+    t = _sub(fs, "eligibility", "Federal eligibility checklist from facts you provide (nothing assumed).", [
+        "python -m candid federal eligibility",
+        "python -m candid federal eligibility --citizenship us_citizen --veteran no",
+        "python -m candid federal eligibility --citizenship us_citizen --veteran yes --federal-employee",
+    ])
+    t.add_argument("--citizenship", default=None,
+                   choices=["us_citizen", "us_national", "permanent_resident", "other"],
+                   help="Your citizenship status (unset: 'confirm' item)")
+    t.add_argument("--veteran", default=None, choices=["yes", "no"],
+                   help="Veterans' preference (unset: 'confirm' item)")
+    t.add_argument("--clearance", action="store_true",
+                   help="You hold an active security clearance (unset: 'confirm' item)")
+    t.add_argument("--federal-employee", action="store_true",
+                   help="You are a current federal employee (unset: 'confirm' item)")
+    t = _sub(fs, "pay", "Look up GS pay for a grade/step, with locality adjustment.", [
+        "python -m candid federal pay --grade 13",
+        "python -m candid federal pay --grade 13 --step 5",
+        "python -m candid federal pay --grade 12 --locality \"New York-Newark, NY-NJ-CT-PA\"",
+    ])
+    t.add_argument("--grade", type=int, required=True, help="GS grade (1-15)")
+    t.add_argument("--step", type=int, default=1, help="Step (1-10, default: 1)")
+    t.add_argument("--locality", default="", help="OPM locality area name")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw pay data as JSON (for scripting)")
+    t = _sub(fs, "resume-notes", "Federal-resume checklist built from your profile.", [
+        "python -m candid federal resume-notes",
+        "python -m candid federal resume-notes --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw notes as JSON (for scripting)")
+    t = _sub(fs, "score", "Score your profile against a federal announcement.", [
+        "python -m candid federal score --file announcement.json",
+        "python -m candid federal score --file announcement.json --json",
+    ])
+    t.add_argument("--file", required=True,
+                   help="Announcement file: parsed JSON dict, raw USAJOBS item JSON, or plain text")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw score as JSON (for scripting)")
+    t = _sub(fs, "announce", "Parse a raw USAJOBS API item into a readable announcement.", [
+        "python -m candid federal announce --file item.json",
+        "python -m candid federal announce --file item.json --json",
+    ])
+    t.add_argument("--file", required=True, help="Raw USAJOBS search-result item (JSON)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the parsed announcement as JSON (for scripting)")
+    s.set_defaults(func=cmd_federal)
 
     return p
 
