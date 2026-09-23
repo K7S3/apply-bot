@@ -13,6 +13,9 @@ Modules:
                 concept deep-dives, timed drills, study plans, progress
     followup  thank-you / recruiter nudge drafts
     offer     offer comparison and total-comp normalization
+    vesting   vesting schedule visualizer: timelines, cliff markers,
+              cumulative value charts, refresher modeling, departure
+              analysis, price scenarios, golden handcuffs, tax events
     negotiate recruiter scripts, counter drafts, BATNA framing
     alumni    alumni network mapper: Connections.csv import, school/company
               overlap, warm-path finder, outreach queue, drafts, coverage,

@@ -32,9 +32,8 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
-    "dashboard", "import", "gmail", "linkedin", "tracks",
+    "followup", "offer", "benefits", "vesting", "negotiate", "salary", "mock",
+    "jobs", "dashboard", "import", "gmail", "linkedin", "patterns", "tracks",
 ]
 
 SUBCOMMANDS = {
@@ -46,6 +45,8 @@ SUBCOMMANDS = {
     "benefits": ["health", "healthcare", "match", "vesting", "pto", "espp",
                  "hsa", "fsa", "commute", "leave", "stipends",
                  "normalize", "compare"],
+    "vesting": ["timeline", "chart", "compare", "depart", "handcuffs",
+                "refresher", "tax", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -63,6 +64,7 @@ SUBCOMMANDS = {
 _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
+    "OfferError", "VestingError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "PatternsError", "AlumniError",
     "ValueError",
@@ -77,6 +79,7 @@ _NEXT_COMMAND = {
     "PrepError": "python -m candid prep --help",
     "OfferError": "python -m candid offer --help",
     "BenefitsError": "python -m candid benefits --help",
+    "VestingError": "python -m candid vesting --help",
     "SalaryError": "python -m candid salary --help",
     "MockError": "python -m candid mock --help",
     "JudgeError": "python -m candid mock --help",
@@ -410,6 +413,107 @@ def cmd_benefits(a):
         pa = B.load_package(a.package_a)
         pb = B.load_package(a.package_b)
         print(B.render_comparison(B.compare_packages(pa, pb)))
+def _vesting_spec(a):
+    """Build a normalized grant spec from CLI flags or a recorded offer."""
+    from candid import vesting as V
+    if getattr(a, "offer_id", 0):
+        return V.grant_by_offer_id(a.offer_id)
+    if a.shares and a.value:
+        sys.exit("Use --shares or --value, not both.\n"
+                 "Next: run `python -m candid vesting timeline --help`.")
+    if a.shares:
+        if not a.grant_price:
+            sys.exit("--shares needs --grant-price for value math.\n"
+                     "Next: run `python -m candid vesting timeline --help`.")
+        spec = {"kind": "shares", "total": a.shares,
+                "grant_price": a.grant_price}
+    elif a.value:
+        spec = {"kind": "dollars", "total": a.value}
+    else:
+        sys.exit("Provide --shares N, --value V, or --offer-id N.\n"
+                 "Next: run `python -m candid vesting timeline --help`.")
+    spec.update({
+        "start": a.start or None,
+        "years": a.years,
+        "freq": a.freq,
+        "cliff_months": a.cliff_months,
+        "schedule": a.schedule,
+        "label": a.label,
+    })
+    return V.normalize_grant(spec)
+
+
+def _vesting_prices(a, spec, months):
+    """Monthly price path for share grants, or None for dollar grants."""
+    from candid import vesting as V
+    if spec["kind"] != "shares":
+        return None
+    start = a.price_start or spec["grant_price"]
+    return V.price_path(start, months, a.growth)
+
+
+def cmd_vesting(a):
+    from candid import vesting as V
+    if a.what == "compare":
+        from candid import offer as O
+        rows = V.compare_offers(O.list_offers())
+        print(V.render_offer_vesting_comparison(rows))
+        return
+    spec = _vesting_spec(a)
+    months = spec["years"] * 12
+    if a.what == "timeline":
+        events = V.build_schedule(spec)
+        print(V.render_table(events, title=f"Vesting timeline — {spec['label']}"))
+        cs = V.cliff_summary(events)
+        if cs:
+            unit = "shares" if spec["kind"] == "shares" else "dollars"
+            print(f"\nCliff: {cs['units']:,.0f} {unit} vest on "
+                  f"{cs['date'].isoformat()} (month {cs['month']}, "
+                  f"{cs['pct_of_grant']:.1f}% of grant).")
+    elif a.what == "chart":
+        events = V.build_schedule(spec)
+        if spec["kind"] == "shares":
+            start = a.price_start or spec["grant_price"]
+            series = V.scenario_series(
+                events, months, start,
+                {"bear": a.bear, "base": a.growth, "bull": a.bull},
+                grant_price=spec["grant_price"])
+            print(V.render_chart(
+                series, months,
+                title=f"Cumulative vested value — {spec['label']} "
+                      f"(price scenarios, %/yr)"))
+        else:
+            series = {"vested $": V.cumulative_value_series(events, months)}
+            print(V.render_chart(series, months,
+                                 title=f"Cumulative vested value — {spec['label']}"))
+    elif a.what == "depart":
+        events = V.build_schedule(spec)
+        print(V.render_departure(V.departure_analysis(events, a.at_month),
+                                 spec["label"]))
+    elif a.what == "handcuffs":
+        events = V.build_schedule(spec)
+        prices = _vesting_prices(a, spec, months)
+        print(V.render_handcuffs(events, months, prices,
+                                 spec.get("grant_price"), spec["label"]))
+    elif a.what == "refresher":
+        events = V.add_refreshers(spec, a.refresher or [])
+        print(V.render_refresher_summary(spec, a.refresher or [], events))
+        print()
+        print(V.render_chart(
+            {"combined vested $": V.cumulative_value_series(events, months)},
+            months, title="Combined cumulative vested value"))
+    elif a.what == "tax":
+        events = V.build_schedule(spec)
+        prices = _vesting_prices(a, spec, months)
+        print(V.render_tax_events(
+            V.tax_events(events, prices, spec.get("grant_price")),
+            spec["label"]))
+    elif a.what == "export":
+        path = V.export_report(
+            spec, path=a.out or None, refresher_specs=a.refresher or [],
+            price_start=(a.price_start or None),
+            annual_growth_pct=a.growth)
+        print(f"Vesting report exported to {path}")
 
 
 def cmd_negotiate(a):
@@ -1156,6 +1260,92 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--package-a", required=True)
     t.add_argument("--package-b", required=True)
     s.set_defaults(func=cmd_benefits)
+    # vesting
+    s = _sub(sub, "vesting", "Vesting schedule visualizer.", [
+        "python -m candid vesting timeline --value 200000 --start 2026-06-01",
+        "python -m candid vesting chart --shares 1000 --grant-price 50 --start 2026-06-01 --schedule amazon",
+        "python -m candid vesting compare",
+        "python -m candid vesting depart --offer-id 1 --at-month 18",
+    ])
+    vs = _nested(s)
+
+    def _grant_args(t):
+        t.add_argument("--offer-id", type=int, default=0,
+                       help="Build the grant from recorded offer #N (equity fields)")
+        t.add_argument("--shares", type=float, default=0,
+                       help="Total RSU/option shares")
+        t.add_argument("--value", type=float, default=0,
+                       help="Total grant value in $ (cash-settled)")
+        t.add_argument("--grant-price", type=float, default=0,
+                       help="$/share at grant (required with --shares)")
+        t.add_argument("--start", default="",
+                       help="Vesting start YYYY-MM-DD (default: today)")
+        t.add_argument("--years", type=int, default=4)
+        t.add_argument("--freq", default="monthly",
+                       choices=["monthly", "quarterly", "annual"])
+        t.add_argument("--cliff-months", type=int, default=12)
+        t.add_argument("--schedule", default="straight",
+                       help="straight | amazon | front | custom:a/b/c/...")
+        t.add_argument("--label", default="Grant")
+        return t
+
+    def _price_args(t):
+        t.add_argument("--price-start", type=float, default=0,
+                       help="$/share path start (default: grant price)")
+        t.add_argument("--growth", type=float, default=0.0,
+                       help="Annual $/share growth %% for value math")
+        return t
+
+    t = _grant_args(_sub(vs, "timeline", "Vesting timeline table with cliff markers.", [
+        "python -m candid vesting timeline --value 200000 --start 2026-06-01",
+        "python -m candid vesting timeline --offer-id 1",
+        "python -m candid vesting timeline --shares 1000 --grant-price 50 --schedule amazon --freq annual",
+    ]))
+
+    t = _price_args(_grant_args(_sub(vs, "chart", "Cumulative vested-value chart (price scenarios for share grants).", [
+        "python -m candid vesting chart --value 200000",
+        "python -m candid vesting chart --shares 1000 --grant-price 50 --growth 5 --bear -10 --bull 25",
+    ])))
+    t.add_argument("--bear", type=float, default=-10.0, help="Bear annual growth %%")
+    t.add_argument("--bull", type=float, default=20.0, help="Bull annual growth %%")
+
+    _sub(vs, "compare", "Compare recorded offers by vested equity at 12/24/36/48 months.", [
+        "python -m candid vesting compare",
+    ])
+
+    t = _price_args(_grant_args(_sub(vs, "depart", "Vested vs forfeited if you leave at month N.", [
+        "python -m candid vesting depart --offer-id 1 --at-month 18",
+        "python -m candid vesting depart --value 200000 --at-month 30",
+    ])))
+    t.add_argument("--at-month", type=int, required=True,
+                   help="Months after vesting start")
+
+    t = _price_args(_grant_args(_sub(vs, "handcuffs", "Golden handcuffs: unvested-$ remaining over time.", [
+        "python -m candid vesting handcuffs --offer-id 1",
+        "python -m candid vesting handcuffs --shares 1000 --grant-price 50 --growth 5",
+    ])))
+
+    t = _grant_args(_sub(vs, "refresher", "Stack refresher grants on the base grant.", [
+        "python -m candid vesting refresher --value 200000 --refresher 40000:2:12 --refresher 40000:2:24",
+    ]))
+    t.add_argument("--refresher", action="append", default=[],
+                   help="Repeatable: VALUE:YEARS:START (START = month offset or YYYY-MM-DD). "
+                        "Refreshers vest straight-line monthly, no cliff.")
+
+    t = _price_args(_grant_args(_sub(vs, "tax", "Taxable-income events per vest (estimate).", [
+        "python -m candid vesting tax --offer-id 1",
+        "python -m candid vesting tax --shares 1000 --grant-price 50 --growth 5",
+    ])))
+
+    t = _price_args(_grant_args(_sub(vs, "export", "Export a full vesting report as markdown.", [
+        "python -m candid vesting export --offer-id 1",
+        "python -m candid vesting export --value 200000 --out vesting.md --refresher 40000:2:12",
+    ])))
+    t.add_argument("--out", default="",
+                   help="Output path (default: candid_data/vesting_reports/<date>_vesting_<label>.md)")
+    t.add_argument("--refresher", action="append", default=[],
+                   help="Repeatable: VALUE:YEARS:START, stacked onto the base grant.")
+    s.set_defaults(func=cmd_vesting)
 
     # negotiate
     s = _sub(sub, "negotiate", "Negotiation playbook, scripts, counter drafts.", [
