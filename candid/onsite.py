@@ -22,6 +22,15 @@ Ten pieces, one command group:
     fresh, per round or for the whole day.
 10. Day summary (`onsite summary`) — export the day (timeline, notes,
     checklist state, follow-up reminders) to Markdown.
+11. Rescheduling (`onsite move-round`) — move or resize a round; the new
+    slot is overlap-checked against the other rounds.
+12. Day runner (`onsite status --at HH:MM`) — what's happening now, what's
+    next and in how long, and which prep to glance at. No real clock is
+    read: you pass the time, so it's deterministic.
+13. Calendar export (`onsite export-ics`) — one .ics VEVENT per round with a
+    15-minute reminder alarm; import it into any calendar app.
+14. Thank-you drafts (`onsite thanks`) — a draft per interviewer, seeded
+    with the notes you captured during their round.
 
 Stored as JSON at candid_data/onsite.json (git-ignored). Everything is
 deterministic and offline: no clocks, no network, no invented data — every
@@ -768,3 +777,185 @@ def render_plans(plans: list[dict]) -> str:
             f"[{p['mode']}] — {n} round{'s' if n != 1 else ''}"
         )
     return "\n".join(lines)
+
+
+# --- rescheduling --------------------------------------------------------------------------
+
+def move_round(plan_id: int, round_id: int, *, start: str | None = None,
+               minutes: int | None = None,
+               path: str | Path | None = None) -> dict:
+    """Move a round to a new start time and/or resize it.
+
+    The new slot is overlap-checked against every OTHER round; back-to-back
+    placement is fine. Returns the updated round record.
+    """
+    if start is None and minutes is None:
+        raise OnsiteError("Nothing to change: pass --start HH:MM and/or --minutes N.")
+    data = _load(path)
+    plan = _find_plan(data, plan_id)
+    rnd = next((r for r in plan["rounds"] if r.get("id") == round_id), None)
+    if rnd is None:
+        raise OnsiteError(f"Plan #{plan_id} has no round with id {round_id}.")
+    new_start = _parse_time(start) if start is not None else rnd["start"]
+    new_minutes = _check_minutes(minutes) if minutes is not None else rnd["minutes"]
+    candidate = {"start": new_start, "minutes": new_minutes,
+                 "title": rnd["title"], "kind": rnd["kind"]}
+    for other in plan["rounds"]:
+        if other.get("id") != round_id and _rounds_overlap(candidate, other):
+            raise OnsiteError(
+                f"Moving '{rnd['title']}' to {_fmt(new_start)}-{_fmt(new_start + new_minutes)} "
+                f"overlaps '{other['title']}' "
+                f"({_fmt(other['start'])}-{_fmt(other['start'] + other['minutes'])})."
+            )
+    rnd["start"] = new_start
+    rnd["minutes"] = new_minutes
+    _save(data, path)
+    return rnd
+
+
+# --- day runner ------------------------------------------------------------------------------
+
+def day_status(plan_id: int, at: str, path: str | Path | None = None) -> str:
+    """Day runner: what's happening at a given 24h HH:MM time.
+
+    Shows the current round (if any), the next round with a countdown, and
+    which prep reminder to glance at. The time is passed in, never read
+    from the clock, so the output is deterministic.
+    """
+    plan = get_plan(plan_id, path)
+    rounds = _sorted_rounds(plan)
+    if not rounds:
+        raise OnsiteError(f"Plan #{plan_id} has no rounds yet — add some with `onsite add-round`.")
+    now = _parse_time(at)
+    current = next((r for r in rounds
+                    if r["start"] <= now < r["start"] + r["minutes"]), None)
+    nxt = next((r for r in rounds if r["start"] > now), None)
+    past = [r for r in rounds if r["start"] + r["minutes"] <= now]
+    lines = [f"Day status at {_fmt(now)} — {plan['role']} @ {plan['company']}", ""]
+    if current:
+        end = current["start"] + current["minutes"]
+        who = f" with {current['interviewer']}" if current["interviewer"] else ""
+        lines.append(f"NOW: {current['title']} (until {_fmt(end)}){who}")
+    if nxt:
+        delta = nxt["start"] - now
+        backtoback = current is not None
+        when = f"in {delta}m" if delta else "right now"
+        lines.append(f"NEXT: {nxt['title']} at {_fmt(nxt['start'])} ({when})")
+        if backtoback:
+            lines.append("      Back-to-back: 2-minute reset — water, stand, breathe.")
+        lines.append(f"      Glance at: python -m candid onsite prep --round-id {nxt['id']}")
+    if past and not current and not nxt:
+        last = past[-1]
+        lines.append(
+            f"Done for the day — last round '{last['title']}' "
+            f"ended at {_fmt(last['start'] + last['minutes'])}."
+        )
+        lines.append("Capture notes while it's fresh: python -m candid onsite notes --text \"...\"")
+        lines.append("Then export the day: python -m candid onsite summary")
+    remaining = len([r for r in rounds if r["start"] + r["minutes"] > now])
+    if remaining and not (past and not current and not nxt):
+        lines.append(f"Rounds remaining today: {remaining}.")
+    return "\n".join(lines)
+
+
+# --- calendar export ---------------------------------------------------------------------------
+
+def _ics_escape(text: str) -> str:
+    return (text.replace("\\", "\\\\").replace(";", "\\;")
+            .replace(",", "\\,").replace("\n", "\\n"))
+
+
+def export_ics(plan_id: int, out: str | Path | None = None,
+               path: str | Path | None = None) -> Path:
+    """Export the day as an .ics calendar file: one VEVENT per round, each
+    with a 15-minute display reminder. Times are floating local times."""
+    plan = get_plan(plan_id, path)
+    rounds = _sorted_rounds(plan)
+    if not rounds:
+        raise OnsiteError(f"Plan #{plan_id} has no rounds yet — add some with `onsite add-round`.")
+    stamp = plan["date"].replace("-", "")
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//candid//onsite//EN"]
+    for r in rounds:
+        start = f"{stamp}T{r['start'] // 60:02d}{r['start'] % 60:02d}00"
+        endm = r["start"] + r["minutes"]
+        end = f"{stamp}T{endm // 60:02d}{endm % 60:02d}00"
+        title = f"Interview: {r['title']} ({plan['company']})"
+        desc = [f"{ROUND_KINDS[r['kind']]['label']} round"]
+        if r["interviewer"]:
+            desc.append(f"Interviewer: {r['interviewer']}")
+        loc = r["location"] or plan["location"]
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:candid-onsite-{plan_id}-{r['id']}@candid",
+            f"DTSTART:{start}",
+            f"DTEND:{end}",
+            f"SUMMARY:{_ics_escape(title)}",
+            f"DESCRIPTION:{_ics_escape(' · '.join(desc))}",
+        ]
+        if loc:
+            lines.append(f"LOCATION:{_ics_escape(loc)}")
+        lines += [
+            "BEGIN:VALARM",
+            "TRIGGER:-PT15M",
+            "ACTION:DISPLAY",
+            f"DESCRIPTION:{_ics_escape(title)}",
+            "END:VALARM",
+            "END:VEVENT",
+        ]
+    lines.append("END:VCALENDAR")
+    dest = Path(out) if out else C.DATA_DIR / f"onsite_{plan_id}.ics"
+    C.ensure_data_dirs()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return dest
+
+
+# --- thank-you drafts ----------------------------------------------------------------------------
+
+def thank_you_drafts(plan_id: int, round_id: int | None = None,
+                     path: str | Path | None = None) -> str:
+    """Thank-you drafts, one per interviewer, seeded with the round's notes.
+
+    Notes are shown as a 'weave this in' hint rather than pasted into the
+    draft, so nothing sounds like it was written for you. The signature is
+    a [Your Name] placeholder — never invented.
+    """
+    plan = get_plan(plan_id, path)
+    rounds = _sorted_rounds(plan)
+    if round_id is not None:
+        rounds = [r for r in rounds if r["id"] == round_id]
+        if not rounds:
+            raise OnsiteError(f"Plan #{plan_id} has no round with id {round_id}.")
+    targets = [r for r in rounds if r["interviewer"]]
+    if not targets:
+        scope = "this round" if round_id else "the day"
+        raise OnsiteError(
+            f"No interviewer names on {scope} yet — "
+            f"set them with `onsite add-round --interviewer ...`."
+        )
+    lines = [f"Thank-you drafts — {plan['role']} @ {plan['company']}", ""]
+    for r in targets:
+        first = r["interviewer"].split()[0]
+        lines.append(f"## To: {r['interviewer']} (after '{r['title']}')")
+        lines.append("")
+        lines.append(f"Subject: Thank you — {plan['role']} interview")
+        lines.append("")
+        lines.append(f"Hi {first},")
+        lines.append("")
+        lines.append(
+            "Thank you for taking the time to speak with me today. I really enjoyed "
+            f"our conversation during the {ROUND_KINDS[r['kind']]['label'].lower()} round."
+        )
+        lines.append("")
+        if r["notes"]:
+            lines.append(f"Your note to weave in: \"{r['notes']}\"")
+            lines.append("")
+        lines.append(
+            f"I'm excited about the {plan['role']} role and the work your team is "
+            f"doing at {plan['company']}. Thanks again — I hope we speak soon."
+        )
+        lines.append("")
+        lines.append("Best,")
+        lines.append("[Your Name]")
+        lines.append("")
+    return "\n".join(lines).rstrip()

@@ -40,9 +40,10 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
-    "onsite": ["plan", "plans", "add-round", "remove-round", "timeline",
-               "checklist", "check", "prep", "energy", "morning",
-               "questions", "notes", "summary", "delete"],
+    "onsite": ["plan", "plans", "add-round", "remove-round", "move-round",
+               "timeline", "checklist", "check", "prep", "energy", "morning",
+               "questions", "notes", "summary", "status", "export-ics",
+               "thanks", "delete"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
@@ -337,6 +338,19 @@ def cmd_onsite(a):
     elif a.what == "remove-round":
         O.remove_round(_onsite_plan_id(a), a.round_id)
         print(f"Removed round #{a.round_id}.")
+    elif a.what == "move-round":
+        rnd = O.move_round(_onsite_plan_id(a), a.round_id,
+                           start=a.start or None, minutes=a.minutes)
+        print(f"Moved round #{rnd['id']}: {rnd['title']} now "
+              f"{O.fmt_time(rnd['start'])}-{O.fmt_time(rnd['start'] + rnd['minutes'])} "
+              f"({rnd['minutes']}m)")
+    elif a.what == "status":
+        print(O.day_status(_onsite_plan_id(a), a.at))
+    elif a.what == "export-ics":
+        dest = O.export_ics(_onsite_plan_id(a), out=a.out or None)
+        print(f"Wrote calendar file to {dest}")
+    elif a.what == "thanks":
+        print(O.thank_you_drafts(_onsite_plan_id(a), round_id=a.round_id))
     elif a.what == "timeline":
         print(O.timeline(_onsite_plan_id(a)))
     elif a.what == "checklist":
@@ -760,6 +774,31 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
     t.add_argument("--round-id", type=int, required=True)
+    t = _sub(os_, "move-round", "Move a round to a new start time and/or resize it.", [
+        "python -m candid onsite move-round --round-id 2 --start 14:00",
+        "python -m candid onsite move-round --round-id 2 --minutes 60",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--round-id", type=int, required=True)
+    t.add_argument("--start", default=None, help="New start time, 24h HH:MM")
+    t.add_argument("--minutes", type=int, default=None, help="New duration in minutes")
+    t = _sub(os_, "status", "Day runner: what's happening at a given time.", [
+        "python -m candid onsite status --at 13:20",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--at", required=True, help="Time of day, 24h HH:MM (you pass it; no clock is read)")
+    t = _sub(os_, "export-ics", "Export the day as an .ics calendar file.", [
+        "python -m candid onsite export-ics",
+        "python -m candid onsite export-ics --out /tmp/onsite-day.ics",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--out", default=None, help="Output path (default: candid_data/onsite_<id>.ics)")
+    t = _sub(os_, "thanks", "Thank-you drafts, one per interviewer, seeded with round notes.", [
+        "python -m candid onsite thanks",
+        "python -m candid onsite thanks --round-id 1",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--round-id", type=int, default=None)
     t = _sub(os_, "timeline", "Render the day timeline with gap analysis.", [
         "python -m candid onsite timeline",
         "python -m candid onsite timeline --plan-id 1",

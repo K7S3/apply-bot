@@ -33,8 +33,13 @@ python -m candid onsite check --item-id 3
 
 # 5. During / after the day
 python -m candid onsite notes --round-id 1 --text "Asked about caching"
+python -m candid onsite status --at 13:20   # day runner: now / next / countdown
+python -m candid onsite thanks              # thank-you drafts per interviewer
 python -m candid onsite summary --out /tmp/acme-day.md
+python -m candid onsite export-ics --out /tmp/acme-day.ics
 ```
+
+Recruiter shuffled the schedule? `onsite move-round --round-id 2 --start 14:00` moves (or `--minutes 60` resizes) with overlap checking.
 
 Omit `--plan-id` everywhere and the latest plan is used.
 
@@ -61,6 +66,10 @@ exactly (one ends at 10:45, next starts at 10:45) are fine.
 | `questions` | Questions to ask the interviewer — `--kind` for one round type, or the whole plan per round. |
 | `notes` | Free-text notes for the day or one round. |
 | `summary` | Export Markdown: timeline, notes, checklist state, follow-up reminders. |
+| `move-round` | Reschedule: move a round to a new start time and/or resize it; the new slot is overlap-checked against the other rounds. |
+| `status` | Day runner: pass `--at HH:MM` and see what's happening now, what's next (with countdown), and which prep to glance at. No clock is read — deterministic. |
+| `export-ics` | Export the day as an `.ics` calendar file (one VEVENT per round, 15-minute reminder alarms) for import into any calendar app. |
+| `thanks` | Thank-you drafts, one per interviewer, seeded with the notes captured during their round (`--round-id` for one). Signature stays a `[Your Name]` placeholder. |
 | `delete` | Delete a plan (requires an explicit `--plan-id`). |
 
 ## How the times are computed
