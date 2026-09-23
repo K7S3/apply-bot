@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "em",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "em": ["reframe", "salary"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -358,6 +359,23 @@ def cmd_salary(a):
             print(f"Stored range: ${parsed['low']:,.0f}–${parsed['high']:,.0f}/yr")
         else:
             print("No pay range found in that text.")
+
+
+def cmd_em(a):
+    if a.what == "reframe":
+        from candid import em_tailor as E
+        result = E.build_reframe(_profile())
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(E.render_reframe(result))
+    elif a.what == "salary":
+        from candid import em_salary as E
+        result = E.mgmt_bands(title=a.title or "", location=a.location or "")
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(E.render_bands(result))
 
 
 def cmd_mock(a):
@@ -748,6 +766,29 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--jd", default=""); t.add_argument("--text", default="")
     t.add_argument("--location", default="")
     s.set_defaults(func=cmd_salary)
+
+    # em (Engineering Manager track)
+    s = _sub(sub, "em", "Engineering Manager track: reframe your resume, EM salary bands.", [
+        "python -m candid em reframe",
+        "python -m candid em salary --title \"Engineering Manager\" --location \"New York\"",
+    ])
+    es = _nested(s)
+    t = _sub(es, "reframe", "Reframe your resume for EM roles: scope signals found, gaps flagged, EM-relevant bullets promoted. Never invents scope.", [
+        "python -m candid em reframe",
+        "python -m candid em reframe --json   # machine-readable output",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the reframe result as JSON (for scripting)")
+    t = _sub(es, "salary", "p25/median/p75 pay bands for management titles (engineering manager, EM, director).", [
+        "python -m candid em salary",
+        "python -m candid em salary --title \"Engineering Manager\" --location \"New York\"",
+        "python -m candid em salary --json",
+    ])
+    t.add_argument("--title", default="", help="Narrow to titles containing this text")
+    t.add_argument("--location", default="", help="Narrow to locations containing this text")
+    t.add_argument("--json", action="store_true",
+                   help="Print the bands as JSON (for scripting)")
+    s.set_defaults(func=cmd_em)
 
     # mock
     s = _sub(sub, "mock", "Mock interviews: coding judge, AI interviewer, behavioral, design.", [
