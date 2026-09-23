@@ -15,6 +15,8 @@ Modules:
     mock      interactive mock interviews (coding judge, AI interviewer,
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
+    ds_sql    Data-Science SQL drills with a real SQLite judge
+    ds_experiment  A/B-test design drills + pure-stdlib power calculator
     jobs      curated job discovery → tracker pipeline
 
 Everything runs locally and deterministically, except the ``mock ai``

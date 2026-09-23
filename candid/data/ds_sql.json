@@ -1,0 +1,413 @@
+{
+  "questions": [
+    {
+      "difficulty": "easy",
+      "expected": [
+        [
+          "east",
+          125.0
+        ],
+        [
+          "north",
+          10.0
+        ],
+        [
+          "west",
+          125.0
+        ]
+      ],
+      "hint": "GROUP BY collapses rows per region; SUM() adds up the amounts.",
+      "id": "ds-sql-01",
+      "order_matters": false,
+      "prompt": "Return each region and its total order revenue, with columns named `region` and `revenue`.",
+      "setup_sql": "CREATE TABLE orders (order_id INTEGER PRIMARY KEY, region TEXT, amount REAL);\nINSERT INTO orders VALUES\n (1,'west',100.0),(2,'east',50.0),(3,'west',25.0),\n (4,'east',75.0),(5,'north',10.0);",
+      "solution": "SELECT region, SUM(amount) AS revenue FROM orders GROUP BY region ORDER BY region;",
+      "title": "Revenue by region",
+      "topic": "aggregations"
+    },
+    {
+      "difficulty": "easy",
+      "expected": [
+        [
+          "Ben"
+        ],
+        [
+          "Dan"
+        ]
+      ],
+      "hint": "LEFT JOIN keeps every customer; the join partner's columns are NULL when there is no match.",
+      "id": "ds-sql-02",
+      "order_matters": false,
+      "prompt": "Return the names of customers who have placed zero orders, as a single column named `name`, ordered alphabetically.",
+      "setup_sql": "CREATE TABLE customers (customer_id INTEGER PRIMARY KEY, name TEXT);\nINSERT INTO customers VALUES (1,'Ava'),(2,'Ben'),(3,'Cara'),(4,'Dan');\nCREATE TABLE orders2 (order_id INTEGER PRIMARY KEY, customer_id INTEGER);\nINSERT INTO orders2 VALUES (1,1),(2,3);",
+      "solution": "SELECT c.name FROM customers c LEFT JOIN orders2 o ON c.customer_id = o.customer_id WHERE o.order_id IS NULL ORDER BY c.name;",
+      "title": "Customers with no orders",
+      "topic": "joins"
+    },
+    {
+      "difficulty": "easy",
+      "expected": [
+        [
+          1,
+          10.0
+        ],
+        [
+          2,
+          20.0
+        ],
+        [
+          4,
+          40.0
+        ]
+      ],
+      "hint": "SQLite's date() understands modifiers like '-30 days'. Treat 2026-09-22 as 'today'.",
+      "id": "ds-sql-03",
+      "order_matters": false,
+      "prompt": "Treat 2026-09-22 as today. Return `order_id` and `amount` for orders placed in the last 30 days (inclusive), ordered by `order_id`.",
+      "setup_sql": "CREATE TABLE orders3 (order_id INTEGER PRIMARY KEY, order_date TEXT, amount REAL);\nINSERT INTO orders3 VALUES\n (1,'2026-09-22',10.0),\n (2,'2026-08-25',20.0),\n (3,'2026-08-20',30.0),\n (4,'2026-09-01',40.0);",
+      "solution": "SELECT order_id, amount FROM orders3 WHERE order_date >= date('2026-09-22','-30 days') ORDER BY order_id;",
+      "title": "Orders in the last 30 days",
+      "topic": "dates"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "beta",
+          950.0
+        ],
+        [
+          "delta",
+          700.0
+        ],
+        [
+          "alpha",
+          500.0
+        ]
+      ],
+      "hint": "Order by revenue descending and keep only the first 3 rows. There are no ties, so LIMIT is deterministic.",
+      "id": "ds-sql-04",
+      "order_matters": true,
+      "prompt": "Return the top 3 products by revenue, with columns `product` and `revenue`, ordered by revenue descending.",
+      "setup_sql": "CREATE TABLE products (product TEXT PRIMARY KEY, revenue REAL);\nINSERT INTO products VALUES\n ('alpha',500.0),('beta',950.0),('gamma',300.0),\n ('delta',700.0),('epsilon',200.0);",
+      "solution": "SELECT product, revenue FROM products ORDER BY revenue DESC LIMIT 3;",
+      "title": "Top 3 products by revenue",
+      "topic": "aggregations"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "Ava",
+          1,
+          "2026-01-10",
+          50.0
+        ],
+        [
+          "Ben",
+          3,
+          "2026-01-05",
+          20.0
+        ]
+      ],
+      "hint": "First find each customer's earliest order date, then join back to get the full order row.",
+      "id": "ds-sql-05",
+      "order_matters": false,
+      "prompt": "For each customer, return their first order: columns `name`, `order_id`, `order_date`, `amount`, ordered by customer name.",
+      "setup_sql": "CREATE TABLE customers5 (customer_id INTEGER PRIMARY KEY, name TEXT);\nINSERT INTO customers5 VALUES (1,'Ava'),(2,'Ben');\nCREATE TABLE orders5 (order_id INTEGER PRIMARY KEY, customer_id INTEGER, order_date TEXT, amount REAL);\nINSERT INTO orders5 VALUES\n (1,1,'2026-01-10',50.0),\n (2,1,'2026-02-01',75.0),\n (3,2,'2026-01-05',20.0);",
+      "solution": "SELECT c.name, o.order_id, o.order_date, o.amount\nFROM customers5 c\nJOIN orders5 o ON c.customer_id = o.customer_id\nJOIN (SELECT customer_id, MIN(order_date) AS first_d FROM orders5 GROUP BY customer_id) f\n  ON o.customer_id = f.customer_id AND o.order_date = f.first_d\nORDER BY c.name;",
+      "title": "Each customer's first order",
+      "topic": "joins"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "b",
+          "eng",
+          120.0,
+          1
+        ],
+        [
+          "a",
+          "eng",
+          100.0,
+          2
+        ],
+        [
+          "d",
+          "sales",
+          110.0,
+          1
+        ],
+        [
+          "c",
+          "sales",
+          90.0,
+          2
+        ]
+      ],
+      "hint": "RANK() numbers rows within each department. What should PARTITION BY be, and which direction should the salary sort go?",
+      "id": "ds-sql-06",
+      "order_matters": true,
+      "prompt": "Rank employees by salary within their department (highest salary = rank 1). Return `name`, `dept`, `salary`, `rnk`, ordered by `dept` then `rnk`.",
+      "setup_sql": "CREATE TABLE employees (emp_id INTEGER PRIMARY KEY, name TEXT, dept TEXT, salary REAL);\nINSERT INTO employees VALUES\n (1,'a','eng',100.0),\n (2,'b','eng',120.0),\n (3,'c','sales',90.0),\n (4,'d','sales',110.0);",
+      "solution": "SELECT name, dept, salary, RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS rnk FROM employees ORDER BY dept, rnk;",
+      "title": "Rank salaries within department",
+      "topic": "window"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "2026-09-01",
+          10.0,
+          10.0
+        ],
+        [
+          "2026-09-02",
+          20.0,
+          30.0
+        ],
+        [
+          "2026-09-03",
+          15.0,
+          45.0
+        ],
+        [
+          "2026-09-04",
+          25.0,
+          70.0
+        ],
+        [
+          "2026-09-05",
+          30.0,
+          100.0
+        ]
+      ],
+      "hint": "An aggregate window function with ORDER BY in the OVER clause accumulates as the frame grows.",
+      "id": "ds-sql-07",
+      "order_matters": true,
+      "prompt": "Return each day, its revenue, and the running total of revenue so far: columns `day`, `revenue`, `running_total`, ordered by `day`.",
+      "setup_sql": "CREATE TABLE daily (day TEXT PRIMARY KEY, revenue REAL);\nINSERT INTO daily VALUES\n ('2026-09-01',10.0),('2026-09-02',20.0),('2026-09-03',15.0),\n ('2026-09-04',25.0),('2026-09-05',30.0);",
+      "solution": "SELECT day, revenue, SUM(revenue) OVER (ORDER BY day) AS running_total FROM daily ORDER BY day;",
+      "title": "Running total of daily revenue",
+      "topic": "window"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "2026-01",
+          100.0,
+          null
+        ],
+        [
+          "2026-02",
+          150.0,
+          0.5
+        ],
+        [
+          "2026-03",
+          120.0,
+          -0.2
+        ]
+      ],
+      "hint": "LAG() reaches back one row. The growth formula is (this - prev) / prev; round to 4 decimals.",
+      "id": "ds-sql-08",
+      "order_matters": true,
+      "prompt": "Return each month, its revenue, and month-over-month growth vs the previous month as `mom_growth` (NULL for the first month), rounded to 4 decimals. Columns: `month`, `revenue`, `mom_growth`, ordered by `month`.",
+      "setup_sql": "CREATE TABLE monthly (month TEXT PRIMARY KEY, revenue REAL);\nINSERT INTO monthly VALUES\n ('2026-01',100.0),('2026-02',150.0),('2026-03',120.0);",
+      "solution": "SELECT month, revenue,\n  ROUND((revenue - LAG(revenue) OVER (ORDER BY month)) * 1.0 / LAG(revenue) OVER (ORDER BY month), 4) AS mom_growth\nFROM monthly ORDER BY month;",
+      "title": "Month-over-month growth",
+      "topic": "window"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "b",
+          200.0
+        ],
+        [
+          "c",
+          300.0
+        ]
+      ],
+      "hint": "A CTE can hold per-customer totals; then compare each total to the average of all totals.",
+      "id": "ds-sql-09",
+      "order_matters": false,
+      "prompt": "Using a CTE, return customers whose total spend is strictly above the average total spend across all customers. Columns: `customer`, `total`, ordered by customer.",
+      "setup_sql": "CREATE TABLE spend (customer TEXT, amount REAL);\nINSERT INTO spend VALUES\n ('a',100.0),('b',200.0),('c',300.0),('d',50.0);",
+      "solution": "WITH totals AS (SELECT customer, SUM(amount) AS total FROM spend GROUP BY customer)\nSELECT customer, total FROM totals\nWHERE total > (SELECT AVG(total) FROM totals)\nORDER BY customer;",
+      "title": "Customers above average spend",
+      "topic": "cte"
+    },
+    {
+      "difficulty": "hard",
+      "expected": [
+        [
+          "cat1",
+          "p2",
+          200.0
+        ],
+        [
+          "cat1",
+          "p3",
+          150.0
+        ],
+        [
+          "cat2",
+          "q2",
+          300.0
+        ],
+        [
+          "cat2",
+          "q1",
+          50.0
+        ]
+      ],
+      "hint": "ROW_NUMBER() partitioned by category gives each product a rank inside its category; filter to ranks 1 and 2.",
+      "id": "ds-sql-10",
+      "order_matters": true,
+      "prompt": "Return the top 2 products by revenue within each category. Columns: `category`, `product`, `revenue`, ordered by `category` then revenue descending.",
+      "setup_sql": "CREATE TABLE salescat (category TEXT, product TEXT, revenue REAL);\nINSERT INTO salescat VALUES\n ('cat1','p1',100.0),('cat1','p2',200.0),('cat1','p3',150.0),\n ('cat2','q1',50.0),('cat2','q2',300.0);",
+      "solution": "WITH ranked AS (\n  SELECT category, product, revenue,\n         ROW_NUMBER() OVER (PARTITION BY category ORDER BY revenue DESC) AS rn\n  FROM salescat\n)\nSELECT category, product, revenue FROM ranked WHERE rn <= 2 ORDER BY category, rn;",
+      "title": "Top 2 products per category",
+      "topic": "window"
+    },
+    {
+      "difficulty": "hard",
+      "expected": [
+        [
+          1
+        ],
+        [
+          4
+        ]
+      ],
+      "hint": "Build one CTE of January users and one of February users, then keep the intersection.",
+      "id": "ds-sql-11",
+      "order_matters": false,
+      "prompt": "Using CTEs, return the `user_id`s of users who were active in both 2026-01 and 2026-02 (January-to-February retention), as a single column `user_id` ordered ascending.",
+      "setup_sql": "CREATE TABLE activity (user_id INTEGER, month TEXT);\nINSERT INTO activity VALUES\n (1,'2026-01'),(1,'2026-02'),\n (2,'2026-01'),\n (3,'2026-02'),\n (4,'2026-01'),(4,'2026-02'),(4,'2026-03');",
+      "solution": "WITH jan AS (SELECT DISTINCT user_id FROM activity WHERE month = '2026-01'),\n     feb AS (SELECT DISTINCT user_id FROM activity WHERE month = '2026-02')\nSELECT jan.user_id FROM jan JOIN feb ON jan.user_id = feb.user_id ORDER BY jan.user_id;",
+      "title": "Two-month retention",
+      "topic": "cte"
+    },
+    {
+      "difficulty": "hard",
+      "expected": [
+        [
+          "2026-09-01",
+          10.0
+        ],
+        [
+          "2026-09-02",
+          15.0
+        ],
+        [
+          "2026-09-03",
+          20.0
+        ],
+        [
+          "2026-09-04",
+          25.0
+        ],
+        [
+          "2026-09-05",
+          30.0
+        ],
+        [
+          "2026-09-06",
+          35.0
+        ],
+        [
+          "2026-09-07",
+          40.0
+        ],
+        [
+          "2026-09-08",
+          50.0
+        ],
+        [
+          "2026-09-09",
+          60.0
+        ],
+        [
+          "2026-09-10",
+          70.0
+        ]
+      ],
+      "hint": "AVG() as a window function with an explicit ROWS frame: 6 PRECEDING through CURRENT ROW. Round to 2 decimals.",
+      "id": "ds-sql-12",
+      "order_matters": true,
+      "prompt": "Return each day and its 7-day rolling average revenue (including the current day; fewer than 7 days at the start is fine). Columns: `day`, `rolling_avg` rounded to 2 decimals, ordered by `day`.",
+      "setup_sql": "CREATE TABLE daily2 (day TEXT PRIMARY KEY, revenue REAL);\nINSERT INTO daily2 VALUES\n ('2026-09-01',10.0),('2026-09-02',20.0),('2026-09-03',30.0),\n ('2026-09-04',40.0),('2026-09-05',50.0),('2026-09-06',60.0),\n ('2026-09-07',70.0),('2026-09-08',80.0),('2026-09-09',90.0),\n ('2026-09-10',100.0);",
+      "solution": "SELECT day,\n  ROUND(AVG(revenue) OVER (ORDER BY day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW), 2) AS rolling_avg\nFROM daily2 ORDER BY day;",
+      "title": "7-day rolling average",
+      "topic": "window"
+    },
+    {
+      "difficulty": "medium",
+      "expected": [
+        [
+          "b"
+        ],
+        [
+          "c"
+        ]
+      ],
+      "hint": "Join the table to itself: employees on one side, their managers on the other.",
+      "id": "ds-sql-13",
+      "order_matters": false,
+      "prompt": "Return the names of employees who earn strictly more than their direct manager, as a single column `name`, ordered alphabetically.",
+      "setup_sql": "CREATE TABLE emp (id INTEGER PRIMARY KEY, name TEXT, manager_id INTEGER, salary REAL);\nINSERT INTO emp VALUES\n (1,'ceo',NULL,200.0),\n (2,'a',1,150.0),\n (3,'b',1,210.0),\n (4,'c',2,160.0);",
+      "solution": "SELECT e.name FROM emp e JOIN emp m ON e.manager_id = m.id WHERE e.salary > m.salary ORDER BY e.name;",
+      "title": "Employees earning more than their manager",
+      "topic": "joins"
+    },
+    {
+      "difficulty": "hard",
+      "expected": [
+        [
+          1
+        ],
+        [
+          4
+        ]
+      ],
+      "hint": "Find each user's first signup and first purchase, then keep users whose purchase came strictly after their signup.",
+      "id": "ds-sql-14",
+      "order_matters": false,
+      "prompt": "Return the `user_id`s of users who completed the funnel: they signed up and then made a purchase strictly after their signup. Single column `user_id`, ordered ascending.",
+      "setup_sql": "CREATE TABLE events (user_id INTEGER, event TEXT, ts TEXT);\nINSERT INTO events VALUES\n (1,'signup','2026-01-01 10:00'),(1,'purchase','2026-01-02 10:00'),\n (2,'signup','2026-01-01 10:00'),\n (3,'purchase','2026-01-01 10:00'),(3,'signup','2026-01-02 10:00'),\n (4,'signup','2026-01-01 10:00'),(4,'purchase','2026-01-05 10:00');",
+      "solution": "WITH s AS (SELECT user_id, MIN(ts) AS t FROM events WHERE event = 'signup' GROUP BY user_id),\n     p AS (SELECT user_id, MIN(ts) AS t FROM events WHERE event = 'purchase' GROUP BY user_id)\nSELECT s.user_id FROM s JOIN p ON s.user_id = p.user_id AND p.t > s.t ORDER BY s.user_id;",
+      "title": "Funnel: signup then purchase",
+      "topic": "cte"
+    },
+    {
+      "difficulty": "hard",
+      "expected": [
+        [
+          1,
+          "y",
+          "2026-02-01"
+        ],
+        [
+          2,
+          "p",
+          "2026-01-15"
+        ]
+      ],
+      "hint": "ROW_NUMBER() partitioned by user ordered by `updated` descending marks the newest row as 1; keep only those.",
+      "id": "ds-sql-15",
+      "order_matters": true,
+      "prompt": "Deduplicate: return one row per user, keeping the row with the latest `updated` timestamp. Columns: `user_id`, `val`, `updated`, ordered by `user_id`.",
+      "setup_sql": "CREATE TABLE raw (user_id INTEGER, val TEXT, updated TEXT);\nINSERT INTO raw VALUES\n (1,'x','2026-01-01'),\n (1,'y','2026-02-01'),\n (2,'p','2026-01-15');",
+      "solution": "WITH d AS (\n  SELECT user_id, val, updated,\n         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY updated DESC) AS rn\n  FROM raw\n)\nSELECT user_id, val, updated FROM d WHERE rn = 1 ORDER BY user_id;",
+      "title": "Deduplicate: latest row per user",
+      "topic": "window"
+    }
+  ]
+}

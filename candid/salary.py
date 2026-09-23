@@ -459,3 +459,109 @@ def render_title_aggregation(agg: dict) -> str:
         lines.append(f"  • {c['company']}: ${c['median']:,.0f}/yr "
                      f"({c['rows']} row{'s' if c['rows'] != 1 else ''})")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# DS-specific title normalization and band lookups
+# ---------------------------------------------------------------------------
+
+#: Title group -> aliases matched by substring against a normalized title.
+#: Checked in dict order, so more specific groups (senior, ML) come first.
+DS_TITLE_GROUPS: dict[str, list[str]] = {
+    "senior-data-scientist": [
+        "senior data scientist", "sr data scientist", "staff data scientist",
+        "principal data scientist", "lead data scientist",
+    ],
+    "ml-engineer": [
+        "machine learning engineer", "ml engineer", "applied scientist",
+        "machine-learning engineer",
+    ],
+    "data-analyst": [
+        "data analyst", "business intelligence", "bi analyst",
+        "analytics engineer", "business analyst",
+    ],
+    "ds-manager": [
+        "data science manager", "ds manager", "head of data science",
+        "director of data science", "analytics manager",
+    ],
+    "research-scientist": [
+        "research scientist", "research engineer",
+    ],
+    "data-scientist": [
+        "data scientist", "data science", "decision scientist",
+    ],
+}
+
+#: Canonical query title used for band lookups per group.
+DS_GROUP_QUERY: dict[str, str] = {
+    "senior-data-scientist": "senior data scientist",
+    "ml-engineer": "machine learning engineer",
+    "data-analyst": "data analyst",
+    "ds-manager": "data science manager",
+    "research-scientist": "research scientist",
+    "data-scientist": "data scientist",
+}
+
+
+def normalize_ds_title(title: str) -> str:
+    """Map a raw DS job title to a title group key, or "other".
+
+    Examples: "Senior Data Scientist" -> "senior-data-scientist",
+    "ML Engineer" -> "ml-engineer", "Data Analyst II" -> "data-analyst".
+    """
+    norm = re.sub(r"[^a-z0-9 ]", " ", (title or "").lower())
+    norm = re.sub(r"\s+", " ", norm).strip()
+    if not norm:
+        return "other"
+    for group, aliases in DS_TITLE_GROUPS.items():
+        for alias in aliases:
+            if alias in norm:
+                return group
+    return "other"
+
+
+def ds_bands(title: str, path: str | Path | None = None) -> dict:
+    """p25/median/p75 pay bands for a DS title, aggregated across companies.
+
+    Resolves the title to a DS title group, then reuses
+    `aggregate_by_title` (same wage sources as `lookup`) so each company's
+    midpoint feeds the percentiles and one heavy filer can't dominate.
+    Returns {title, group, query, p25, median, p75, n, companies}.
+    """
+    group = normalize_ds_title(title)
+    query = DS_GROUP_QUERY.get(group, title or "")
+    agg = aggregate_by_title(query, path=path)
+    return {
+        "title": title or "",
+        "group": group,
+        "query": query,
+        **agg,
+    }
+
+
+def render_ds_bands(result: dict) -> str:
+    """Render ds_bands output."""
+    if not result.get("n"):
+        return (
+            f"No salary data for DS title '{result.get('title')}' "
+            f"(title group: {result.get('group')}, searched '{result.get('query')}').\n"
+            "Build the database with:\n"
+            "  python -m candid salary import-lca <dol_h1b_csv>\n"
+            "  python -m candid salary parse-range --company X --role Y --jd job.txt"
+        )
+    lines = [
+        f"DS salary bands for '{result['title']}' "
+        f"(title group: {result['group']}, {result['n']} companies):",
+        f"  p25    ${result['p25']:,.0f}/yr",
+        f"  median ${result['median']:,.0f}/yr",
+        f"  p75    ${result['p75']:,.0f}/yr",
+        "",
+        "Top companies by median (each company's own midpoint):",
+    ]
+    for c in result["companies"][:8]:
+        lines.append(f"  • {c['company']}: ${c['median']:,.0f}/yr "
+                     f"({c['rows']} row{'s' if c['rows'] != 1 else ''})")
+    lines.append("")
+    lines.append("Tip: use these bands in `python -m candid negotiate` "
+                 "when a range comes up.")
+    return "\n".join(lines)

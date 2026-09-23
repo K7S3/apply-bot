@@ -7,6 +7,9 @@
     python -m candid prep --company X --role Y
     python -m candid mock coding
     python -m candid salary lookup --company X --title Y
+    python -m candid salary ds-bands "Data Scientist"
+    python -m candid ds-portfolio check candid/data/ds_portfolio_sample.json
+    python -m candid ds-portfolio guide
     python -m candid dashboard            # local web UI (127.0.0.1 only)
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
@@ -32,22 +35,35 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "ds-takehome",
+    "ds-portfolio", "ds-sql", "ds-exp", "ds-stats", "ds-metrics",
+    "ds-case", "ds-sysdesign",
 ]
 
 SUBCOMMANDS = {
     "profile": ["show"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
+    "prep": ["ds"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
-    "salary": ["lookup", "import-lca", "parse-range"],
+    "salary": ["lookup", "import-lca", "parse-range", "ds-bands"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "ds-takehome": ["list", "show", "start", "submit", "csv", "status"],
+    "ds-portfolio": ["check", "guide"],
+    "ds-sql": ["list", "show", "solve"],
+    "ds-exp": ["list", "show", "drill", "calc"],
+    "ds-stats": ["review", "quiz"],
+    "ds-metrics": ["accuracy", "precision", "recall", "f1", "auc",
+                   "log-loss", "rmse", "mae", "uplift", "lift", "gain",
+                   "ndcg", "map", "calibration", "explain", "list"],
+    "ds-case": ["list", "show", "drill"],
+    "ds-sysdesign": ["list", "show", "drill"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +71,9 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "TakeHomeError", "DSPortfolioError",
+    "SQLDrillError", "ExperimentError",
+    "DSStatsError", "DSMetricsError", "DSCaseError", "DSSysDesignError",
     "ValueError",
 }
 
@@ -72,6 +91,13 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "TakeHomeError": "python -m candid ds-takehome --help",
+    "SQLDrillError": "python -m candid ds-sql --help",
+    "ExperimentError": "python -m candid ds-exp --help",
+    "DSStatsError": "python -m candid ds-stats --help",
+    "DSMetricsError": "python -m candid ds-metrics --help",
+    "DSCaseError": "python -m candid ds-case --help",
+    "DSSysDesignError": "python -m candid ds-sysdesign --help",
 }
 
 
@@ -271,6 +297,20 @@ def cmd_track(a):
 
 def cmd_prep(a):
     from candid import prep as P
+    if getattr(a, "what", None) == "ds":
+        jd = _jd_text(a) if getattr(a, "jd", "") else ""
+        markdown, path = P.build_ds_pack(
+            _profile(), a.role, company=a.company or "", jd=jd,
+            app_id=getattr(a, "app_id", None), location=a.location or "")
+        print(f"DS prep pack saved to {path}\n")
+        print(markdown[:3000])
+        if len(markdown) > 3000:
+            print(f"\n... ({len(markdown) - 3000} more chars in the file)")
+        return
+    if not a.company or not a.role:
+        sys.exit("prep needs --company and --role "
+                 "(or use `python -m candid prep ds <role-title>`).\n"
+                 "Next: run `python -m candid prep --help`.")
     jd = _jd_text(a) if a.jd else ""
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
                                   app_id=a.app_id, location=a.location or "")
@@ -278,6 +318,23 @@ def cmd_prep(a):
     print(markdown[:3000])
     if len(markdown) > 3000:
         print(f"\n... ({len(markdown) - 3000} more chars in the file)")
+
+
+def cmd_ds_takehome(a):
+    from candid import ds_takehome as D
+    if a.what == "list":
+        print(D.render_list())
+    elif a.what == "show":
+        print(D.render_prompt(D.get_prompt(a.id)))
+    elif a.what == "csv":
+        dest = D.write_sample_csv(a.id, a.out or f"{a.id}.csv")
+        print(f"Practice CSV written to {dest}")
+    elif a.what == "start":
+        print(D.start(a.id, hours=a.hours))
+    elif a.what == "submit":
+        print(D.submit(a.id, a.file))
+    elif a.what == "status":
+        print(D.status())
 
 
 def cmd_followup(a):
@@ -358,6 +415,52 @@ def cmd_salary(a):
             print(f"Stored range: ${parsed['low']:,.0f}–${parsed['high']:,.0f}/yr")
         else:
             print("No pay range found in that text.")
+    elif a.what == "ds-bands":
+        result = S.ds_bands(a.title or "")
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(S.render_ds_bands(result))
+
+
+def cmd_ds_portfolio(a):
+    from candid import ds_portfolio as D
+    if a.what == "check":
+        src = a.manifest
+        from pathlib import Path
+        if Path(src).is_dir():
+            projects = D.projects_from_directory(src)
+        else:
+            projects = D.load_manifest(src)
+        results = D.check_projects(projects)
+        if a.json:
+            print(json.dumps(results, indent=2, default=str))
+        else:
+            print(D.render_check(results))
+    elif a.what == "guide":
+        print(D.render_guide())
+
+
+def cmd_ds_sql(a):
+    from candid import ds_sql as S
+    if a.what == "list":
+        S.cmd_list(a)
+    elif a.what == "show":
+        S.cmd_show(a)
+    elif a.what == "solve":
+        sys.exit(S.cmd_solve(a))
+
+
+def cmd_ds_exp(a):
+    from candid import ds_experiment as E
+    if a.what == "list":
+        E.cmd_list(a)
+    elif a.what == "show":
+        E.cmd_show(a)
+    elif a.what == "drill":
+        sys.exit(E.cmd_drill(a))
+    elif a.what == "calc":
+        E.cmd_calc(a)
 
 
 def cmd_mock(a):
@@ -484,6 +587,63 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_ds_stats(a):
+    from candid import ds_stats as S
+    if a.what == "review":
+        cards = S.get_cards(topic=a.topic, shuffle=a.shuffle, seed=a.seed)
+        print(S.render_review(cards))
+        scope = f" on topic '{a.topic}'" if a.topic else ""
+        print(f"\n{len(cards)} card(s){scope}. "
+              f"Topics: {', '.join(S.topics())}")
+    elif a.what == "quiz":
+        S.run_quiz(n=a.n, topic=a.topic, seed=a.seed)
+
+
+def cmd_ds_metrics(a):
+    from candid import ds_metrics as DM
+    if a.what == "explain":
+        print(DM.explain(a.metric))
+    elif a.what == "list":
+        print(DM.render_metric_list())
+    else:
+        value = DM.compute_metric(
+            a.what, y_true=a.y_true, y_score=a.y_score,
+            threshold=a.threshold, k=a.k, bins=a.bins, y_treat=a.y_treat)
+        print(DM.render_result(a.what, value))
+
+
+def cmd_ds_case(a):
+    from candid import ds_case as D
+    if a.what == "list":
+        cases = D.list_cases()
+        if a.json:
+            print(json.dumps(cases, indent=2))
+        else:
+            print(f"{'ID':<22}Title")
+            for c in cases:
+                print(f"{c['id']:<22}{c['title']}")
+    elif a.what == "show":
+        print(D.render_case(D.get_case(a.id)))
+    elif a.what == "drill":
+        D.drill(a.id)
+
+
+def cmd_ds_sysdesign(a):
+    from candid import ds_sysdesign as D
+    if a.what == "list":
+        scenarios = D.list_scenarios()
+        if a.json:
+            print(json.dumps(scenarios, indent=2))
+        else:
+            print(f"{'ID':<26}Title")
+            for s in scenarios:
+                print(f"{s['id']:<26}{s['title']}")
+    elif a.what == "show":
+        print(D.render_scenario(D.get_scenario(a.id)))
+    elif a.what == "drill":
+        D.drill(a.id)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -613,12 +773,26 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid prep --company Acme --role \"Data Scientist\"",
         "python -m candid prep --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid prep --company Acme --role \"Data Scientist\" --app-id 3",
+        "python -m candid prep ds \"Data Scientist\" --company Acme",
     ])
-    s.add_argument("--company", required=True)
-    s.add_argument("--role", required=True)
+    s.add_argument("--company", default="",
+                   help="Required unless using the `ds` subcommand")
+    s.add_argument("--role", default="")
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    ps = _nested(s)
+    ps.required = False
+    t = _sub(ps, "ds", "Data Scientist interview prep pack.", [
+        "python -m candid prep ds \"Data Scientist\"",
+        "python -m candid prep ds \"Data Scientist\" --company Acme",
+        "python -m candid prep ds \"Data Scientist\" --company Acme --app-id 3",
+    ])
+    t.add_argument("role", help="Role title, e.g. \"Data Scientist\"")
+    t.add_argument("--company", default="")
+    t.add_argument("--jd", default="", help=JD_HELP)
+    t.add_argument("--location", default="")
+    t.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
     s.set_defaults(func=cmd_prep)
 
     # followup
@@ -747,6 +921,14 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd", default=""); t.add_argument("--text", default="")
     t.add_argument("--location", default="")
+    t = _sub(ss, "ds-bands", "Pay bands (p25/median/p75) for a DS title group.", [
+        "python -m candid salary ds-bands \"Data Scientist\"",
+        "python -m candid salary ds-bands \"Machine Learning Engineer\"",
+        "python -m candid salary ds-bands \"Data Analyst\" --json",
+    ])
+    t.add_argument("title", help="DS job title, e.g. \"Data Scientist\"")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw band result as JSON (for scripting)")
     s.set_defaults(func=cmd_salary)
 
     # mock
@@ -918,6 +1100,254 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # ds-takehome
+    s = _sub(sub, "ds-takehome", "Timed Data Scientist take-home drills (synthetic practice data).", [
+        "python -m candid ds-takehome list",
+        "python -m candid ds-takehome show churn-risk",
+        "python -m candid ds-takehome csv churn-risk -o subscribers.csv",
+        "python -m candid ds-takehome start churn-risk --hours 8",
+        "python -m candid ds-takehome submit churn-risk report.md",
+        "python -m candid ds-takehome status",
+    ])
+    ds = _nested(s)
+    _sub(ds, "list", "List the take-home drills.", [
+        "python -m candid ds-takehome list",
+    ])
+    t = _sub(ds, "show", "Show the full brief for a drill.", [
+        "python -m candid ds-takehome show churn-risk",
+    ])
+    t.add_argument("id", help="Prompt id (see `ds-takehome list`)")
+    t = _sub(ds, "csv", "Generate the synthetic practice CSV for a drill.", [
+        "python -m candid ds-takehome csv churn-risk -o subscribers.csv",
+    ])
+    t.add_argument("id", help="Prompt id (see `ds-takehome list`)")
+    t.add_argument("-o", "--out", default="", help="Output CSV path (default: <id>.csv)")
+    t = _sub(ds, "start", "Start the timer for a drill.", [
+        "python -m candid ds-takehome start churn-risk",
+        "python -m candid ds-takehome start churn-risk --hours 8",
+    ])
+    t.add_argument("id", help="Prompt id (see `ds-takehome list`)")
+    t.add_argument("--hours", type=int, default=None,
+                   help="Timebox in hours (default: the prompt's suggested timebox)")
+    t = _sub(ds, "submit", "Submit your report; get a completeness check (not a grading).", [
+        "python -m candid ds-takehome submit churn-risk report.md",
+    ])
+    t.add_argument("id", help="Prompt id (see `ds-takehome list`)")
+    t.add_argument("file", help="Your report file (.md/.txt)")
+    _sub(ds, "status", "Show started drills, deadlines, and submissions.", [
+        "python -m candid ds-takehome status",
+    ])
+    s.set_defaults(func=cmd_ds_takehome)
+
+    # ds-sql
+    s = _sub(sub, "ds-sql", "Data-Science SQL drills with a real SQLite judge.", [
+        "python -m candid ds-sql list",
+        "python -m candid ds-sql list --topic window --difficulty hard",
+        "python -m candid ds-sql show ds-sql-06",
+        "python -m candid ds-sql solve ds-sql-06 --file solution.sql",
+        "cat solution.sql | python -m candid ds-sql solve ds-sql-06",
+    ])
+    dss = _nested(s)
+    t = _sub(dss, "list", "List SQL drill questions.", [
+        "python -m candid ds-sql list",
+        "python -m candid ds-sql list --topic window",
+        "python -m candid ds-sql list --difficulty hard",
+    ])
+    t.add_argument("--topic", default=None,
+                   help="Filter: aggregations | window | joins | cte | dates")
+    t.add_argument("--difficulty", default=None,
+                   help="Filter: easy | medium | hard")
+    t = _sub(dss, "show", "Show a question's prompt and table schemas.", [
+        "python -m candid ds-sql show ds-sql-06",
+    ])
+    t.add_argument("id", help="Question id (see `ds-sql list`)")
+    t = _sub(dss, "solve", "Judge your SQL query (stdin or --file).", [
+        "python -m candid ds-sql solve ds-sql-06 --file solution.sql",
+        "cat solution.sql | python -m candid ds-sql solve ds-sql-06",
+    ])
+    t.add_argument("id", help="Question id (see `ds-sql list`)")
+    t.add_argument("--file", default="",
+                   help="Read the query from a file instead of stdin")
+    s.set_defaults(func=cmd_ds_sql)
+
+    # ds-exp
+    s = _sub(sub, "ds-exp", "A/B-test experiment-design practice + power calculator.", [
+        "python -m candid ds-exp list",
+        "python -m candid ds-exp list --topic peeking",
+        "python -m candid ds-exp show exp-03",
+        "python -m candid ds-exp drill exp-03",
+        "python -m candid ds-exp calc --p 0.1 --mde 0.02 --alpha 0.05 --power 0.8",
+        "python -m candid ds-exp calc --p 0.1 --n 5000",
+    ])
+    dse = _nested(s)
+    t = _sub(dse, "list", "List experiment-design scenarios.", [
+        "python -m candid ds-exp list",
+        "python -m candid ds-exp list --topic peeking",
+    ])
+    t.add_argument("--topic", default=None,
+                   help="Filter by topic (e.g. randomization, peeking, power)")
+    t = _sub(dse, "show", "Show a scenario with its rubric.", [
+        "python -m candid ds-exp show exp-03",
+    ])
+    t.add_argument("id", help="Scenario id (see `ds-exp list`)")
+    t = _sub(dse, "drill", "Interactive drill with keyword-rubric feedback.", [
+        "python -m candid ds-exp drill exp-03",
+    ])
+    t.add_argument("id", help="Scenario id (see `ds-exp list`)")
+    t = _sub(dse, "calc", "Sample-size / detectable-effect calculator.", [
+        "python -m candid ds-exp calc --p 0.1 --mde 0.02 --alpha 0.05 --power 0.8",
+        "python -m candid ds-exp calc --p 0.1 --rel 0.2",
+        "python -m candid ds-exp calc --p 0.1 --n 5000",
+    ])
+    t.add_argument("--p", type=float, required=True,
+                   help="Baseline conversion rate, e.g. 0.1")
+    t.add_argument("--mde", type=float, default=None,
+                   help="Absolute minimum detectable effect, e.g. 0.02")
+    t.add_argument("--rel", type=float, default=None,
+                   help="Relative MDE as a fraction of p, e.g. 0.2 for +20%%")
+    t.add_argument("--alpha", type=float, default=0.05,
+                   help="Significance level (default: 0.05)")
+    t.add_argument("--power", type=float, default=0.8,
+                   help="Statistical power (default: 0.8)")
+    t.add_argument("--n", type=int, default=None,
+                   help="Samples per variant -> report the detectable effect")
+    s.set_defaults(func=cmd_ds_exp)
+
+    # ds-portfolio
+    s = _sub(sub, "ds-portfolio", "Score your DS portfolio readiness; print the playbook.", [
+        "python -m candid ds-portfolio check candid/data/ds_portfolio_sample.json",
+        "python -m candid ds-portfolio check ~/portfolio-notes/",
+        "python -m candid ds-portfolio guide",
+    ])
+    dps = _nested(s)
+    t = _sub(dps, "check", "Score projects from a manifest or a directory of notes.", [
+        "python -m candid ds-portfolio check candid/data/ds_portfolio_sample.json",
+        "python -m candid ds-portfolio check portfolio.yaml",
+        "python -m candid ds-portfolio check ~/portfolio-notes/ --json",
+    ])
+    t.add_argument("manifest",
+                   help="Path to a JSON/YAML portfolio manifest, or a directory "
+                        "of project notes (.md/.txt)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the raw check result as JSON (for scripting)")
+    t = _sub(dps, "guide", "Print the DS portfolio playbook.", [
+        "python -m candid ds-portfolio guide",
+    ])
+    s.set_defaults(func=cmd_ds_portfolio)
+
+    # ds-stats
+    s = _sub(sub, "ds-stats", "DS stats/probability refresher cards + self-quiz.", [
+        "python -m candid ds-stats review",
+        "python -m candid ds-stats review --topic bayes",
+        "python -m candid ds-stats quiz --n 10",
+        "python -m candid ds-stats quiz --topic distributions --n 5",
+    ])
+    dss = _nested(s)
+    t = _sub(dss, "review", "Show concept cards (concise interview-ready explanations).", [
+        "python -m candid ds-stats review",
+        "python -m candid ds-stats review --topic bayes",
+        "python -m candid ds-stats review --shuffle --seed 7",
+    ])
+    t.add_argument("--topic", default=None,
+                   help="Only show cards on this topic (see the topic list printed at the end)")
+    t.add_argument("--shuffle", action="store_true", help="Shuffle card order")
+    t.add_argument("--seed", type=int, default=None, help="RNG seed for --shuffle")
+    t = _sub(dss, "quiz", "Drill yourself: answer questions, get scored.", [
+        "python -m candid ds-stats quiz",
+        "python -m candid ds-stats quiz --n 5",
+        "python -m candid ds-stats quiz --topic p_value --n 3",
+        "python -m candid ds-stats quiz --seed 42   # reproducible question order",
+    ])
+    t.add_argument("--n", type=int, default=10, help="Number of questions (default: 10)")
+    t.add_argument("--topic", default=None, help="Only quiz this topic")
+    t.add_argument("--seed", type=int, default=None,
+                   help="RNG seed for a reproducible question order")
+    s.set_defaults(func=cmd_ds_stats)
+
+    # ds-metrics
+    s = _sub(sub, "ds-metrics", "Compute / explain common DS metrics.", [
+        "python -m candid ds-metrics f1 --y-true 1 0 1 1 --y-score 0.9 0.2 0.8 0.4",
+        "python -m candid ds-metrics auc --y-true 0 0 1 1 --y-score 0.1 0.2 0.8 0.9",
+        "python -m candid ds-metrics ndcg --y-true 3 2 1 0 --y-score 0.9 0.8 0.7 0.1 --k 4",
+        "python -m candid ds-metrics explain auc",
+        "python -m candid ds-metrics list",
+    ])
+    from candid import ds_metrics as _DM
+    dsm = _nested(s)
+    for _mname in _DM.METRIC_NAMES:
+        t = _sub(dsm, _mname, f"Compute {_mname} from label/score vectors.", [
+            f"python -m candid ds-metrics {_mname} --y-true 1 0 1 1 --y-score 0.9 0.2 0.8 0.4",
+            f"python -m candid ds-metrics explain {_mname}   # interview-ready explanation",
+        ])
+        t.add_argument("--y-true", nargs="+", default=None,
+                       help="Space-separated ground truth labels/outcomes")
+        t.add_argument("--y-score", nargs="+", default=None,
+                       help="Space-separated predicted scores/probabilities")
+        t.add_argument("--y-treat", nargs="+", default=None,
+                       help="Space-separated 0/1 treatment indicators (for uplift)")
+        t.add_argument("--threshold", type=float, default=0.5,
+                       help="Score -> 0/1 cutoff for accuracy/precision/recall/f1 (default: 0.5)")
+        t.add_argument("--k", type=int, default=None,
+                       help="Cutoff rank for lift/gain/ndcg/map (default: half the list)")
+        t.add_argument("--bins", type=int, default=10,
+                       help="Calibration bins (default: 10)")
+    t = _sub(dsm, "explain", "Print an interview-ready explanation of a metric.", [
+        "python -m candid ds-metrics explain auc",
+        "python -m candid ds-metrics explain ndcg",
+    ])
+    t.add_argument("metric", choices=_DM.METRIC_NAMES,
+                   help="Which metric to explain")
+    t = _sub(dsm, "list", "List all supported metrics with one-line summaries.", [
+        "python -m candid ds-metrics list",
+    ])
+    s.set_defaults(func=cmd_ds_metrics)
+
+    # ds-case
+    s = _sub(sub, "ds-case", "ML case-interview drills (churn, recommender, fraud, ...).", [
+        "python -m candid ds-case list",
+        "python -m candid ds-case show churn-prediction",
+        "python -m candid ds-case drill churn-prediction",
+    ])
+    dsc = _nested(s)
+    t = _sub(dsc, "list", "List the seeded ML case scenarios.", [
+        "python -m candid ds-case list",
+        "python -m candid ds-case list --json   # machine-readable output",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the case list as JSON (for scripting)")
+    t = _sub(dsc, "show", "Show a case: business context, probes, rubric.", [
+        "python -m candid ds-case show churn-prediction",
+    ])
+    t.add_argument("id", help="Case id (see `ds-case list`)")
+    t = _sub(dsc, "drill", "Interactive drill: answer the probes, get rubric feedback.", [
+        "python -m candid ds-case drill churn-prediction",
+    ])
+    t.add_argument("id", help="Case id (see `ds-case list`)")
+    s.set_defaults(func=cmd_ds_case)
+
+    # ds-sysdesign
+    s = _sub(sub, "ds-sysdesign", "ML system design drills (feature store, serving, ...).", [
+        "python -m candid ds-sysdesign list",
+        "python -m candid ds-sysdesign show feature-store",
+        "python -m candid ds-sysdesign drill feature-store",
+    ])
+    dss = _nested(s)
+    t = _sub(dss, "list", "List the seeded ML system design scenarios.", [
+        "python -m candid ds-sysdesign list",
+        "python -m candid ds-sysdesign list --json   # machine-readable output",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the scenario list as JSON (for scripting)")
+    t = _sub(dss, "show", "Show a scenario: context, questions, rubric.", [
+        "python -m candid ds-sysdesign show feature-store",
+    ])
+    t.add_argument("id", help="Scenario id (see `ds-sysdesign list`)")
+    t = _sub(dss, "drill", "Interactive drill: answer the questions, get rubric feedback.", [
+        "python -m candid ds-sysdesign drill feature-store",
+    ])
+    t.add_argument("id", help="Scenario id (see `ds-sysdesign list`)")
+    s.set_defaults(func=cmd_ds_sysdesign)
 
     return p
 

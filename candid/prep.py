@@ -397,3 +397,239 @@ def _market_line(company: str, role: str, location: str) -> str:
         "Build it with `python -m candid salary import-lca <dol_csv>` or by parsing "
         "posted ranges (`salary parse-range`), then re-run this prep pack."
     )
+
+# ---------------------------------------------------------------------------
+# Data Scientist track (additive: `python -m candid prep ds <role-title>`)
+# ---------------------------------------------------------------------------
+# Everything below is new for batch-92. Nothing above this line was changed,
+# so the legacy `prep --company X --role Y` path is byte-identical.
+
+
+def _ds_stats_topics() -> tuple[list[str], str]:
+    """Statistics refresher topics, preferring the sibling ds_stats module.
+
+    Returns (topics, source_label). The sibling module may not exist in
+    every checkout (parallel batches), so the import is defensive: any
+    failure falls back to the built-in pointer list. The sibling exposes
+    topics either as a module-level list or as a no-arg ``topics()``
+    function; both shapes are handled.
+    """
+    try:
+        from candid import ds_stats  # type: ignore
+    except Exception:
+        return list(_DS_STATS_FALLBACK), "built-in refresher pointers"
+    for attr in ("STATS_TOPICS", "TOPICS", "DS_STATS_TOPICS", "topics"):
+        candidate = getattr(ds_stats, attr, None)
+        if callable(candidate):
+            try:
+                candidate = candidate()
+            except Exception:
+                continue
+        if candidate:
+            try:
+                titles = [_ds_topic_title(t) for t in candidate]
+            except TypeError:
+                continue
+            if titles:
+                return titles, f"candid/ds_stats.py:{attr}"
+    return list(_DS_STATS_FALLBACK), "built-in refresher pointers"
+
+
+def _ds_topic_title(topic) -> str:
+    """Normalize a ds_stats topic entry (str, dict, or tuple) to a title."""
+    if isinstance(topic, str):
+        return topic
+    if isinstance(topic, dict):
+        for key in ("title", "name", "topic", "label"):
+            if topic.get(key):
+                return str(topic[key])
+        return str(topic)
+    if isinstance(topic, (list, tuple)) and topic:
+        return str(topic[0])
+    return str(topic)
+
+
+_DS_STATS_FALLBACK: tuple[str, ...] = (
+    "Hypothesis testing: null/alternative, p-values, Type I vs Type II errors",
+    "Confidence intervals: what they mean, and what they don't",
+    "A/B test design: randomization unit, sample size, power, MDE",
+    "Multiple testing: Bonferroni, FDR, and when peeking invalidates results",
+    "Bayesian basics: priors, posteriors, and when Bayes beats frequentism",
+    "Regression: OLS assumptions, regularization, interpreting coefficients",
+    "Causal inference: confounding, diff-in-diff, propensity scores, DAGs",
+    "Probability distributions: when to reach for binomial/Poisson/normal",
+    "Simpson's paradox and aggregation pitfalls in metrics",
+    "Bootstrapping: quick uncertainty estimates without closed forms",
+)
+
+_DS_ML_CASES: tuple[tuple[str, str], ...] = (
+    ("Churn / retention prediction",
+     "Framing: classification vs survival; features from event history; "
+     "evaluation by lift in the top decile, not just AUC."),
+    ("Fraud / anomaly detection",
+     "Framing: extreme class imbalance; precision-recall tradeoffs; "
+     "human-in-the-loop review economics."),
+    ("Recommendation",
+     "Framing: candidate generation vs ranking; offline metrics (NDCG) vs "
+     "online A/B; cold start and popularity bias."),
+    ("Demand / revenue forecasting",
+     "Framing: horizon and granularity; backtesting discipline; "
+     "how forecast error flows into inventory or staffing decisions."),
+    ("Pricing / elasticity",
+     "Framing: causal estimate from experiments or quasi-experiments; "
+     "from elasticity to the revenue-optimal price."),
+    ("Customer segmentation",
+     "Framing: clustering for action (who gets which treatment); "
+     "stability of segments over time; connecting segments to P&L."),
+)
+
+_DS_SQL_DRILLS: tuple[tuple[str, str], ...] = (
+    ("Window functions",
+     "ROW_NUMBER/RANK for dedup, LAG/LEAD for period-over-period, running "
+     "totals with SUM() OVER (... ROWS BETWEEN)."),
+    ("Joins and fan-out traps",
+     "One-to-many joins inflating aggregates; pre-aggregate before joining; "
+     "LEFT vs INNER and what each implies about the question."),
+    ("Cohort retention",
+     "First-event per user, cohort month bucketing, retention matrix via "
+     "conditional aggregation."),
+    ("Funnel analysis",
+     "Event-sequence funnels with conditional counts; conversion between "
+     "steps; drop-off attribution."),
+    ("Sessionization",
+     "Grouping events into sessions with timestamp gaps; session-level "
+     "metrics from raw event tables."),
+    ("Date spines and gaps",
+     "Generating a calendar spine, LEFT JOINing sparse facts, COALESCE "
+     "for missing periods."),
+)
+
+
+def _ds_sql_drills() -> tuple[list[tuple[str, str]], str]:
+    """SQL drill pointers, preferring the sibling ds_sql question bank.
+
+    Returns (drills, source_label); defensive like _ds_stats_topics.
+    """
+    try:
+        from candid import ds_sql  # type: ignore
+        questions = ds_sql.list_questions()
+    except Exception:
+        return list(_DS_SQL_DRILLS), "built-in drill pointers"
+    by_topic: dict[str, int] = {}
+    for q in questions or []:
+        topic = str(q.get("topic") or "general")
+        by_topic[topic] = by_topic.get(topic, 0) + 1
+    if not by_topic:
+        return list(_DS_SQL_DRILLS), "built-in drill pointers"
+    drills = [
+        (topic.replace("_", " ").title(),
+         f"{n} drill(s) in the sibling question bank (`candid/ds_sql.py`) — "
+         "work them against a scratch database until the syntax is muscle memory.")
+        for topic, n in sorted(by_topic.items())
+    ]
+    return drills, "candid/ds_sql.py question bank"
+
+
+def _ds_company_questions(company: str) -> str:
+    """Company-question section via prep's existing sourced-question mechanism."""
+    slug = _find_company(company)
+    company_qs = QUESTIONS_DB.get(slug, []) if slug else []
+    lines = ["### Company-reported questions", ""]
+    if company_qs:
+        cur_cat = None
+        for q in company_qs[:15]:
+            if q["category"] != cur_cat:
+                cur_cat = q["category"]
+                lines += [f"**{cur_cat.replace('_', ' ').title()}**", ""]
+            lines.append(f"- {q['q']}")
+            reported = f" (reported {q['reported']})" if q.get("reported") else ""
+            lines.append(f"  ↳ *Source: {q['source']}{reported}*")
+        lines += ["",
+                  "_Questions candidates publicly reported for this company — "
+                  "representative of style and topics, not a leaked list._"]
+    else:
+        lines.append(
+            "> **No verified company-specific questions found.** The drills "
+            "below are general Data Scientist preparation, not verified as "
+            "asked at this company. Add reported questions to "
+            "`candid/prep_questions.py` (see `docs/adding_questions.md`) so "
+            "future packs include them."
+        )
+    return "\n".join(lines)
+
+
+def build_ds_pack(profile: dict, role: str, company: str = "", jd: str = "",
+                  app_id: int | None = None, location: str = "") -> tuple[str, Path]:
+    """Build a Data Scientist interview prep pack.
+
+    Sections: statistics refresher pointers (from sibling ``candid/ds_stats``
+    when available, else built-in pointers), ML case list, SQL drills, and a
+    company-question section using prep's existing sourced-question mechanism.
+    Written to the same output location/format as ``build_pack``.
+    """
+    topics, topics_source = _ds_stats_topics()
+    sql_drills, sql_source = _ds_sql_drills()
+    market_line = _market_line(company, role, location)
+    talking_points = _comp_talking_points(company, role, location)
+
+    lines = [
+        f"# DS Interview Prep — {role}" + (f" @ {company}" if company else ""),
+        f"*Generated {date.today().isoformat()} · Data Scientist track*",
+        "",
+        "## 1. Statistics refresher",
+        "",
+        f"_Topic pointers ({topics_source}). Work each until you can explain "
+        "it on a whiteboard in 3 minutes._",
+        "",
+    ]
+    lines += [f"- [ ] {t}" for t in topics]
+    lines += [
+        "",
+        "## 2. ML case list",
+        "",
+        "_Classic DS interview cases. For each, practice: problem framing → "
+        "metric choice → model choice → evaluation → business decision._",
+        "",
+    ]
+    for title, pointer in _DS_ML_CASES:
+        lines += [f"### {title}", "", pointer, ""]
+    lines += [
+        "## 3. SQL drills",
+        "",
+        f"_Drill pointers ({sql_source}). Narrate your reasoning out loud as "
+        "you write._",
+        "",
+    ]
+    for title, pointer in sql_drills:
+        lines += [f"### {title}", "", pointer, ""]
+    lines += [
+        "## 4. " + _ds_company_questions(company or "").lstrip("# ").rstrip(),
+        "",
+        "## 5. STAR story prompts (from your resume)",
+        "",
+    ]
+    lines.append(_star_prompts(profile).split("\n", 2)[-1])
+    lines += ["", "## 6. Compensation benchmark", "", market_line, ""]
+    if talking_points:
+        lines += [talking_points]
+    lines += ["## 7. " + _research_checklist(company or "the company").lstrip("# ").rstrip(), ""]
+    lines += ["## 8. " + PC.DAY_BEFORE_CHECKLIST.lstrip("# ").rstrip(), ""]
+    lines.append("---")
+    lines.append(
+        "_Statistics topics: `candid/ds_stats.py` when present, else built-in "
+        "pointers. Company questions are never fabricated — see "
+        "`candid/prep_questions.py`._"
+    )
+
+    markdown = "\n".join(lines)
+    C.ensure_data_dirs()
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in f"ds-{company}-{role}")[:60]
+    out = C.PREP_PACKS_DIR / f"{date.today().isoformat()}_{safe}.md"
+    out.write_text(markdown, encoding="utf-8")
+
+    if app_id is not None:
+        try:
+            T.update(app_id, prep_pack=str(out))
+        except T.TrackerError:
+            pass
+    return markdown, out
