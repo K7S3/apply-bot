@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "reject",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "reject": ["log", "actions", "advice", "morale", "reapproach",
+               "feedback", "draft", "network", "report", "changed"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,8 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "RejectLogError", "RejectCoachError", "RejectFollowError",
+    "RejectReportError",
     "ValueError",
 }
 
@@ -72,6 +76,10 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "RejectLogError": "python -m candid reject --help",
+    "RejectCoachError": "python -m candid reject --help",
+    "RejectFollowError": "python -m candid reject --help",
+    "RejectReportError": "python -m candid reject --help",
 }
 
 
@@ -484,6 +492,87 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_reject(a):
+    from candid import reject_log as RL
+    from candid import reject_coach as RC
+    from candid import reject_follow as RF
+    from candid import reject_report as RR
+    from candid import tracker as T
+    if a.what == "log":
+        rec = RL.log_rejection(a.id, stage=a.stage,
+                               reason_notes=a.reason or "",
+                               feedback=a.feedback or "")
+        print(RL.render_log([rec]))
+        print("\nSuggested next actions:")
+        print(RC.render_actions(RC.next_actions(rec)))
+    elif a.what == "actions":
+        rec = RL.get_rejection(a.id)
+        if rec is None:
+            raise RL.RejectLogError(
+                f"No rejection logged for application #{a.id}. "
+                f"Log one with: python -m candid reject log {a.id} --stage <stage>")
+        print(RC.render_actions(RC.next_actions(rec)))
+    elif a.what == "advice":
+        print(RC.render_advice(RC.pattern_advice(RL.list_rejections())))
+    elif a.what == "morale":
+        print(RC.render_morale(RC.morale_summary(T.list_apps(), RL.list_rejections())))
+    elif a.what == "reapproach":
+        if a.due:
+            print(RF.render_reapproaches(RF.due_reapproaches()))
+        elif a.cancel is not None:
+            if RF.cancel_reapproach(a.cancel):
+                print(f"Cancelled re-approach reminder for application #{a.cancel}.")
+            else:
+                print(f"No re-approach scheduled for application #{a.cancel}.")
+        else:
+            rec = RF.schedule_reapproach(a.id, months=a.months, note=a.note or "")
+            print(f"Scheduled re-approach for {rec['company']} ({rec['role']}) "
+                  f"on {rec['due_date']}.")
+            if rec.get("note"):
+                print(f"Note: {rec['note']}")
+    elif a.what == "feedback":
+        if a.ask:
+            rec = RF.ask_feedback(a.id, a.ask)
+            print(f"Feedback requested from {rec['who']} "
+                  f"({rec['company']}, {rec['role']}).")
+        elif a.log_text:
+            rec = RF.log_feedback(a.id, a.log_text)
+            print(f"Feedback recorded for application #{rec['app_id']}.")
+        else:
+            print(RF.render_feedback(RF.pending_feedback()))
+    elif a.what == "draft":
+        rec = RL.get_rejection(a.id)
+        if rec is None:
+            raise RL.RejectLogError(
+                f"No rejection logged for application #{a.id}. "
+                f"Log one with: python -m candid reject log {a.id} --stage <stage>")
+        d = RF.draft_response(rec, a.kind)
+        print(f"Subject: {d['subject']}\n")
+        print(d["body"])
+    elif a.what == "network":
+        names = [n.strip() for n in (a.names or "").split(",") if n.strip()]
+        contacts = RF.to_network(a.id, names)
+        print(RF.render_contacts(contacts))
+    elif a.what == "report":
+        rep = RR.build_report(
+            rejections=RL.list_rejections(),
+            reapproaches_due=RF.due_reapproaches(),
+            pending_feedback=RF.pending_feedback(),
+            apps=T.list_apps())
+        print(RR.render(rep))
+    elif a.what == "changed":
+        if a.add:
+            ch = RR.log_change(a.id, a.add)
+            print(f"Logged improvement for application #{ch['app_id']}: {ch['text']}")
+        else:
+            changes = RR.changes_since(a.id)
+            if not changes:
+                print(f"No improvements logged yet for application #{a.id}.")
+            else:
+                for c in changes:
+                    print(f"{c['date']}: {c['text']}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -899,6 +988,83 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid gmail guide",
     ])
     s.set_defaults(func=cmd_gmail)
+
+    # reject
+    from candid import reject_log as _RL
+    s = _sub(sub, "reject", "Rejection reframe: log rejections, get next actions, schedule re-approaches.", [
+        "python -m candid reject log 3 --stage onsite --reason \"went with internal candidate\"",
+        "python -m candid reject actions 3",
+        "python -m candid reject advice",
+        "python -m candid reject morale",
+        "python -m candid reject reapproach 3 --months 9",
+        "python -m candid reject report",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "log", "Log a rejection with the stage you reached.", [
+        "python -m candid reject log 3 --stage onsite --reason \"went with internal candidate\"",
+    ])
+    t.add_argument("id", type=int, help="Tracker application id")
+    t.add_argument("--stage", required=True, choices=_RL.STAGES,
+                   help="How far you got: " + ", ".join(_RL.STAGES))
+    t.add_argument("--reason", default="", help="What they told you (or your best read)")
+    t.add_argument("--feedback", default="", help="Any feedback received")
+    t = _sub(rs, "actions", "Concrete next actions for one rejection.", [
+        "python -m candid reject actions 3",
+    ])
+    t.add_argument("id", type=int, help="Tracker application id")
+    t = _sub(rs, "advice", "Pattern-aware advice across all your rejections.", [
+        "python -m candid reject advice",
+    ])
+    t = _sub(rs, "morale", "Honest pipeline stats and encouragement.", [
+        "python -m candid reject morale",
+    ])
+    t = _sub(rs, "reapproach", "Schedule (or list/cancel) re-approach reminders.", [
+        "python -m candid reject reapproach 3 --months 9 --note \"role may reopen\"",
+        "python -m candid reject reapproach --due",
+        "python -m candid reject reapproach --cancel 3",
+    ])
+    t.add_argument("id", type=int, nargs="?", default=None,
+                   help="Tracker application id (omit with --due)")
+    t.add_argument("--months", type=int, default=9,
+                   help="Months from now to re-approach (1-24, default 9)")
+    t.add_argument("--note", default="", help="Reminder note")
+    t.add_argument("--due", action="store_true", help="List due re-approaches")
+    t.add_argument("--cancel", type=int, default=None, metavar="ID",
+                   help="Cancel a scheduled re-approach")
+    t = _sub(rs, "feedback", "Track feedback requests and what you got back.", [
+        "python -m candid reject feedback 3 --ask \"hiring manager\"",
+        "python -m candid reject feedback 3 --log \"wanted deeper system design\"",
+        "python -m candid reject feedback",
+    ])
+    t.add_argument("id", type=int, nargs="?", default=None,
+                   help="Tracker application id (omit to list pending)")
+    t.add_argument("--ask", default="", metavar="WHO",
+                   help="Record that you asked WHO for feedback")
+    t.add_argument("--log-text", default="", metavar="TEXT",
+                   help="Record feedback you received")
+    t = _sub(rs, "draft", "Draft a thank-you or feedback-request email.", [
+        "python -m candid reject draft 3 --kind thankyou",
+        "python -m candid reject draft 3 --kind feedback",
+    ])
+    t.add_argument("id", type=int, help="Tracker application id")
+    t.add_argument("--kind", default="thankyou", choices=["thankyou", "feedback"],
+                   help="Draft kind (default: thankyou)")
+    t = _sub(rs, "network", "Add interviewers as networking contacts.", [
+        'python -m candid reject network 3 --names "Priya Shah, Dan Lee"',
+    ])
+    t.add_argument("id", type=int, help="Tracker application id")
+    t.add_argument("--names", default="", help="Comma-separated interviewer names")
+    t = _sub(rs, "report", "Resilience report: patterns, due re-approaches, morale.", [
+        "python -m candid reject report",
+    ])
+    t = _sub(rs, "changed", "Log improvements made since a rejection (or list them).", [
+        'python -m candid reject changed 3 --add "shipped the side project we discussed"',
+        "python -m candid reject changed 3",
+    ])
+    t.add_argument("id", type=int, help="Tracker application id")
+    t.add_argument("--add", default="", metavar="TEXT",
+                   help="Log an improvement (omit to list)")
+    s.set_defaults(func=cmd_reject)
 
     # linkedin
     s = _sub(sub, "linkedin", "Import LinkedIn's official data export (no scraping).", [
