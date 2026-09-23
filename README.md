@@ -38,6 +38,11 @@ python -m candid tailor cover-letter --jd samples/candid/sample_jd.txt \
 python -m candid track add --company "Acme Corp" --role "Senior Data Scientist"
 python -m candid track update 1 --status selected_for_interview
 python -m candid prep --company "Capital One" --role "Senior Data Scientist" --app-id 1
+
+# 5. Drill coding patterns: log attempts, get a gap-driven study plan
+python -m candid patterns log --problem two-sum --solved --quality 4
+python -m candid patterns plan --out plan.md
+python -m candid patterns drill --minutes-per-day 45
 ```
 
 All commands are `python -m candid <command> --help`. No accounts, no keys.
@@ -59,6 +64,7 @@ one ends with the exact next command to run.
 | `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
+| `patterns` | Coding patterns curriculum on the problem bank: 20-pattern taxonomy with recognition cues + templates, per-problem pattern tags, **Blind-75-style study plans generated from your skill gaps**, SM-2 **spaced repetition** scheduling, day-by-day **weekly drills** (new weak-pattern problems + due reviews in your time budget), per-pattern **mastery dashboard**, and one-page **cheat sheets**. See [docs/patterns.md](docs/patterns.md). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |

@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "patterns",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "patterns": ["list", "tags", "plan", "log", "due", "review",
+                 "drill", "mastery", "cheatsheet", "reset"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "PatternsError",
     "ValueError",
 }
 
@@ -72,6 +76,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "PatternsError": "python -m candid patterns --help",
 }
 
 
@@ -391,6 +396,112 @@ def cmd_mock(a):
         M.behavioral_session(theme=a.theme, ai_feedback=a.ai)
     elif a.what == "design":
         M.design_session(level=a.level, ai_feedback=a.ai)
+
+
+def cmd_patterns(a):
+    from candid import patterns as P
+    if a.what == "list":
+        if a.pattern:
+            p = P.get_pattern(a.pattern)
+            print(f"{p['name']} (`{p['id']}`)\n\n{p['blurb']}\n")
+            print("Recognize it:")
+            for c in p["cues"]:
+                print(f"  - {c}")
+            print(f"\nComplexity: {p['complexity']}")
+            banked = P.problems_for_pattern(a.pattern)
+            if banked:
+                print("\nBank problems:")
+                for b in banked:
+                    print(f"  {b['id']:<20}{b['title'][:40]:<42}{b['difficulty']}")
+            else:
+                print("\nNo bank problems tagged with this pattern yet.")
+        else:
+            cov = P.coverage()
+            print(f"{'ID':<20}{'Name':<34}{'Bank':>5}")
+            for p in P.PATTERNS:
+                n = len(cov.get(p["id"], []))
+                print(f"{p['id']:<20}{p['name'][:33]:<34}{n:>5}")
+    elif a.what == "tags":
+        if a.by_pattern:
+            problems = P.problems_for_pattern(a.by_pattern)
+            if not problems:
+                print(f"No bank problems tagged '{a.by_pattern}' yet.")
+            for b in problems:
+                print(f"{b['id']:<20}{b['title'][:45]:<47}{b['difficulty']}")
+        else:
+            r = P.validate_bank()
+            if r["errors"]:
+                sys.exit("Tag errors:\n" + "\n".join(f"- {e}" for e in r["errors"]))
+            print(f"{r['problems']} problems tagged across "
+                  f"{len(r['patterns_used'])} patterns.")
+            if r["patterns_unused"]:
+                print("No bank problems yet for: "
+                      + ", ".join(r["patterns_unused"]))
+    elif a.what == "plan":
+        gaps = [g.strip() for g in a.gaps.split(",") if g.strip()] \
+            if a.gaps else None
+        plan = P.build_plan(gaps=gaps, total=a.total, weeks=a.weeks)
+        if a.json:
+            print(json.dumps(plan, indent=2))
+        elif a.out:
+            fp = P.export_plan(plan, a.out)
+            print(f"Wrote {plan['total']}-problem plan to {fp}")
+        else:
+            print(P.render_plan(plan))
+    elif a.what == "log":
+        rec = P.log_attempt(a.problem, solved=a.solved, quality=a.quality,
+                            minutes=a.minutes,
+                            at=a.date if a.date else None)
+        status = "solved" if rec["solved"] else "not solved"
+        print(f"Logged {a.problem}: {status}, quality {rec['quality']}/5 "
+              f"on {rec['date']}.")
+    elif a.what == "due":
+        due = P.due_cards(as_of=a.as_of if a.as_of else None)
+        if a.json:
+            print(json.dumps(due, indent=2))
+        elif not due:
+            print("Nothing due for review.")
+        else:
+            print(f"{'Problem':<20}{'Next due':<12}Interval  Ease")
+            for c in due:
+                print(f"{c['problem_id']:<20}{c['next_due']:<12}"
+                      f"{c['interval']:>5}d  {c['easiness']}")
+    elif a.what == "review":
+        card = P.review(a.problem, a.quality,
+                        today=a.date if a.date else None)
+        print(f"{a.problem}: quality {a.quality}/5 -> next review "
+              f"{card['next_due']} (interval {card['interval']}d, "
+              f"ease {card['easiness']}).")
+    elif a.what == "drill":
+        drill = P.build_drill(minutes_per_day=a.minutes_per_day, days=a.days,
+                              seed=a.seed,
+                              start=a.start if a.start else None)
+        if a.json:
+            print(json.dumps(drill, indent=2))
+        else:
+            print(P.render_drill(drill))
+    elif a.what == "mastery":
+        report = P.mastery_report()
+        if a.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(P.render_mastery(report))
+    elif a.what == "cheatsheet":
+        text = P.cheatsheet(a.pattern)
+        if a.out:
+            fp = Path(a.out).expanduser()
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(text, encoding="utf-8")
+            print(f"Wrote cheat sheet to {fp}")
+        else:
+            print(text)
+    elif a.what == "reset":
+        if not a.yes:
+            sys.exit("This deletes your patterns attempts and review cards.\n"
+                     "Re-run with --yes to confirm.")
+        removed = P.reset_progress()
+        print(f"Removed {removed['attempts']} attempts and "
+              f"{removed['cards']} review cards.")
 
 
 def cmd_jobs(a):
@@ -798,6 +909,84 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("--level", default=None); t.add_argument("--ai", action="store_true")
     s.set_defaults(func=cmd_mock)
+
+    # patterns
+    s = _sub(sub, "patterns", "Coding patterns curriculum: study plans, spaced repetition, drills.", [
+        "python -m candid patterns list",
+        "python -m candid patterns plan --gaps sliding-window,dp-1d",
+        "python -m candid patterns log --problem two-sum --solved --quality 4",
+        "python -m candid patterns drill --minutes-per-day 45",
+        "python -m candid patterns mastery",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "list", "List the pattern taxonomy (or detail one pattern).", [
+        "python -m candid patterns list",
+        "python -m candid patterns list --pattern sliding-window",
+    ])
+    t.add_argument("--pattern", default=None, help="Pattern id for detail view")
+    t = _sub(ps, "tags", "Validate problem pattern tags / list by pattern.", [
+        "python -m candid patterns tags",
+        "python -m candid patterns tags --by-pattern hashmap",
+    ])
+    t.add_argument("--by-pattern", default=None, help="List bank problems for a pattern")
+    t = _sub(ps, "plan", "Blind-75-style study plan from your skill gaps.", [
+        "python -m candid patterns plan",
+        "python -m candid patterns plan --gaps sliding-window,dp-1d --total 30",
+        "python -m candid patterns plan --out plan.md",
+    ])
+    t.add_argument("--gaps", default=None,
+                   help="Comma-separated pattern ids, weakest first (default: from your attempts)")
+    t.add_argument("--total", type=int, default=75, help="Cap on problems (default: 75)")
+    t.add_argument("--weeks", type=int, default=None, help="Weeks to spread over")
+    t.add_argument("--out", default=None, help="Write plan markdown to file")
+    t.add_argument("--json", action="store_true", help="Print the raw plan as JSON")
+    t = _sub(ps, "log", "Log a practice attempt (updates spaced repetition).", [
+        "python -m candid patterns log --problem two-sum --solved --quality 4",
+        "python -m candid patterns log --problem coin-change --failed --minutes 30",
+    ])
+    t.add_argument("--problem", required=True)
+    g = t.add_mutually_exclusive_group(required=True)
+    g.add_argument("--solved", action="store_true")
+    g.add_argument("--failed", action="store_true")
+    t.add_argument("--quality", type=int, default=None, help="Self-rating 0-5")
+    t.add_argument("--minutes", type=float, default=None)
+    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
+    t = _sub(ps, "due", "Show spaced-repetition cards due for review.", [
+        "python -m candid patterns due",
+        "python -m candid patterns due --as-of 2026-10-01",
+    ])
+    t.add_argument("--as-of", default=None, help="YYYY-MM-DD (default: today)")
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "review", "Record a review and reschedule (SM-2).", [
+        "python -m candid patterns review --problem two-sum --quality 5",
+    ])
+    t.add_argument("--problem", required=True)
+    t.add_argument("--quality", type=int, required=True, help="Recall quality 0-5")
+    t.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
+    t = _sub(ps, "drill", "Day-by-day drill: new weak-pattern problems + due reviews.", [
+        "python -m candid patterns drill",
+        "python -m candid patterns drill --minutes-per-day 30 --days 5",
+    ])
+    t.add_argument("--minutes-per-day", type=int, default=45)
+    t.add_argument("--days", type=int, default=7)
+    t.add_argument("--seed", type=int, default=0)
+    t.add_argument("--start", default=None, help="YYYY-MM-DD (default: today)")
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "mastery", "Per-pattern mastery dashboard.", [
+        "python -m candid patterns mastery",
+    ])
+    t.add_argument("--json", action="store_true")
+    t = _sub(ps, "cheatsheet", "One-page pattern cheat sheet.", [
+        "python -m candid patterns cheatsheet sliding-window",
+        "python -m candid patterns cheatsheet heap-top-k --out heap.md",
+    ])
+    t.add_argument("pattern", help="Pattern id")
+    t.add_argument("--out", default=None, help="Write markdown to file")
+    t = _sub(ps, "reset", "Delete patterns attempts and review cards.", [
+        "python -m candid patterns reset --yes",
+    ])
+    t.add_argument("--yes", action="store_true", help="Confirm deletion")
+    s.set_defaults(func=cmd_patterns)
 
     # jobs
     s = _sub(sub, "jobs", "Curate open jobs and feed the tracker.", [

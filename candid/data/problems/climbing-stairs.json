@@ -2,6 +2,9 @@
   "id": "climbing-stairs",
   "title": "Climbing Stairs",
   "topic": "dp",
+  "patterns": [
+    "dp-1d"
+  ],
   "difficulty": "easy",
   "statement": "You are climbing a staircase of `n` steps. Each time you can climb 1 or 2 steps. Return the number of distinct ways to reach the top.\n\nExample: n = 3 -> 3 (1+1+1, 1+2, 2+1)",
   "function": "solve(n)",

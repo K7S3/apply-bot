@@ -2,6 +2,10 @@
   "id": "two-sum",
   "title": "Two Sum",
   "topic": "arrays",
+  "patterns": [
+    "hashmap",
+    "two-pointers"
+  ],
   "difficulty": "easy",
   "statement": "Given an array of integers `nums` and an integer `target`, return the indices of the two numbers that add up to `target`.\n\nEach input has exactly one solution; you may not use the same element twice.\n\nExample: nums = [2, 7, 11, 15], target = 9 -> [0, 1]",
   "function": "solve(nums, target)",

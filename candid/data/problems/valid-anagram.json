@@ -2,6 +2,9 @@
   "id": "valid-anagram",
   "title": "Valid Anagram",
   "topic": "strings",
+  "patterns": [
+    "hashmap"
+  ],
   "difficulty": "easy",
   "statement": "Given two strings `s` and `t`, return True if `t` is an anagram of `s`, else False.\n\nExample: s = \"anagram\", t = \"nagaram\" -> True",
   "function": "solve(s, t)",

@@ -2,6 +2,9 @@
   "id": "number-of-islands",
   "title": "Number of Islands",
   "topic": "graphs",
+  "patterns": [
+    "graph-bfs-dfs"
+  ],
   "difficulty": "medium",
   "statement": "Given an m x n binary grid of '1's (land) and '0's (water), return the number of islands. An island is surrounded by water and formed by connecting adjacent lands horizontally or vertically.\n\nExample: [[\"1\",\"1\",\"0\"],[\"1\",\"0\",\"0\"],[\"0\",\"0\",\"1\"]] -> 2",
   "function": "solve(grid)",
