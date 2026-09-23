@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contributing guide
+    url: https://github.com/K7S3/candid/blob/main/CONTRIBUTING.md
+    about: How to set up, test, and submit changes
+  - name: Discussions
+    url: https://github.com/K7S3/candid/discussions
+    about: Questions, ideas, and help from other contributors

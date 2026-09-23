@@ -181,6 +181,19 @@ is the product now. The legacy runner expects its own `profile.yaml` /
 `applications.xlsx` setup; see the docstrings in `candid/legacy/` if you're
 migrating.
 
+## Contributing
+
+Want to help? Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the quickstart,
+coding standards, test requirements, and PR process. One command sets up a dev
+environment:
+
+```bash
+bash scripts/dev-setup.sh
+```
+
+New contributors: grab a [good first issue](docs/labels.md). All contributors
+agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 MIT.
