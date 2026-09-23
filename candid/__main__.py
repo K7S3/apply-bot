@@ -360,6 +360,59 @@ def cmd_salary(a):
             print("No pay range found in that text.")
 
 
+def cmd_behavioral(a):
+    from candid import behavioral as B
+    if a.what == "frameworks":
+        for f in B.list_frameworks():
+            print(f"{f['key']:<12}{f['name']:<38}{f['principles']} principles")
+            print(f"{'':<12}{f['source']}")
+    elif a.what == "lp-bank":
+        qs = B.lp_questions(company=a.company or "", framework=a.framework or "",
+                            principle=a.principle)
+        if not qs:
+            print("No questions found.")
+            return
+        cur = None
+        for q in qs:
+            if q["principle"] != cur:
+                cur = q["principle"]
+                p = B.principle_lookup(q["framework"], cur)
+                print(f"\n## {p['name']}\n_{p['desc']}_\n")
+            print(f"- {q['q']}")
+    elif a.what == "values":
+        for vp in B.values_prompts(company=a.company or "", framework=a.framework or ""):
+            print(f"**{vp['q']}**\n  _Scaffold:_ {vp['scaffold']}\n")
+    elif a.what == "story-map":
+        m = B.map_stories(_profile(), company=a.company or "", framework=a.framework or "")
+        print(f"# Story map — {m['framework_name']} ({len(m['stories'])} stories)\n")
+        for pid, e in m["mapping"].items():
+            p = e["principle"]
+            mark = {"covered": "✅", "thin": "⚠️", "missing": "❌"}[e["status"]]
+            print(f"{mark} {p['name']} (score {e['score']})")
+            if e["best"]:
+                t = e["best"]["text"]
+                print(f"   ↳ {(t[:100] + '…') if len(t) > 100 else t}")
+    elif a.what == "drill":
+        d = B.drill(company=a.company or "", framework=a.framework or "",
+                    principle=a.principle, seed=a.seed)
+        print(B.render_drill(d))
+    elif a.what == "coverage":
+        md = B.coverage_report(_profile(), company=a.company or "", role=a.role or "",
+                               framework=a.framework or "")
+        print(md)
+    elif a.what == "traps":
+        for t in B.trap_questions():
+            print(f"**{t['q']}**\n  _Why they ask:_ {t['why_asked']}\n  _Frame:_ {t['frame']}\n")
+    elif a.what == "pitch":
+        print(B.pitch(_profile(), company=a.company or "", framework=a.framework or ""))
+    elif a.what == "scaffold":
+        story = a.story or ""
+        if not story:
+            print("Pass --story \"your resume bullet\".")
+            return
+        print(B.scaffold_story(story, variant=a.variant))
+
+
 def cmd_mock(a):
     from candid import mock as M
     if a.what == "list":
@@ -620,6 +673,56 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
     s.set_defaults(func=cmd_prep)
+
+    # behavioral (batch-37: leadership principles beyond STAR)
+    s = _sub(sub, "behavioral", "Behavioral prep beyond STAR: leadership principles, values, story mapping.", [
+        "python -m candid behavioral frameworks",
+        "python -m candid behavioral lp-bank --company Amazon",
+        "python -m candid behavioral drill --company Amazon --principle bias_action",
+        "python -m candid behavioral story-map --company Meta",
+        "python -m candid behavioral coverage --company Netflix --role \"Data Scientist\"",
+    ])
+    bs = _nested(s)
+    t = _sub(bs, "frameworks", "List leadership-principle frameworks per company type.", [
+        "python -m candid behavioral frameworks",
+    ])
+    t = _sub(bs, "lp-bank", "Principle-tagged question bank for a company.", [
+        "python -m candid behavioral lp-bank --company Amazon",
+        "python -m candid behavioral lp-bank --framework meta --principle move_fast",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--framework", default="")
+    t.add_argument("--principle", default=None)
+    t = _sub(bs, "values", "Values-alignment / 'why us' prompts.", [
+        "python -m candid behavioral values --company Netflix",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--framework", default="")
+    t = _sub(bs, "story-map", "Map your resume stories to principles; find gaps.", [
+        "python -m candid behavioral story-map --company Amazon",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--framework", default="")
+    t = _sub(bs, "drill", "One principle-tagged question + interviewer probes.", [
+        "python -m candid behavioral drill --company Amazon --principle bias_action",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--framework", default="")
+    t.add_argument("--principle", default=None); t.add_argument("--seed", type=int, default=None)
+    t = _sub(bs, "coverage", "Markdown coverage report: covered / thin / missing principles.", [
+        "python -m candid behavioral coverage --company Meta --role \"ML Engineer\"",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--framework", default="")
+    t.add_argument("--role", default="")
+    t = _sub(bs, "traps", "Red-flag questions (salary, gaps, leaving) with framing.", [
+        "python -m candid behavioral traps",
+    ])
+    t = _sub(bs, "pitch", "90-second 'tell me about yourself' mapped to company values.", [
+        "python -m candid behavioral pitch --company Google",
+    ])
+    t.add_argument("--company", default=""); t.add_argument("--framework", default="")
+    t = _sub(bs, "scaffold", "Render a story bullet as a STAR / STAR-V / PAR / SOAR scaffold.", [
+        "python -m candid behavioral scaffold --story \"Cut churn 12% by ...\" --variant star_v",
+    ])
+    t.add_argument("--story", default=""); t.add_argument("--variant", default="star_v",
+                 choices=["star", "star_v", "par", "soar"])
+    s.set_defaults(func=cmd_behavioral)
 
     # followup
     s = _sub(sub, "followup", "Draft thank-you / check-in / referral emails.", [

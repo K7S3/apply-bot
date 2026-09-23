@@ -340,6 +340,15 @@ def _pick_behavioral(theme: str | None = None) -> dict:
     if theme:
         qs = [q for q in qs if q["theme"] == theme]
         if not qs:
+            # Fall back to leadership-principle drills (candid.behavioral):
+            # `mock behavioral --theme bias_action` just works.
+            try:
+                from candid import behavioral as B
+                lp = B.mock_question(theme)
+            except Exception:
+                lp = None
+            if lp is not None:
+                return lp
             raise MockError(f"Unknown behavioral theme '{theme}'.")
     return random.choice(qs)
 

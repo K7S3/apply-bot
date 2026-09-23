@@ -101,6 +101,15 @@ def _gap_categories(gaps: list[str]) -> list[str]:
     return sorted(order, key=lambda c: -counts[c])
 
 
+def _lp_section(profile: dict, company: str, role: str) -> str:
+    """Leadership-principles section (batch-37 behavioral module). Soft-fails."""
+    try:
+        from candid import behavioral as B
+        return B.pack_section(profile, company, role)
+    except Exception:
+        return "Leadership principles & values alignment\n\n_unavailable_"
+
+
 def _tailored_mock(profile: dict, role: str, company: str,
                    categories: list[str]) -> str:
     """Deterministic mock Q&A scaffold grounded in the profile."""
@@ -349,11 +358,12 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
     lines += ["## 4. " + _tailored_mock(profile, role, company, categories).lstrip("# ").rstrip(),
               ""]
     lines += ["## 5. " + _star_prompts(profile).lstrip("# ").rstrip(), ""]
-    lines += ["## 6. Compensation benchmark", "", market_line, ""]
+    lines += ["## 6. " + _lp_section(profile, company, role).lstrip("# ").rstrip(), ""]
+    lines += ["## 7. Compensation benchmark", "", market_line, ""]
     if talking_points:
         lines += [talking_points]
-    lines += ["## 7. " + _research_checklist(company).lstrip("# ").rstrip(), ""]
-    lines += ["## 8. " + PC.DAY_BEFORE_CHECKLIST.lstrip("# ").rstrip(), ""]
+    lines += ["## 8. " + _research_checklist(company).lstrip("# ").rstrip(), ""]
+    lines += ["## 9. " + PC.DAY_BEFORE_CHECKLIST.lstrip("# ").rstrip(), ""]
     lines.append("---")
     lines.append(
         "_Question bank: `candid/prep_questions.py` — add new reported questions "
