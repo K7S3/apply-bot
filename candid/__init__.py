@@ -9,6 +9,8 @@ Modules:
     salary    salary intelligence (pay ranges + DOL LCA data)
     prep      interview prep packs (questions, deep-dives, mock, checklist)
     prep_concepts  concept explainer library used by prep
+    prep_tracks role-family prep tracks: curated loops, question banks,
+                concept deep-dives, timed drills, study plans, progress
     followup  thank-you / recruiter nudge drafts
     offer     offer comparison and total-comp normalization
     negotiate recruiter scripts, counter drafts, BATNA framing
