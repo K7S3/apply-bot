@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "notify",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "notify": ["send", "prefs", "snooze", "unsnooze", "flush", "due"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -486,6 +487,109 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def _parse_snooze_duration(text: str):
+    """Parse '2h', '30m', '45s' (bare number = minutes) into a timedelta."""
+    from datetime import timedelta
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([hmsHMS]?)\s*", text or "")
+    if not m:
+        sys.exit(f"Bad duration {text!r}: use like 2h, 30m, 45s "
+                 "(bare number = minutes).")
+    n = float(m.group(1))
+    unit = (m.group(2) or "m").lower()
+    if unit == "h":
+        return timedelta(hours=n)
+    if unit == "s":
+        return timedelta(seconds=n)
+    return timedelta(minutes=n)
+
+
+def cmd_notify(a):
+    from datetime import datetime, timedelta
+    from candid import notify as N
+    if a.what == "send":
+        ok = N.notify(a.title, a.body, category=a.category, urgency=a.urgency)
+        prefs = N.get_prefs()
+        if ok:
+            print("delivered")
+        elif (not prefs.get("enabled", True)
+              or not prefs.get("categories", {}).get(a.category, True)):
+            print("skipped")
+        else:
+            print("queued")
+    elif a.what == "prefs":
+        prefs = N.get_prefs()
+        for kv in a.set:
+            if "=" not in kv:
+                sys.exit(f"Bad --set {kv!r}: use key=value.")
+            key, _, value = kv.partition("=")
+            prefs = N.set_pref(key.strip(), value.strip())
+        print(json.dumps(prefs, indent=2, sort_keys=True))
+    elif a.what == "snooze":
+        if a.minutes is not None:
+            duration = timedelta(minutes=a.minutes)
+        elif a.until:
+            try:
+                hh, mm = a.until.split(":")
+                target = datetime.now().replace(hour=int(hh), minute=int(mm),
+                                                second=0, microsecond=0)
+            except (ValueError, AttributeError):
+                sys.exit(f"Bad --until {a.until!r}: use HH:MM (24h).")
+            now = datetime.now()
+            if target <= now:
+                target += timedelta(days=1)
+            duration = target - now
+        else:
+            duration = _parse_snooze_duration(a.for_)
+        until = N.snooze(duration)
+        print(f"Snoozed until {until.strftime('%Y-%m-%d %H:%M')}.")
+    elif a.what == "unsnooze":
+        N.clear_snooze()
+        print("Snooze cleared.")
+    elif a.what == "flush":
+        delivered = N.flush_queue()
+        for rec in delivered:
+            print(f"Delivered: {rec['title']}")
+        print(f"Delivered {len(delivered)} queued notification(s).")
+    elif a.what == "due":
+        try:
+            from candid.notify_reminders import collect_due
+        except ImportError:
+            print("Reminder collection is not available yet: "
+                  "candid.notify_reminders is missing from this worktree.")
+            print("Track applications with `python -m candid track list` instead.")
+            sys.exit(1)
+        items = collect_due() or []
+        if not items:
+            print("Nothing due right now.")
+        sent = 0
+        for it in items:
+            if isinstance(it, dict):
+                title = it.get("title", "Reminder")
+                body = it.get("body", "")
+                category = it.get("category", "general")
+                urgency = it.get("urgency", "normal")
+                nid = it.get("id")
+            else:
+                title, body, category, urgency, nid = (
+                    str(it), "", "general", "normal", None)
+            label = f"- {title}: {body}" if body else f"- {title}"
+            if not a.deliver:
+                print(label)
+                continue
+            if nid and N.was_sent(nid):
+                print(f"{label} [already sent]")
+                continue
+            if N.notify(title, body, category=category, urgency=urgency):
+                sent += 1
+                if nid:
+                    N.mark_sent(nid)
+                print(f"{label} [sent]")
+            else:
+                print(f"{label} [queued/skipped]")
+        if a.deliver:
+            print(f"Sent {sent} of {len(items)} due item(s).")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -918,6 +1022,58 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # notify
+    s = _sub(sub, "notify", "Desktop notifications: send, prefs, snooze, queue.", [
+        "python -m candid notify send --title \"Interview\" --body \"Acme loop at 2pm\"",
+        "python -m candid notify prefs --set enabled=false",
+        "python -m candid notify snooze --for 2h",
+        "python -m candid notify flush",
+        "python -m candid notify due --deliver",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "send", "Send a desktop notification now.", [
+        "python -m candid notify send --title \"Interview\" --body \"Acme loop at 2pm\"",
+        "python -m candid notify send --title \"Deadline\" --body \"Apply by Friday\" --category deadlines --urgency critical",
+    ])
+    t.add_argument("--title", required=True, help="Notification title")
+    t.add_argument("--body", required=True, help="Notification body")
+    t.add_argument("--category", default="general",
+                   help="Category: interviews, deadlines, followups, watchlist, system, general")
+    t.add_argument("--urgency", default="normal",
+                   choices=["low", "normal", "critical"], help="Urgency level")
+    t = _sub(ns, "prefs", "Show prefs, or set them with --set key=value.", [
+        "python -m candid notify prefs",
+        "python -m candid notify prefs --set enabled=false",
+        "python -m candid notify prefs --set quiet_start=23:00 --set categories.watchlist=false",
+    ])
+    t.add_argument("--set", action="append", default=[], metavar="key=value",
+                   help="Set a pref (repeatable). Keys: enabled, quiet_start, "
+                        "quiet_end, categories.<name>")
+    t = _sub(ns, "snooze", "Snooze notifications for a while.", [
+        "python -m candid notify snooze --for 2h",
+        "python -m candid notify snooze --minutes 30",
+        "python -m candid notify snooze --until 09:00",
+    ])
+    grp = t.add_mutually_exclusive_group(required=True)
+    grp.add_argument("--for", dest="for_", metavar="DURATION",
+                     help="Duration like 2h, 30m, 45s (bare number = minutes)")
+    grp.add_argument("--minutes", type=int, help="Snooze this many minutes")
+    grp.add_argument("--until", metavar="HH:MM",
+                     help="Snooze until this time today (or tomorrow if passed)")
+    t = _sub(ns, "unsnooze", "Clear any active snooze.", [
+        "python -m candid notify unsnooze",
+    ])
+    t = _sub(ns, "flush", "Deliver queued notifications now.", [
+        "python -m candid notify flush",
+    ])
+    t = _sub(ns, "due", "List due reminders; --deliver sends them.", [
+        "python -m candid notify due",
+        "python -m candid notify due --deliver",
+    ])
+    t.add_argument("--deliver", action="store_true",
+                   help="Send due reminders via notify()")
+    s.set_defaults(func=cmd_notify)
 
     return p
 

@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `notify` | OS-native desktop notifications: `send` (one-off), `due` (list due interview / deadline / follow-up / watchlist reminders, `--deliver` to send each once), `prefs` (master switch, quiet hours, per-category toggles), `snooze` / `unsnooze`, `flush` (deliver queued). Backends: macOS (`terminal-notifier`, else `osascript`), Linux (`notify-send`, else `gdbus`). Quiet hours and snoozes queue instead of firing; categories `interviews`, `deadlines`, `followups`, `watchlist`, `system` can each be disabled. See [docs/notifications.md](docs/notifications.md). |
 
 ## Job-source coverage (honest)
 
