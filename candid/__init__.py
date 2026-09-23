@@ -12,6 +12,9 @@ Modules:
     followup  thank-you / recruiter nudge drafts
     offer     offer comparison and total-comp normalization
     negotiate recruiter scripts, counter drafts, BATNA framing
+    postaccept post-accept milestone tracker: cliff dates, vesting calendar,
+              refresher grants, first-year milestones, promotion check-ins,
+              reminders, comp realization
     mock      interactive mock interviews (coding judge, AI interviewer,
               behavioral, system design)
     mock_judge  sandboxed subprocess judge used by mock
@@ -26,4 +29,4 @@ in samples/candid/ so a new user can try every command in minutes.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

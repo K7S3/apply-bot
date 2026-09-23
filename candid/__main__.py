@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from datetime import date
 
 from candid import __version__
 
@@ -55,6 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "PostAcceptError",
     "ValueError",
 }
 
@@ -72,6 +74,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "PostAcceptError": "python -m candid postaccept --help",
 }
 
 
@@ -324,6 +327,95 @@ def cmd_negotiate(a):
                               base_ask_reason=a.base_ask, second_item=a.second_item,
                               second_ask_reason=a.second_ask or "",
                               target_summary=a.target or "", call_time=a.call_time))
+
+
+def cmd_postaccept(a):
+    from candid import postaccept as PA
+    if a.what == "record":
+        rec = PA.record_acceptance(
+            company=a.company, role=a.role, start_date=a.start,
+            level=a.level or "", base=a.base or 0,
+            bonus_target_pct=a.bonus_pct or 0, sign_on=a.sign_on or 0,
+            shares=a.shares or 0, grant_value=a.grant_value or 0,
+            grant_date=a.grant_date or None,
+            vest_years=a.vest_years, schedule=a.schedule,
+            cliff_months=a.cliff_months)
+        print(f"Recorded: {rec['company']} — {rec['role']}, "
+              f"starting {rec['start_date']}.")
+        print(f"Cliff: {PA.cliff_date(rec['start_date'], rec['cliff_months'])} "
+              f"({rec['shares']:g} shares, {rec['schedule']} over "
+              f"{rec['vest_years']}y).")
+    elif a.what == "cliff":
+        rec = PA.load_record()
+        start = rec["start_date"]
+        cliff = PA.cliff_date(start, rec.get("cliff_months") or 0)
+        days = (cliff - date.today()).days
+        print(f"Start: {start}  |  Cliff ({rec.get('cliff_months') or 0}mo): "
+              f"{cliff}  |  {days} days out")
+    elif a.what == "vest":
+        rec = PA.load_record()
+        events = PA.vesting_events()
+        if a.json:
+            print(json.dumps(events, indent=2))
+        else:
+            print(f"Vesting calendar: {rec['company']} "
+                  f"({rec['shares']:g} shares)")
+            for e in events:
+                print(f"  {e['date']}  {e['shares']:>10g}  "
+                      f"{e['kind']:5}  {e['source']}")
+    elif a.what == "milestones":
+        for m in PA.list_milestones():
+            box = "x" if m["done"] else " "
+            print(f"[{box}] {m['due']}  {m['id']:10}  {m['title']}")
+    elif a.what == "done":
+        m = PA.mark_milestone_done(a.id, done=not a.undo)
+        print(f"{'Reopened' if a.undo else 'Done'}: {m['title']}")
+    elif a.what == "add-milestone":
+        m = PA.add_milestone(a.title, a.due, detail=a.detail or "")
+        print(f"Added milestone {m['id']}: {m['title']} (due {m['due']})")
+    elif a.what == "refreshers":
+        if a.label:
+            if not a.grant_date:
+                raise PA.PostAcceptError(
+                    "Adding a refresher needs --grant-date YYYY-MM-DD.")
+            r = PA.add_refresher(a.label, a.grant_date, a.shares,
+                                 vest_years=a.vest_years,
+                                 schedule=a.schedule)
+            print(f"Added refresher '{r['label']}': {r['shares']:g} shares "
+                  f"from {r['grant_date']}.")
+        else:
+            rows = PA.list_refreshers()
+            if not rows:
+                print("No refresher grants tracked yet.")
+            for r in rows:
+                print(f"{r['grant_date']}  {r['label']:24}  "
+                      f"{r['shares']:g} shares  {r['schedule']}")
+    elif a.what == "promo":
+        rec = PA.load_record()
+        for c in PA.promotion_checkins(rec["start_date"]):
+            print(f"{c['due']}  {c['title']}\n    {c['prompt']}\n")
+    elif a.what == "reminders":
+        for r in PA.upcoming_reminders(days=a.days):
+            tag = "OVERDUE" if r["overdue"] else f"in {r['days_out']}d"
+            print(f"{r['date']}  [{r['kind']}]  {r['title']}  ({tag})")
+    elif a.what == "tenure":
+        rec = PA.load_record()
+        t = PA.tenure(rec["start_date"])
+        print(f"{t['days']} days ({t['months']} months) since "
+              f"{rec['start_date']}.")
+    elif a.what == "comp":
+        c = PA.comp_realization(a.price)
+        print(f"As of {c['as_of']} @ ${c['price_per_share']:,.2f}/share:")
+        print(f"  vested:   {c['vested_shares']:g} shares = "
+              f"${c['vested_value']:,.0f}")
+        print(f"  unvested: {c['unvested_shares']:g} shares = "
+              f"${c['unvested_value']:,.0f}")
+        for y, b in c["by_year"].items():
+            print(f"  {y}: vested {b['vested_shares']:g} "
+                  f"(${b['vested_value']:,.0f}), upcoming "
+                  f"{b['upcoming_shares']:g} (${b['upcoming_value']:,.0f})")
+    elif a.what == "dashboard":
+        print(PA.render_dashboard())
 
 
 def cmd_salary(a):
@@ -718,6 +810,80 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--second-ask", default=""); t.add_argument("--target", default="")
     t.add_argument("--call-time", default="tomorrow")
     s.set_defaults(func=cmd_negotiate)
+
+    # postaccept
+    s = _sub(sub, "postaccept", "Post-accept milestone tracker: cliff dates, "
+             "vesting calendar, refresher grants, first-year milestones, "
+             "promotion check-ins, reminders.", [
+        "python -m candid postaccept record --company Acme --role \"Data Scientist\" --start 2026-10-05 --shares 480",
+        "python -m candid postaccept vest",
+        "python -m candid postaccept reminders --days 60",
+        "python -m candid postaccept dashboard",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "record", "Record the accepted offer (start date, comp, equity grant).", [
+        "python -m candid postaccept record --company Acme --role \"Data Scientist\" --start 2026-10-05 --base 180000 --shares 480",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
+    t.add_argument("--level", default=""); t.add_argument("--base", type=float, default=0)
+    t.add_argument("--bonus-pct", type=float, default=0)
+    t.add_argument("--sign-on", type=float, default=0)
+    t.add_argument("--shares", type=float, default=0)
+    t.add_argument("--grant-value", type=float, default=0)
+    t.add_argument("--grant-date", default=None, help="Defaults to --start")
+    t.add_argument("--vest-years", type=int, default=4)
+    t.add_argument("--schedule", default="25/25/25/25",
+                   help="Yearly percentages, e.g. 40/30/20/10")
+    t.add_argument("--cliff-months", type=int, default=12)
+    _sub(ps, "cliff", "Show the vesting cliff date and days remaining.", [
+        "python -m candid postaccept cliff",
+    ])
+    t = _sub(ps, "vest", "Full vesting calendar (initial grant + refreshers).", [
+        "python -m candid postaccept vest",
+        "python -m candid postaccept vest --json",
+    ])
+    t.add_argument("--json", action="store_true")
+    _sub(ps, "milestones", "List first-year + custom milestones.", [
+        "python -m candid postaccept milestones",
+    ])
+    t = _sub(ps, "done", "Mark a milestone done (or --undo to reopen).", [
+        "python -m candid postaccept done --id day-30",
+    ])
+    t.add_argument("--id", required=True); t.add_argument("--undo", action="store_true")
+    t = _sub(ps, "add-milestone", "Add a custom milestone.", [
+        "python -m candid postaccept add-milestone --title \"Finish bootcamp\" --due 2026-10-20",
+    ])
+    t.add_argument("--title", required=True); t.add_argument("--due", required=True,
+                   help="Due date YYYY-MM-DD")
+    t.add_argument("--detail", default="")
+    t = _sub(ps, "refreshers", "Add (with --label) or list refresher grants.", [
+        "python -m candid postaccept refreshers",
+        "python -m candid postaccept refreshers --label \"2027 refresher\" --grant-date 2027-10-05 --shares 150",
+    ])
+    t.add_argument("--label", default=None)
+    t.add_argument("--grant-date", default=None)
+    t.add_argument("--shares", type=float, default=0)
+    t.add_argument("--vest-years", type=int, default=4)
+    t.add_argument("--schedule", default="25/25/25/25")
+    _sub(ps, "promo", "6/9/12-month promotion check-in plan.", [
+        "python -m candid postaccept promo",
+    ])
+    t = _sub(ps, "reminders", "Vests, milestones, cliff and promo check-ins due soon.", [
+        "python -m candid postaccept reminders --days 60",
+    ])
+    t.add_argument("--days", type=int, default=30)
+    _sub(ps, "tenure", "Days since the start date.", [
+        "python -m candid postaccept tenure",
+    ])
+    t = _sub(ps, "comp", "Vested vs unvested equity value at a share price.", [
+        "python -m candid postaccept comp --price 150",
+    ])
+    t.add_argument("--price", type=float, required=True)
+    _sub(ps, "dashboard", "One-screen post-accept summary.", [
+        "python -m candid postaccept dashboard",
+    ])
+    s.set_defaults(func=cmd_postaccept)
 
     # salary
     s = _sub(sub, "salary", "Salary intelligence database.", [
