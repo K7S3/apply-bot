@@ -11,6 +11,13 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid shell               # interactive REPL (no retyping `python -m candid`)
+    python -m candid menu                # plain-language menu of what you can do
+    python -m candid wizard tailor       # step-by-step guided wizard
+    python -m candid triage              # walk through tracked applications
+
+Any command accepts -i / --interactive to be prompted for missing
+arguments instead of erroring, e.g. `python -m candid track add -i`.
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -22,6 +29,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -33,6 +41,7 @@ COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
+    "shell", "menu", "triage", "wizard",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +57,7 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "wizard": ["onboard", "tailor", "track-add", "offer-add", "prep"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -56,6 +66,7 @@ _EXPECTED_ERRORS = {
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "ValueError",
+    "InteractiveError", "WizardAborted", "TriageError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +83,9 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "InteractiveError": "python -m candid menu",
+    "WizardAborted": "python -m candid wizard",
+    "TriageError": "python -m candid track list",
 }
 
 
@@ -254,6 +268,13 @@ def cmd_track(a):
             print(f"   python -m candid prep --company \"{rec['company']}\" "
                   f"--role \"{rec['role']}\" --app-id {rec['id']}")
     elif a.what == "remove":
+        from candid import interactive as I
+        if I.is_tty() and not a.yes:
+            from candid import confirm as CF
+            if not CF.confirm_destructive(
+                    f"permanently delete application #{a.id} from the tracker"):
+                print("Cancelled.")
+                return
         T.remove(a.id)
         print(f"Removed application #{a.id}.")
     elif a.what == "stats":
@@ -337,8 +358,9 @@ def cmd_salary(a):
             print(S.render_lookup(result, company=a.company or "",
                                   title=a.title or "", location=a.location or ""))
     elif a.what == "import-lca":
-        print(f"Importing {a.file} ...")
-        res = S.import_lca(a.file, limit=a.limit)
+        from candid import progress as PG
+        with PG.spin(f"Importing {a.file}"):
+            res = S.import_lca(a.file, limit=a.limit)
         print(f"Imported {res['imported']} rows, skipped {res['skipped']}.")
     elif a.what == "parse-range":
         if a.text:
@@ -401,11 +423,13 @@ def cmd_jobs(a):
             sys.exit("--role is required (e.g. --role \"Data Scientist\").\n"
                      "Next: run `python -m candid jobs curate --help`.")
         fn = J.refresh if a.what == "refresh" else J.curate
-        result = fn(_profile(), role=a.role, location=a.location or "",
-                    remote=a.remote, level=a.level, limit=a.limit,
-                    sources=a.sources or None,
-                    days=getattr(a, "days", None),
-                    min_score=getattr(a, "min_score", 0) or 0)
+        from candid import progress as PG
+        with PG.spin(f"Curating {a.role} jobs"):
+            result = fn(_profile(), role=a.role, location=a.location or "",
+                        remote=a.remote, level=a.level, limit=a.limit,
+                        sources=a.sources or None,
+                        days=getattr(a, "days", None),
+                        min_score=getattr(a, "min_score", 0) or 0)
         print(J.render_curated(result))
     elif a.what == "list":
         if a.json:
@@ -486,6 +510,314 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+# ---------------------------------------------------------------------------
+# interactive mode: shell, menu, triage, wizards, -i prompting
+# ---------------------------------------------------------------------------
+
+#: Commands whose subcommand is required (nested subparsers, required=True).
+_REQUIRED_WHAT = {"track", "followup", "offer", "negotiate", "salary",
+                  "mock", "jobs", "gmail", "linkedin"}
+
+#: Commands whose `what` is a required positional (not a nested subparser).
+_WHAT_CHOICE = {"tailor": ("Tailor what?", ["resume", "cover-letter"])}
+
+#: (cmd, subcommand) -> arguments to prompt for under -i/--interactive.
+#: {"flag": ...} entries become --flag value; {"arg": ..., "position": N}
+#: entries are missing positionals inserted at index N.
+_INTERACTIVE_REQUIRED = {
+    ("onboard", None): [
+        {"flag": "resume", "prompt": "Resume file (.pdf/.md/.txt)", "kind": "path"},
+    ],
+    ("match", None): [
+        {"flag": "jd", "prompt": "JD file path, URL, or - for stdin", "kind": "text"},
+    ],
+    ("tailor", None): [
+        {"flag": "jd", "prompt": "JD file path, URL, or - for stdin", "kind": "text"},
+    ],
+    ("tailor", "resume"): [
+        {"flag": "jd", "prompt": "JD file path, URL, or - for stdin", "kind": "text"},
+    ],
+    ("tailor", "cover-letter"): [
+        {"flag": "jd", "prompt": "JD file path, URL, or - for stdin", "kind": "text"},
+    ],
+    ("track", "add"): [
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+    ],
+    ("track", "update"): [
+        {"arg": "id", "position": 2, "prompt": "Application id", "kind": "int"},
+    ],
+    ("track", "remove"): [
+        {"arg": "id", "position": 2, "prompt": "Application id", "kind": "int"},
+    ],
+    ("prep", None): [
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+    ],
+    ("followup", "thank-you"): [
+        {"flag": "person", "prompt": "Person's name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+    ],
+    ("followup", "check-in"): [
+        {"flag": "person", "prompt": "Person's name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+    ],
+    ("followup", "referral"): [
+        {"flag": "person", "prompt": "Person's name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+    ],
+    ("offer", "add"): [
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+    ],
+    ("negotiate", "script"): [
+        {"flag": "which", "prompt": "Scenario", "kind": "choice",
+         "options": ["lowball_anchor", "competing_offer", "exploding_deadline",
+                     "level_pushback", "leveling_up_push", "remote_flexibility"]},
+    ],
+    ("negotiate", "counter"): [
+        {"flag": "person", "prompt": "Person's name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+        {"flag": "base-ask", "prompt": "Base salary ask (e.g. 190k base)",
+         "kind": "text", "required": True},
+    ],
+    ("salary", "parse-range"): [
+        {"flag": "company", "prompt": "Company name", "kind": "text", "required": True},
+        {"flag": "role", "prompt": "Role title", "kind": "text", "required": True},
+    ],
+    ("salary", "import-lca"): [
+        {"arg": "file", "position": 2, "prompt": "LCA csv file", "kind": "path"},
+    ],
+    ("jobs", "curate"): [
+        {"flag": "role", "prompt": "Wanted title, e.g. \"Data Scientist\"",
+         "kind": "text", "required": True},
+    ],
+    ("jobs", "refresh"): [
+        {"flag": "role", "prompt": "Wanted title, e.g. \"Data Scientist\"",
+         "kind": "text", "required": True},
+    ],
+    ("linkedin", "import"): [
+        {"flag": "zip", "prompt": "LinkedIn export .zip path", "kind": "path"},
+    ],
+    ("mock", "run"): [
+        {"flag": "problem", "prompt": "Problem id", "kind": "text", "required": True},
+        {"flag": "file", "prompt": "Solution file", "kind": "path"},
+    ],
+    ("mock", "solution"): [
+        {"flag": "problem", "prompt": "Problem id", "kind": "text", "required": True},
+    ],
+    ("mock", "hint"): [
+        {"flag": "problem", "prompt": "Problem id", "kind": "text", "required": True},
+    ],
+    ("gmail", "confirm"): [
+        {"arg": "id", "position": 2, "prompt": "Proposal id", "kind": "int"},
+    ],
+    ("gmail", "reject"): [
+        {"arg": "id", "position": 2, "prompt": "Proposal id", "kind": "int"},
+    ],
+}
+
+
+def _interactive_requested(argv) -> bool:
+    return "-i" in argv or "--interactive" in argv
+
+
+def _strip_interactive(argv):
+    return [t for t in argv if t not in ("-i", "--interactive")]
+
+
+def _flag_present(argv, flag) -> bool:
+    return f"--{flag}" in argv or any(
+        t.startswith(f"--{flag}=") for t in argv)
+
+
+def _prompt_entry(cmd, entry):
+    """Prompt for one missing argument spec entry; return the string value."""
+    from candid import interactive as I
+    from candid import prefill as PF
+    kind = entry.get("kind", "text")
+    name = entry.get("flag", entry.get("arg"))
+    default = PF.get_default(cmd, name) or None
+    prompt = entry["prompt"]
+    required = entry.get("required", False)
+    if kind == "path":
+        return str(I.ask_path(prompt, default=default))
+    if kind == "int":
+        return str(I.ask_int(prompt))
+    if kind == "choice":
+        options = entry["options"]
+        return I.ask_choice(prompt, options,
+                            default=default if default in options else None)
+    return I.ask(prompt, default=default, required=required)
+
+
+def _maybe_prompt_missing(argv):
+    """Fill missing arguments via interactive prompts (the -i/--interactive
+    path). Always strips -i/--interactive; prompts only when requested.
+    Returns a new argv list. Never hangs: requires a TTY to prompt."""
+    from candid import interactive as I
+    requested = _interactive_requested(argv)
+    argv = _strip_interactive(argv)
+    if not requested:
+        return argv
+    if not argv or "-h" in argv or "--help" in argv:
+        return argv
+    if not I.is_tty():
+        raise I.InteractiveError(
+            "-i/--interactive needs a terminal; pass the flags explicitly or pipe input.")
+    cmd = argv[0]
+    if cmd.startswith("-") or cmd not in COMMANDS:
+        return argv
+    # missing subcommand for commands that require one
+    what = argv[1] if len(argv) > 1 and not argv[1].startswith("-") else None
+    if what is None and cmd in _REQUIRED_WHAT:
+        what = I.ask_choice("What do you want to do?", SUBCOMMANDS[cmd])
+        argv.insert(1, what)
+    elif what is None and cmd in _WHAT_CHOICE:
+        prompt, options = _WHAT_CHOICE[cmd]
+        argv.insert(1, I.ask_choice(prompt, options))
+    spec = _INTERACTIVE_REQUIRED.get((cmd, what),
+                                     _INTERACTIVE_REQUIRED.get((cmd, None), []))
+    for entry in spec:
+        if "flag" in entry:
+            if not _flag_present(argv, entry["flag"]):
+                argv += [f"--{entry['flag']}", _prompt_entry(cmd, entry)]
+        else:  # positional {"arg", "position"}
+            pos = entry["position"]
+            if len(argv) <= pos or argv[pos].startswith("-"):
+                argv.insert(pos, _prompt_entry(cmd, entry))
+    return argv
+
+
+def cmd_shell(a):
+    from candid import shell as S
+    code = S.run_shell()
+    if code:
+        sys.exit(code)
+
+
+def cmd_menu(a):
+    from candid import menu as M
+    label = M.show_menu()
+    if label is None:
+        print("Cancelled. Run `python -m candid --help` to see all commands.")
+        return
+    argv2 = M.pick_intent(label)
+    print(f"Running: python -m candid {' '.join(argv2)}")
+    main(argv2)
+
+
+def cmd_triage(a):
+    from candid import triage as TR
+    summary = TR.triage()
+    print(f"Triaged {summary['reviewed']} application(s): "
+          f"{summary['updated']} updated, {summary['archived']} archived.")
+
+
+def _jsonable_answers(answers):
+    """Wizard answers may hold Paths; sessions need plain JSON."""
+    out = {}
+    for k, v in answers.items():
+        out[k] = str(v) if isinstance(v, Path) else v
+    return out
+
+
+def _wizard_argv(name, answers):
+    """Translate wizard answers into the real command's argv."""
+    s = {k: ("" if v is None else str(v)) for k, v in answers.items()}
+    if name == "onboard":
+        argv = ["onboard"]
+        if s.get("resume"):
+            argv += ["--resume", s["resume"]]
+        if s.get("linkedin"):
+            argv += ["--linkedin", s["linkedin"]]
+        return argv
+    if name == "tailor":
+        return ["tailor", "resume", "--jd", s.get("jd", ""),
+                "--company", s.get("company", ""), "--role", s.get("role", ""),
+                "--tone", s.get("tone", "confident"),
+                "--length", s.get("length", "one-page")]
+    if name == "track-add":
+        argv = ["track", "add", "--company", s.get("company", ""),
+                "--role", s.get("role", ""), "--status", s.get("status", "saved")]
+        if s.get("source"):
+            argv += ["--notes", f"source: {s['source']}"]
+        return argv
+    if name == "offer-add":
+        argv = ["offer", "add", "--company", s.get("company", ""),
+                "--role", s.get("role", "")]
+        for key, flag in (("base", "--base"), ("bonus", "--bonus-first"),
+                          ("sign_on", "--sign-on"), ("equity", "--equity")):
+            if s.get(key) and s[key] not in ("0", "0.0", ""):
+                argv += [flag, s[key]]
+        if s.get("notes"):
+            argv += ["--notes", s["notes"]]
+        return argv
+    if name == "prep":
+        argv = ["prep", "--company", s.get("company", ""),
+                "--role", s.get("role", "")]
+        if s.get("jd"):
+            argv += ["--jd", s["jd"]]
+        return argv
+    raise ValueError(f"Unknown wizard: {name}")
+
+
+def cmd_wizard(a):
+    from candid import wizards as W
+    from candid import sessions as SE
+    from candid import prefill as PF
+    from candid import interactive as I
+    if not a.name:
+        print("Available wizards:")
+        for n in W.WIZARDS:
+            print(f"  {n}")
+        print("\nRun `python -m candid wizard <name> "
+              "[--resume-from NAME] [--save-as NAME]`.")
+        return
+    if a.name not in W.WIZARDS:
+        sys.exit(f"Unknown wizard {a.name!r}. Choose from: {', '.join(sorted(W.WIZARDS))}.")
+    seed = {}
+    if a.resume_from:
+        saved = SE.load_session(a.resume_from)
+        if saved is None:
+            sys.exit(f"No saved session {a.resume_from!r}.")
+        seed = saved
+        print(f"Resumed session {a.resume_from!r}.")
+    wiz = W.WIZARDS[a.name]()
+    for step in wiz.steps:  # smart defaults surface as pre-filled prompt defaults
+        key = step["key"]
+        if key not in seed:
+            d = PF.get_default(a.name, key)
+            if d:
+                step["default"] = d
+    I.banner(f"{a.name} wizard")
+    try:
+        answers = wiz.run(seed)
+    except W.WizardAborted as e:
+        partial = _jsonable_answers(e.partial or seed)
+        if partial:
+            name = a.save_as or f"{a.name}-partial"
+            SE.save_session(name, partial)
+            print(f"Progress saved as {name!r} — resume with "
+                  f"`python -m candid wizard {a.name} --resume-from {name}`.")
+        else:
+            print("Wizard aborted; nothing to save.")
+        return
+    for k, v in answers.items():  # learn from what the user typed
+        if isinstance(v, (str, int, float)) and str(v).strip():
+            PF.record_history(a.name, k, str(v))
+    if a.save_as:
+        SE.save_session(a.save_as, _jsonable_answers(answers))
+        print(f"Answers saved as session {a.save_as!r}.")
+    argv2 = _wizard_argv(a.name, answers)
+    print("Running: python -m candid " + " ".join(argv2))
+    main(argv2)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -499,6 +831,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {__version__}",
                    help="Show the candid version and exit.")
+    p.add_argument("-i", "--interactive", action="store_true",
+                   help="Prompt for missing arguments instead of erroring "
+                        "(may appear before or after the command)")
     sub = p.add_subparsers(dest="cmd", required=True,
                            title="commands", metavar="<command>",
                            parser_class=CandidParser)
@@ -594,6 +929,8 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track remove 3",
     ])
     t.add_argument("id", type=int)
+    t.add_argument("--yes", action="store_true",
+                   help="Skip the confirmation prompt")
     t = _sub(ts, "stats", "Funnel stats and rates.", [
         "python -m candid track stats",
     ])
@@ -919,6 +1256,39 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     s.set_defaults(func=cmd_linkedin)
 
+    # shell
+    s = _sub(sub, "shell", "Interactive REPL: run commands without retyping `python -m candid`.", [
+        "python -m candid shell",
+    ])
+    s.set_defaults(func=cmd_shell)
+
+    # menu
+    s = _sub(sub, "menu", "Plain-language menu of everything candid can do.", [
+        "python -m candid menu",
+    ])
+    s.set_defaults(func=cmd_menu)
+
+    # triage
+    s = _sub(sub, "triage", "Walk through tracked applications and update them.", [
+        "python -m candid triage",
+    ])
+    s.set_defaults(func=cmd_triage)
+
+    # wizard
+    s = _sub(sub, "wizard", "Step-by-step guided wizards for complex commands.", [
+        "python -m candid wizard",
+        "python -m candid wizard tailor",
+        "python -m candid wizard track-add --save-as acme",
+        "python -m candid wizard tailor --resume-from acme",
+    ])
+    s.add_argument("name", nargs="?", default=None,
+                   help="Wizard to run: onboard, tailor, track-add, offer-add, prep")
+    s.add_argument("--resume-from", default=None, metavar="NAME",
+                   help="Resume answers from a saved session")
+    s.add_argument("--save-as", default=None, metavar="NAME",
+                   help="Save answers as a named session")
+    s.set_defaults(func=cmd_wizard)
+
     return p
 
 
@@ -934,7 +1304,30 @@ def _next_command(args, etype: str) -> str:
 
 
 def main(argv=None):
+    argv = list(argv) if argv is not None else sys.argv[1:]
+    if not argv:
+        # Bare `python -m candid`: guide instead of erroring.
+        from candid import interactive as I
+        if I.is_tty():
+            cmd_menu(None)
+            return
+        # Not a TTY (scripts/pipes): fall through to argparse's usage error.
+    interactive = _interactive_requested(argv)
+    if interactive:
+        try:
+            argv = _maybe_prompt_missing(argv)
+        except Exception as e:
+            etype = type(e).__name__
+            if etype in _EXPECTED_ERRORS:
+                sys.stderr.write(f"Error: {e}\n")
+                sys.stderr.write("Next: pass the missing flags explicitly, or run "
+                                 "`python -m candid menu`.\n")
+                sys.exit(1)
+            raise
+    else:
+        argv = _strip_interactive(argv)
     args = build_parser().parse_args(argv)
+    args.interactive = interactive
     try:
         args.func(args)
     except SystemExit as e:

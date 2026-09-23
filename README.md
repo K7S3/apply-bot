@@ -64,7 +64,38 @@ one ends with the exact next command to run.
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
+| `shell` | Interactive REPL: run commands without retyping `python -m candid`. Builtins (`help`, `quit`, ...), `!` shell escape, persistent history, Ctrl-C safe. |
+| `menu` | Plain-language menu of everything candid can do — pick by number instead of memorizing commands. Works over SSH / pipes too. |
+| `wizard` | Guided step-by-step wizards (`onboard`, `tailor`, `track-add`, `offer-add`, `prep`) with back/quit/review, `--save-as` / `--resume-from` sessions, and smart defaults remembered from last time. |
+| `triage` | Walk through tracked applications one by one and keep/update/archive them. |
+| `-i` / `--interactive` | Append to any command to be prompted for missing arguments instead of erroring. Works before or after the command; refuses to hang without a TTY. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+
+## Interactive mode
+
+Four ways to drive candid without memorizing flags:
+
+```bash
+python -m candid menu            # plain-language menu, pick by number
+python -m candid shell           # REPL: run commands without retyping the prefix
+python -m candid wizard tailor   # guided wizard: back/quit/review, sessions via
+                                 # --save-as NAME / --resume-from NAME
+python -m candid triage          # walk your tracked applications and update them
+python -m candid track add -i    # any command + -i: prompts for missing args
+```
+
+Notes:
+
+- Everything interactive honors `--help`-style escapes: type `quit` any time to
+  back out, and `?` inside a wizard re-prints the help for that step.
+- Prompts pre-fill with your saved defaults (`~/.config/candid/defaults.json`)
+  and what you typed last time — press Enter to accept.
+- Destructive actions (like `track remove`) ask for confirmation and default to
+  **No**. Pass `--yes` to skip the prompt in scripts.
+- Interactive features need a terminal. Piped into a script without `-i`,
+  behavior is unchanged from before (plain flags, no prompts, no hangs).
+- `python -m candid` with no arguments drops you into the menu when a terminal
+  is attached.
 
 ## Job-source coverage (honest)
 
@@ -133,7 +164,11 @@ Rules that hold for every source:
 Everything candid learns about you lives in `candid_data/` (git-ignored):
 `profile.json`, `tracker.json`, `offers.json`, `salary.db`, prep packs,
 tailored output, mock sessions, and `gmail_proposals.json` (pending Gmail
-import proposals). Delete the folder and you're forgotten — including every
+import proposals). Interactive state also lives in the git-ignored config dir
+(`~/.config/candid/`): `defaults.json` (your saved prompt defaults),
+`history.json` (recently typed values used for smart prefill),
+`wizard_sessions/` (saved wizard answers), and `shell_history`.
+Delete the folder and you're forgotten — including every
 proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
