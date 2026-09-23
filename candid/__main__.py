@@ -41,6 +41,7 @@ SUBCOMMANDS = {
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
     "offer": ["add", "list", "compare", "export"],
+    "prep": ["em", "em-questions"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
     "mock": ["list", "coding", "run", "solution", "hint", "ai",
@@ -55,7 +56,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "EMPrepError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +73,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "EMPrepError": "python -m candid prep em-questions --help",
 }
 
 
@@ -270,6 +272,31 @@ def cmd_track(a):
 
 
 def cmd_prep(a):
+    from candid import em_prep as E
+    if getattr(a, "what", None) == "em-questions":
+        if a.json:
+            print(json.dumps(E.bank_as_json(a.topic), indent=2))
+        else:
+            print(E.render_bank_text(a.topic))
+        return
+    if getattr(a, "what", None) == "em":
+        jd = _jd_text(a) if a.jd else ""
+        markdown, path, _sections = E.build_em_pack(
+            _profile(), role=a.role or "Engineering Manager", jd=jd)
+        if a.json:
+            print(json.dumps({"role": a.role or "Engineering Manager",
+                              "path": str(path), "markdown": markdown},
+                             indent=2))
+        else:
+            print(f"EM prep pack saved to {path}\n")
+            print(markdown[:3000])
+            if len(markdown) > 3000:
+                print(f"\n... ({len(markdown) - 3000} more chars in the file)")
+        return
+    if not a.company or not a.role:
+        raise ValueError(
+            "prep needs --company and --role "
+            "(or use `prep em` / `prep em-questions` for EM prep)")
     from candid import prep as P
     jd = _jd_text(a) if a.jd else ""
     markdown, path = P.build_pack(_profile(), a.company, a.role, jd=jd,
@@ -613,12 +640,22 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid prep --company Acme --role \"Data Scientist\"",
         "python -m candid prep --company Acme --role \"Data Scientist\" --jd jd.txt",
         "python -m candid prep --company Acme --role \"Data Scientist\" --app-id 3",
+        "python -m candid prep em --role \"Engineering Manager\"",
+        "python -m candid prep em-questions --topic hiring",
     ])
-    s.add_argument("--company", required=True)
-    s.add_argument("--role", required=True)
+    s.add_argument("what", nargs="?", choices=["em", "em-questions"],
+                   help="em: EM prep pack · em-questions: verified EM question bank")
+    s.add_argument("--company", default="")
+    s.add_argument("--role", default="")
     s.add_argument("--jd", default="", help=JD_HELP)
     s.add_argument("--location", default="")
     s.add_argument("--app-id", type=int, default=None, help="Tracker id to link the pack to")
+    s.add_argument("--topic", default=None,
+                   help="Question-bank topic for `prep em-questions` "
+                        "(hiring, performance_management, org_design, "
+                        "incident_leadership, managing_up, cross_functional)")
+    s.add_argument("--json", action="store_true",
+                   help="Print `prep em` / `prep em-questions` output as JSON")
     s.set_defaults(func=cmd_prep)
 
     # followup
