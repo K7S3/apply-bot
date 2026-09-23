@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "metrics",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "metrics": ["scan", "prompt", "preview", "apply", "coverage",
+                "debt", "audit", "bank"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -486,6 +488,285 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def _parse_metric_answer(raw: str):
+    """Parse a '<number> <unit>' answer line into (number, unit).
+
+    Returns (None, "") when no leading number can be read.
+    """
+    parts = raw.split(None, 1)
+    if not parts:
+        return None, ""
+    try:
+        number = float(parts[0].replace(",", ""))
+    except ValueError:
+        return None, ""
+    unit = parts[1].strip() if len(parts) > 1 else ""
+    return number, unit
+
+
+def _render_opp(item: dict, idx: int) -> None:
+    print(f"{idx}. [{item.get('role', '')} @ {item.get('company', '')}] "
+          f"({item.get('opp_type', '')})")
+    print(f"   {item.get('bullet', '')}")
+    cues = item.get("cues") or []
+    if cues:
+        print(f"   cues: {', '.join(cues)}")
+    for q in item.get("questions") or []:
+        print(f"   ? {q}")
+
+
+def _needed_answer_keys(M, opp_type: str) -> list[str]:
+    """Ordered answer slots the phrasing templates need for an opp type.
+
+    Reads the module's template table (falling back to value/unit) so the
+    prompt collects exactly the named values suggest_phrasings() consumes.
+    """
+    templates = getattr(M, "_TEMPLATES", None) or {}
+    required: set[str] = set()
+    for keys, _tmpl in templates.get(opp_type, []):
+        required |= set(keys)
+    if not required:
+        required = {"value", "unit"}
+    return [k for k in ("before", "after", "value", "pct", "unit")
+            if k in required]
+
+
+def _metrics_prompt(a):
+    from candid import metrics as M
+    prof = _profile()
+    bank = M.load_bank()
+    debt = M.metric_debt(prof, bank)
+    if not debt:
+        print("No metric debt: every bullet either has metrics or is already in the bank.")
+        return
+    print(f"{len(debt)} bullet(s) need numbers.")
+    print("Answer '<number> <unit>' (e.g. '25 percent'), blank to skip a value,")
+    print("'s' to skip the bullet, 'd' to decline it for good.")
+    print("Declined bullets are never rewritten: nothing is invented on your behalf.")
+    for item in debt:
+        role_idx = item.get("role_idx")
+        bullet_idx = item.get("bullet_idx")
+        bullet = item.get("bullet", "")
+        opp_type = item.get("opp_type", "")
+        print(f"\n--- {item.get('role', '')} @ {item.get('company', '')} ---")
+        print(bullet)
+        for q in item.get("questions") or []:
+            print(f"? {q}")
+        answers: dict = {}
+        status = "supplied"
+        for key in _needed_answer_keys(M, opp_type):
+            if key in answers:
+                continue
+            while True:
+                prompt = ("unit (e.g. percent, users, ms): " if key == "unit"
+                          else f"{key} [<number> <unit>]: ")
+                raw = input(prompt).strip()
+                low = raw.lower()
+                if low in ("s", "skip"):
+                    status = "skipped"
+                    break
+                if low in ("d", "decline"):
+                    status = "declined"
+                    break
+                if not raw:
+                    break
+                if key == "unit":
+                    _n, u = _parse_metric_answer(raw)
+                    answers["unit"] = u or raw
+                    break
+                number, u = _parse_metric_answer(raw)
+                if number is None:
+                    print("Could not read a number: use '<number> <unit>', e.g. '25 percent'.")
+                    continue
+                warnings = M.validate_metric(opp_type, number,
+                                             u or answers.get("unit", ""))
+                if warnings:
+                    print("Heads up:")
+                    for w in warnings:
+                        print(f"  - {w}")
+                    conf = input("Keep this answer anyway? [y/n] ").strip().lower()
+                    if conf not in ("y", "yes"):
+                        continue
+                answers[key] = number
+                if u and "unit" not in answers:
+                    answers["unit"] = u
+                break
+            if status in ("skipped", "declined"):
+                break
+        if status == "supplied" and not answers:
+            status = "skipped"
+        M.record_answer(bank, role_idx, bullet_idx, bullet, answers, status=status)
+        entry = bank[M.bank_key(role_idx, bullet_idx)]
+        entry["role"] = item.get("role", "")
+        entry["company"] = item.get("company", "")
+        entry["opp_type"] = opp_type
+        entry["phrasings"] = (M.suggest_phrasings(bullet, opp_type, answers)
+                              if status == "supplied" and answers else [])
+        entry["chosen"] = None
+        print(f"Saved [{status}].")
+    M.save_bank(bank)
+    print(f"\nBank updated: {len(bank)} entr(ies). Next: `python -m candid metrics preview`.")
+
+
+def _metrics_preview(a):
+    import difflib
+    from candid import metrics as M
+    bank = M.load_bank()
+    keys = a.keys or [k for k, e in bank.items()
+                     if (e.get("phrasings") or []) and e.get("chosen") is None]
+    if not keys:
+        print("Nothing to preview: no bank entries with unaccepted phrasings.")
+        print("Run `python -m candid metrics prompt` first, or pass explicit keys.")
+        return
+    for key in keys:
+        entry = bank.get(key)
+        if entry is None:
+            print(f"Unknown bank key: {key}")
+            continue
+        phrasings = entry.get("phrasings") or []
+        if not phrasings:
+            print(f"{key}: no phrasings yet (run `metrics prompt` first).")
+            continue
+        new = phrasings[0]
+        print(f"\n=== {key}: {entry.get('role', '')} @ {entry.get('company', '')} ===")
+        diff = difflib.unified_diff(
+            entry.get("bullet", "").splitlines(), new.splitlines(),
+            fromfile="current", tofile="suggested", lineterm="")
+        print("\n".join(diff))
+        ans = input("Accept this phrasing? [y/n] ").strip().lower()
+        if ans in ("y", "yes"):
+            entry["chosen"] = 0
+            entry["status"] = "accepted"
+            print("Accepted.")
+        else:
+            print("Left unchanged.")
+    M.save_bank(bank)
+    print("\nBank updated. Apply with `python -m candid metrics apply`.")
+
+
+def _metrics_apply(a):
+    import time
+    from candid import config as C
+    from candid import metrics as M
+    prof = _profile()
+    bank = M.load_bank()
+    accepted = [(k, e) for k, e in bank.items()
+                if e.get("chosen") is not None and (e.get("phrasings") or [])]
+    if not accepted:
+        print("Nothing to apply: no accepted phrasings. Run `metrics preview` first.")
+        return
+    stamp = time.strftime("%Y%m%d%H%M%S")
+    backup = C.PROFILE_PATH.with_name(f"profile.json.bak.{stamp}")
+    backup.write_text(C.PROFILE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    for key, entry in accepted:
+        new_bullet = entry["phrasings"][entry["chosen"]]
+        prof = M.apply_rewrite(prof, entry.get("role_idx"),
+                               entry.get("bullet_idx"), new_bullet)
+        entry["status"] = "applied"
+    C.PROFILE_PATH.write_text(json.dumps(prof, indent=2, ensure_ascii=False) + "\n",
+                              encoding="utf-8")
+    M.save_bank(bank)
+    print(f"Applied {len(accepted)} rewrite(s). Backup saved to {backup}.")
+
+
+def cmd_metrics(a):
+    from candid import metrics as M
+    if a.action == "scan":
+        opps = M.scan_bullets(_profile())
+        if a.json:
+            print(json.dumps(opps, indent=2, default=str))
+            return
+        if not opps:
+            print("No metric opportunities: every bullet already carries numbers.")
+            return
+        print(f"{len(opps)} metric opportunit(ies):")
+        for i, item in enumerate(opps, 1):
+            _render_opp(item, i)
+    elif a.action == "prompt":
+        _metrics_prompt(a)
+    elif a.action == "preview":
+        _metrics_preview(a)
+    elif a.action == "apply":
+        _metrics_apply(a)
+    elif a.action == "coverage":
+        cov = M.metric_coverage(_profile())
+        if a.json:
+            print(json.dumps(cov, indent=2, default=str))
+            return
+        total = cov.get("total", 0)
+        with_m = cov.get("with_metrics", 0)
+        pct = cov.get("pct", 0)
+        print(f"Bullets with metrics: {with_m}/{total} ({pct}%)")
+        per = cov.get("per_role") or []
+        if isinstance(per, dict):
+            items = per.items()
+        elif isinstance(per, list):
+            items = [(r.get("role", "?") if isinstance(r, dict) else r, r)
+                     for r in per]
+        else:
+            items = []
+        for role, detail in items:
+            if isinstance(detail, dict):
+                print(f"  {role}: {detail.get('with_metrics', '?')}/"
+                      f"{detail.get('total', '?')}")
+            else:
+                print(f"  {role}: {detail}")
+    elif a.action == "debt":
+        bank = M.load_bank()
+        debt = M.metric_debt(_profile(), bank)
+        if a.json:
+            print(json.dumps(debt, indent=2, default=str))
+            return
+        if not debt:
+            print("No metric debt.")
+            return
+        print(f"{len(debt)} bullet(s) still missing metrics or bank answers:")
+        for i, item in enumerate(debt, 1):
+            _render_opp(item, i)
+    elif a.action == "audit":
+        result = M.audit_no_invention(_profile(), M.load_bank())
+        violations = (result.get("violations", []) if isinstance(result, dict)
+                      else (result or []))
+        if not violations:
+            print("Audit clean: no invented metrics found.")
+            return
+        print(f"{len(violations)} violation(s):")
+        for v in violations:
+            print(f"  - {v}" if isinstance(v, str) else f"  - {json.dumps(v)}")
+        sys.exit(1)
+    elif a.action == "bank":
+        bank = M.load_bank()
+        if a.bank_action == "list":
+            if a.json:
+                print(json.dumps(bank, indent=2, default=str))
+                return
+            if not bank:
+                print("Metric bank is empty.")
+                return
+            for key, entry in bank.items():
+                print(f"{key}: {entry.get('role', '')} @ {entry.get('company', '')} "
+                      f"[{entry.get('status', '?')}]")
+                answers = entry.get("answers") or {}
+                if isinstance(answers, dict):
+                    for ak, av in answers.items():
+                        print(f"    {ak}: {av}")
+                elif isinstance(answers, list):
+                    for ans in answers:
+                        if isinstance(ans, dict):
+                            print(f"    answer: {ans.get('number')} {ans.get('unit')}")
+                        else:
+                            print(f"    answer: {ans}")
+                if entry.get("chosen") is not None:
+                    print(f"    chosen phrasing #{entry['chosen']}")
+        elif a.bank_action == "remove":
+            if a.key not in bank:
+                sys.exit(f"No bank entry {a.key!r}. "
+                         "See `python -m candid metrics bank list` for keys.")
+            del bank[a.key]
+            M.save_bank(bank)
+            print(f"Removed bank entry {a.key}.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -918,6 +1199,66 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # metrics
+    s = _sub(sub, "metrics", "Find bullets missing metrics and fill them in.", [
+        "python -m candid metrics scan",
+        "python -m candid metrics prompt",
+        "python -m candid metrics preview",
+        "python -m candid metrics apply",
+        "python -m candid metrics coverage",
+    ])
+    ms = _nested(s, dest="action")
+    t = _sub(ms, "scan", "List bullets that could use a metric.", [
+        "python -m candid metrics scan",
+        "python -m candid metrics scan --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the opportunities as JSON (for scripting)")
+    t = _sub(ms, "prompt", "Interactively answer metric questions; answers go to the bank.", [
+        "python -m candid metrics prompt",
+    ])
+    t = _sub(ms, "preview", "Preview phrasing diffs and accept them one by one.", [
+        "python -m candid metrics preview",
+        "python -m candid metrics preview 0:1",
+    ])
+    t.add_argument("keys", nargs="*", default=[],
+                   help="Bank keys to preview (default: all unaccepted)")
+    t = _sub(ms, "apply", "Write accepted rewrites into profile.json (backed up first).", [
+        "python -m candid metrics apply",
+    ])
+    t = _sub(ms, "coverage", "How many bullets already carry metrics.", [
+        "python -m candid metrics coverage",
+        "python -m candid metrics coverage --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the coverage report as JSON (for scripting)")
+    t = _sub(ms, "debt", "Bullets still missing metrics or bank answers.", [
+        "python -m candid metrics debt",
+        "python -m candid metrics debt --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the debt list as JSON (for scripting)")
+    t = _sub(ms, "audit", "Check that no metrics were invented (exits non-zero on violations).", [
+        "python -m candid metrics audit",
+    ])
+    t = _sub(ms, "bank", "Inspect or edit the metric bank.", [
+        "python -m candid metrics bank list",
+        "python -m candid metrics bank list --json",
+        "python -m candid metrics bank remove 0:1",
+    ])
+    bs = _nested(t, dest="bank_action")
+    b = _sub(bs, "list", "List bank entries.", [
+        "python -m candid metrics bank list",
+        "python -m candid metrics bank list --json",
+    ])
+    b.add_argument("--json", action="store_true",
+                   help="Print the bank as JSON (for scripting)")
+    b = _sub(bs, "remove", "Remove a bank entry.", [
+        "python -m candid metrics bank remove 0:1",
+    ])
+    b.add_argument("key", help="Bank entry key (see `metrics bank list`)")
+    s.set_defaults(func=cmd_metrics)
 
     return p
 
