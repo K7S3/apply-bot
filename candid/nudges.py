@@ -164,8 +164,40 @@ def pending_nudges(apps: list[dict] | None = None,
             except Exception:
                 pass  # date parsing must never break the nudge list
 
-    order = {"interview_soon": 0, "follow_up_due": 1, "quiet_applied": 2,
-             "stale_saved": 3}
+        # postdoc application deadline approaching (worker-2, academic track)
+        try:
+            if T.kind_of(a) == "postdoc" and status in ("saved", "applied"):
+                d = T.parse_deadline(a.get("deadline", ""))
+                if d is not None:
+                    delta = (d - today).days
+                    if 0 <= delta <= 14:
+                        when = "today" if delta == 0 else (
+                            "tomorrow" if delta == 1 else f"in {delta} days")
+                        nudges.append({
+                            "kind": "postdoc_deadline",
+                            "app_id": a["id"],
+                            "company": company,
+                            "role": role,
+                            "message": (
+                                f"Postdoc application deadline {when} "
+                                f"({d.isoformat()}) for {role} @ {company}."
+                            ),
+                            "action": "Draft research statement + email the PI",
+                            "command": f"python -m candid track update {a['id']} --status applied",
+                        })
+        except Exception:
+            pass  # deadline parsing must never break the nudge list
+
+    # upcoming fellowship deadlines (worker-2 hook; pure data, offline-safe)
+    try:
+        from candid import fellowships as _F
+        for n in _F.fellowship_deadlines(days=30, today=today):
+            nudges.append(n)
+    except Exception:
+        pass
+
+    order = {"interview_soon": 0, "postdoc_deadline": 1, "follow_up_due": 2,
+             "fellowship_deadline": 3, "quiet_applied": 4, "stale_saved": 5}
     nudges.sort(key=lambda n: order.get(n["kind"], 9))
     return nudges
 

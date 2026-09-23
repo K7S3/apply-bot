@@ -164,7 +164,11 @@ class NudgeTest(unittest.TestCase):
                  "status": "applied",
                  "date_updated": "2026-09-21"}]
         ns = N.pending_nudges(apps, today=date(2026, 9, 22))
-        self.assertEqual(ns, [])
+        # batch-19: global fellowship/postdoc deadline nudges are time-based,
+        # not app-driven; "quiet" means no app-driven nudges.
+        app_ns = [n for n in ns
+                  if n["kind"] not in ("fellowship_deadline", "postdoc_deadline")]
+        self.assertEqual(app_ns, [])
 
 
 # ---------------------------------------------------------------------------

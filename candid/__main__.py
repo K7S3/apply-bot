@@ -55,6 +55,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "FeedsError", "LabsError",
     "ValueError",
 }
 
@@ -229,14 +230,19 @@ def cmd_track(a):
     from candid import tracker as T
     if a.what == "add":
         rec = T.add(a.company, a.role, jd_link=a.jd_link or "", status=a.status,
-                    notes=a.notes or "")
+                    notes=a.notes or "", kind=getattr(a, "kind", "industry"),
+                    pi=getattr(a, "pi", "") or "", lab=getattr(a, "lab", "") or "",
+                    funding_source=getattr(a, "funding_source", "") or "",
+                    deadline=getattr(a, "deadline", "") or "",
+                    start_date=getattr(a, "start_date", "") or "")
         if rec.get("duplicate"):
             print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
                   f"[{rec['status']}] — not duplicated.")
         else:
             print(f"Added application #{rec['id']}: {rec['role']} @ {rec['company']} [{rec['status']}]")
     elif a.what == "list":
-        apps = T.list_apps(status=a.status, company=a.company)
+        apps = T.list_apps(status=a.status, company=a.company,
+                           kind=getattr(a, "kind", None))
         if a.json:
             print(json.dumps(apps, indent=2, default=str))
             return
@@ -247,7 +253,13 @@ def cmd_track(a):
                  if len(apps) > limit else ""))
         print(T.render_list(shown))
     elif a.what == "update":
-        rec = T.update(a.id, status=a.status, notes=a.notes)
+        rec = T.update(a.id, status=a.status, notes=a.notes,
+                       kind=getattr(a, "kind", None),
+                       pi=getattr(a, "pi", None) or None,
+                       lab=getattr(a, "lab", None) or None,
+                       funding_source=getattr(a, "funding_source", None) or None,
+                       deadline=getattr(a, "deadline", None) or None,
+                       start_date=getattr(a, "start_date", None) or None)
         print(f"Updated #{rec['id']}: status={rec['status']}")
         if rec["status"] == "selected_for_interview":
             print("\n🎯 Interview! Generate a prep pack with:")
@@ -329,6 +341,8 @@ def cmd_negotiate(a):
 def cmd_salary(a):
     from candid import salary as S
     if a.what == "lookup":
+        if S.handle_postdoc_lookup(a):  # batch-19: --postdoc NIH NRSA scale
+            return
         result = S.lookup(company=a.company or "", title=a.title or "",
                           location=a.location or "")
         if a.json:
@@ -606,6 +620,8 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid track export-csv tracker.csv",
     ])
     t.add_argument("dest", help="Destination CSV file path")
+    from candid import tracker as _T19
+    _T19.add_parsers(ts)  # batch-19: postdoc flags on track add/list/update
     s.set_defaults(func=cmd_track)
 
     # prep
@@ -747,6 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd", default=""); t.add_argument("--text", default="")
     t.add_argument("--location", default="")
+    from candid import salary as _S19
+    _S19.add_parsers(ss)  # batch-19: --postdoc / --years on salary lookup
     s.set_defaults(func=cmd_salary)
 
     # mock
@@ -918,6 +936,22 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # batch-19: academic track (university/research job boards)
+    from candid import academic_feeds as _AF19
+    from candid import fellowships as _F19
+    from candid import labs as _L19
+    from candid import academic_calendar as _AC19
+    from candid import academic_cv as _ACV19
+    from candid import research_statement as _RS19
+    from candid import academic_digest as _AD19
+    _AF19.add_parsers(sub)
+    _F19.add_parsers(sub)
+    _L19.add_parsers(sub)
+    _AC19.add_parsers(sub)
+    _ACV19.add_parsers(sub)
+    _RS19.add_parsers(sub)
+    _AD19.add_parsers(sub)
 
     return p
 

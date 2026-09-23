@@ -137,6 +137,46 @@ ADAPTERS: dict[str, object] = {
 
 
 # ---------------------------------------------------------------------------
+# opt-in academic / research feed adapters (candid.academic_feeds)
+#
+# These live in EXTRA_ADAPTERS rather than ADAPTERS so the default
+# ``jobs curate`` run stays fast and low-noise. Opt in per run:
+#   python -m candid jobs curate --role "Postdoc" --sources naturecareers academic
+# The "academic" source fetches every feed in the user's registry
+# (``python -m candid feeds list``); the rest are built-in research boards.
+# ---------------------------------------------------------------------------
+
+from candid import academic_feeds as _AF  # noqa: E402  (import-safe: stdlib + config only)
+
+
+def _wrap_research_adapter(key: str):
+    label = _AF.RESEARCH_SOURCES[key][0]
+
+    def _run() -> list[dict]:
+        try:
+            return _AF.adapt_research_feed(key)
+        except _AF.FeedsError as exc:
+            raise JobsError(f"{label}: {exc}") from exc
+
+    _run.__name__ = f"_adapt_{key}"
+    return _run
+
+
+def _adapt_academic() -> list[dict]:
+    """User's registry feeds (``python -m candid feeds add ...``)."""
+    try:
+        return _AF.adapt_academic_registry()
+    except _AF.FeedsError as exc:
+        raise JobsError(f"academic feeds: {exc}") from exc
+
+
+EXTRA_ADAPTERS: dict[str, object] = {
+    **{key: _wrap_research_adapter(key) for key in _AF.RESEARCH_SOURCES},
+    "academic": _adapt_academic,
+}
+
+
+# ---------------------------------------------------------------------------
 # filtering / ranking / scoring
 # ---------------------------------------------------------------------------
 
@@ -365,15 +405,17 @@ def curate(profile: dict, role: str, location: str = "", remote: bool = False,
     from candid import salary as S
 
     wanted = sources or list(ADAPTERS)
-    unknown = [s for s in wanted if s not in ADAPTERS]
+    all_sources = {**ADAPTERS, **EXTRA_ADAPTERS}
+    unknown = [s for s in wanted if s not in all_sources]
     if unknown:
-        raise JobsError(f"Unknown source(s): {', '.join(unknown)}. Available: {', '.join(ADAPTERS)}")
+        raise JobsError(f"Unknown source(s): {', '.join(unknown)}. "
+                        f"Available: {', '.join(all_sources)}")
 
     raw: list[dict] = []
     errors: list[str] = []
     for name in wanted:
         try:
-            raw.extend(ADAPTERS[name]())  # type: ignore[operator]
+            raw.extend(all_sources[name]())  # type: ignore[operator]
         except JobsError as e:
             errors.append(str(e))
 

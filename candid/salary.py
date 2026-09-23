@@ -459,3 +459,156 @@ def render_title_aggregation(agg: dict) -> str:
         lines.append(f"  • {c['company']}: ${c['median']:,.0f}/yr "
                      f"({c['rows']} row{'s' if c['rows'] != 1 else ''})")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# NIH NRSA postdoc stipends (batch-19, worker 5)
+#
+# Committed static dataset: candid/data/nrsa_stipends.json, verified against
+# NIH Guide Notice NOT-OD-26-044 (FY2026) on 2026-09-22. This is the NIH NRSA
+# stipend scale, NOT a market pay rate: it answers "what does NIH pay a
+# postdoc at N years of experience", not "what do postdocs earn".
+# ---------------------------------------------------------------------------
+
+import json as _json
+from functools import lru_cache as _lru_cache
+
+NRSA_DATA_PATH = Path(__file__).resolve().parent / "data" / "nrsa_stipends.json"
+
+
+@_lru_cache(maxsize=1)
+def _load_nrsa_data() -> dict:
+    """Load the committed NRSA stipend dataset (cached)."""
+    try:
+        data = _json.loads(NRSA_DATA_PATH.read_text(encoding="utf-8"))
+    except (OSError, _json.JSONDecodeError) as e:
+        raise SalaryError(f"NRSA stipend data unavailable: {e}")
+    levels = data.get("levels")
+    if not isinstance(levels, list) or not levels:
+        raise SalaryError("NRSA stipend data is malformed: no 'levels' list.")
+    return data
+
+
+def nrsa_lookup(years: int) -> dict:
+    """Look up the NIH NRSA postdoctoral stipend for N years of experience.
+
+    NIH defines 8 levels (0 through "7 or more"), so years >= 7 all map to
+    the top level. Returns {years, years_label, stipend_annual,
+    stipend_monthly, fiscal_year, notice, source, source_url, verified,
+    note}. Raises SalaryError for negative / non-integer input.
+    """
+    try:
+        y = int(years)
+    except (TypeError, ValueError):
+        raise SalaryError(
+            f"Years of experience must be an integer, got {years!r}.")
+    if isinstance(years, bool) or y < 0:
+        raise SalaryError(
+            f"Years of experience must be a non-negative integer, got {years!r}.")
+    data = _load_nrsa_data()
+    levels = data["levels"]
+    # levels are ordered by years_min ascending; years >= 7 -> last ("7+") level
+    level = levels[0]
+    for lv in levels:
+        if y >= lv["years_min"]:
+            level = lv
+        else:
+            break
+    return {
+        "years": y,
+        "years_label": level["years"],
+        "stipend_annual": level["annual"],
+        "stipend_monthly": level["monthly"],
+        "fiscal_year": data.get("fiscal_year", ""),
+        "notice": data.get("notice", ""),
+        "source": data.get("source", "NIH"),
+        "source_url": data.get("source_url", ""),
+        "verified": bool(data.get("verified", False)),
+        "note": ("NIH NRSA stipend scale, not a market pay rate. "
+                 "Many institutions pay postdocs above these floors."),
+    }
+
+
+def render_nrsa(result: dict) -> str:
+    """Render one nrsa_lookup result."""
+    lines = [
+        f"NIH NRSA postdoc stipend ({result['fiscal_year']}, {result['notice']}):",
+        f"  {result['years_label']} year{'s' if result['years_label'] != '1' else ''} "
+        f"of experience: ${result['stipend_annual']:,}/yr "
+        f"(${result['stipend_monthly']:,}/mo)",
+        "",
+        f"Note: {result['note']}",
+        f"Source: {result['source']} {result['notice']} - {result['source_url']}",
+    ]
+    return "\n".join(lines)
+
+
+def render_nrsa_table() -> str:
+    """Render the full NRSA postdoc stipend table."""
+    data = _load_nrsa_data()
+    lines = [
+        f"NIH NRSA postdoc stipend table ({data.get('fiscal_year')}, "
+        f"{data.get('notice')}):",
+        f"  {'Yrs exp':<8}{'Annual':>10}{'Monthly':>10}",
+    ]
+    for lv in data["levels"]:
+        annual = "$" + f"{lv['annual']:,}"
+        monthly = "$" + f"{lv['monthly']:,}"
+        lines.append(f"  {lv['years']:<8}{annual:>10}{monthly:>10}")
+    lines += [
+        "",
+        "Note: NIH NRSA stipend scale, not a market pay rate. "
+        "Many institutions pay postdocs above these floors.",
+        f"Source: {data.get('source')} {data.get('notice')} - "
+        f"{data.get('source_url')}",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# CLI surface (wired by the coordinator in __main__.py)
+# ---------------------------------------------------------------------------
+
+def add_parsers(salary_subparsers) -> None:
+    """Add --postdoc / --years to the existing `salary lookup` subparser.
+
+    Contract for __main__.py: after building the salary subcommands, call
+    ``S.add_parsers(salary_subparsers)`` where ``salary_subparsers`` is the
+    _SubParsersAction created for the ``salary`` command (the one holding the
+    ``lookup`` / ``import-lca`` / ``parse-range`` parsers). No new subcommand
+    is added; the flags extend ``salary lookup``.
+    """
+    lookup_p = None
+    choices = getattr(salary_subparsers, "choices", None)
+    if isinstance(choices, dict):
+        lookup_p = choices.get("lookup")
+    if lookup_p is None:
+        return
+    lookup_p.add_argument(
+        "--postdoc", action="store_true",
+        help="Look up the NIH NRSA postdoc stipend scale instead of market pay data.")
+    lookup_p.add_argument(
+        "--years", type=int, default=None, metavar="N",
+        help="Years of postdoctoral experience (0-7+; 7 or more maps to the top "
+             "level). Omit --years to print the full stipend table.")
+
+
+def handle_postdoc_lookup(a) -> bool:
+    """One-line hook for cmd_salary's ``lookup`` branch.
+
+    If --postdoc was passed, print the NRSA stipend (single level with
+    --years N, full table without) and return True so the caller can skip the
+    market-data lookup. Returns False when --postdoc was not passed.
+
+    Coordinator wiring inside cmd_salary, at the top of the lookup branch:
+        if S.handle_postdoc_lookup(a):
+            return
+    """
+    if not getattr(a, "postdoc", False):
+        return False
+    years = getattr(a, "years", None)
+    if years is None:
+        print(render_nrsa_table())
+    else:
+        print(render_nrsa(nrsa_lookup(years)))
+    return True
