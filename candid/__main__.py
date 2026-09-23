@@ -11,6 +11,11 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid master init --resume resume.md
+    python -m candid bullets score resume.md
+    python -m candid linkedin optimize
+    python -m candid narrative
+    python -m candid redteam --resume resume.md
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -32,7 +37,9 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "master", "bullets",
+    "narrative", "narrative-arc", "pitch", "references",
+    "networking-brief", "portfolio", "redteam", "pivot",
 ]
 
 SUBCOMMANDS = {
@@ -47,7 +54,12 @@ SUBCOMMANDS = {
              "behavioral", "design"],
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
-    "linkedin": ["import", "guide"],
+    "linkedin": ["import", "guide", "optimize", "polish-about"],
+    "master": ["init", "show", "update", "diff", "lineage"],
+    "bullets": ["score", "reword"],
+    "references": ["add", "list", "remove", "sheet"],
+    "portfolio": ["describe", "section"],
+    "pivot": ["suggest", "reframe", "plan", "brief"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +67,9 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "MasterResumeError", "BulletScorerError", "LinkedInOptimizeError",
+    "NarrativeError", "ReferencesError", "NetworkingError",
+    "PortfolioError", "RedTeamError", "PivotError",
     "ValueError",
 }
 
@@ -72,6 +87,15 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "MasterResumeError": "python -m candid master --help",
+    "BulletScorerError": "python -m candid bullets --help",
+    "LinkedInOptimizeError": "python -m candid linkedin optimize --help",
+    "NarrativeError": "python -m candid narrative --help",
+    "ReferencesError": "python -m candid references --help",
+    "NetworkingError": "python -m candid networking-brief --help",
+    "PortfolioError": "python -m candid portfolio --help",
+    "RedTeamError": "python -m candid redteam --help",
+    "PivotError": "python -m candid pivot --help",
 }
 
 
@@ -484,6 +508,284 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+    elif a.what == "optimize":
+        _cmd_linkedin_optimize(a)
+    elif a.what == "polish-about":
+        _cmd_linkedin_polish_about(a)
+
+
+def cmd_master(a):
+    from candid import master_resume as M
+    if a.what == "init":
+        meta = M.init_master(resume_path=a.resume, note=a.note or "")
+        print(f"Master resume initialized: {meta['version_id']} "
+              f"({meta.get('note', '')}) — source: {meta['source']}")
+        print("Tailored variants are derived from this master and traced back to it.")
+    elif a.what == "show":
+        cur = M.get_master()
+        print(f"Master resume {cur['version_id']} — {cur.get('note', '')}")
+        print()
+        print(cur["markdown"])
+    elif a.what == "update":
+        with open(a.file, encoding="utf-8") as f:
+            text = f.read()
+        meta = M.update_master(text, note=a.note or "")
+        if meta.get("unchanged"):
+            print(f"No changes — master is still {meta['version_id']}.")
+        else:
+            print(f"Master updated to {meta['version_id']} "
+                  f"({meta.get('note', '')}). History kept under master_resume/versions/.")
+    elif a.what == "diff":
+        print(M.diff_versions(a.v1, a.v2))
+    elif a.what == "lineage":
+        lin = M.lineage(a.variant_id)
+        print(f"Variant {lin.get('variant_id', a.variant_id)} was derived from "
+              f"master {lin.get('master_version', '?')} "
+              f"({lin.get('kind', '')}, {lin.get('recorded_at', '')}).")
+
+
+def cmd_bullets(a):
+    from candid import bullet_scorer as B
+    if a.what == "score":
+        res = B.score_file(a.file)
+        print(f"Bullet score: {res['overall']}/100 across {res['bullet_count']} bullets\n")
+        for s in res["bullets"]:
+            print(f"[{s['score']:>3}] {s['bullet']}")
+            for fl in s["flags"]:
+                print(f"       - {fl['type']}: {fl.get('detail', '')}")
+        if res["fixes"]:
+            print("\nFix first (lowest score first):")
+            for fx in res["fixes"]:
+                print(f"  [{fx['score']}] {fx['bullet']}")
+                line = f"    issue: {fx['top_issue']}"
+                if fx.get("detail"):
+                    line += f" — {fx['detail']}"
+                print(line)
+                if fx.get("question"):
+                    print(f"    ask yourself: {fx['question']}")
+    else:
+        prof = _profile()
+        r = B.suggest_reword(a.text, prof.get("skills") or None)
+        print(f"Original:  {r['original']}")
+        print(f"Reworded:  {r['reworded']}")
+        if not r["changed"]:
+            print("(no weak lead-in found — bullet left as-is)")
+        for n in r["notes"]:
+            print(f"  note: {n}")
+        for q in r["questions"]:
+            print(f"  question: {q}")
+        print("Grounded: only facts already in the bullet were used — nothing invented.")
+
+
+def _cmd_linkedin_optimize(a):
+    from candid import linkedin_optimize as L
+    report = L.full_report(_profile(), open_to_work=a.open_to_work)
+    if a.out:
+        with open(a.out, "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"LinkedIn optimization report saved to {a.out}")
+    else:
+        print(report)
+
+
+def _cmd_linkedin_polish_about(a):
+    from candid import linkedin_optimize as L
+    if a.file:
+        with open(a.file, encoding="utf-8") as f:
+            text = f.read()
+    elif a.text:
+        text = a.text
+    else:
+        sys.exit("Provide --text or --file.\n"
+                 "Next: run `python -m candid linkedin polish-about --help`.")
+    res = L.polish_about(text, _profile())
+    print(res["polished"])
+    if a.voice_notes:
+        print("\nVoice preserved:")
+        for v in res["voice_notes"]:
+            print(f"  - {v}")
+    if a.changes:
+        print("\nChanges made:")
+        for c in res["changes"]:
+            print(f"  - {c}")
+
+
+def cmd_narrative(a):
+    from candid import narrative as N
+    print(N.build_narrative(_profile(), length=a.length))
+
+
+def cmd_narrative_arc(a):
+    from candid import narrative as N
+    print(N.story_arc(_profile()))
+
+
+def cmd_pitch(a):
+    from candid import narrative as N
+    print(N.elevator_pitch(_profile(), audience=a.audience))
+
+
+def cmd_references(a):
+    from candid import references as R
+    if a.what == "add":
+        ref = R.add_reference(a.name, a.relationship,
+                              contact=a.contact or "", notes=a.notes or "")
+        print(f"Added reference: {ref['name']} ({ref['relationship']})")
+    elif a.what == "list":
+        refs = R.list_references()
+        if not refs:
+            print("No references stored yet. "
+                  "Add one: python -m candid references add --help")
+            return
+        for r in refs:
+            line = f"- {r['name']} ({r['relationship']})"
+            if r.get("contact"):
+                line += f" — {r['contact']}"
+            print(line)
+            if r.get("notes"):
+                print(f"    notes: {r['notes']}")
+    elif a.what == "remove":
+        R.remove_reference(a.name)
+        print(f"Removed reference: {a.name}")
+    elif a.what == "sheet":
+        prof = _profile()
+        name = prof.get("name") or "Your Name"
+        print(R.render_sheet(name, output=a.format, on_request=a.on_request))
+
+
+def cmd_networking_brief(a):
+    from candid import networking as W
+    roles = [r.strip() for r in (a.roles or "").split(",") if r.strip()] or None
+    path = W.save_brief(_profile(), target_roles=roles, ask=a.ask or None,
+                        path=a.out or None)
+    print(f"Networking brief saved to {path}")
+    if roles:
+        print(f"Target roles: {', '.join(roles)}")
+    else:
+        print("(target roles inferred from your profile — pass --roles to set them)")
+
+
+def _render_repo_description(d: dict):
+    print(f"# {d['headline']}")
+    for b in d["bullets"]:
+        print(f"- {b}")
+    if d.get("caveat"):
+        print(f"\n⚠️  {d['caveat']}")
+
+
+def cmd_portfolio(a):
+    from candid import portfolio as P
+    repos = P.load_repos(a.repos)
+    if a.what == "describe":
+        if a.name:
+            picked = [r for r in repos
+                      if r.get("name", "").lower() == a.name.lower()]
+            if not picked:
+                sys.exit(f"No repo named {a.name!r} in {a.repos}.\n"
+                         "Next: run `python -m candid portfolio describe --help`.")
+            _render_repo_description(P.describe_repo(picked[0]))
+        else:
+            for r in repos:
+                _render_repo_description(P.describe_repo(r))
+                print()
+    else:
+        prof = _profile()
+        ranked = P.rank_repos(repos, prof.get("skills") or [])
+        print(P.portfolio_section(ranked, top_n=a.top_n))
+
+
+def cmd_redteam(a):
+    from candid import redteam as RT
+    if a.resume:
+        with open(a.resume, encoding="utf-8") as f:
+            src = f.read()
+    else:
+        src = _profile()
+    findings = RT.review(src)
+    print(RT.hiring_manager_summary(findings))
+    if findings:
+        print("\nPrioritized fixes:")
+        for fx in RT.prioritized_fixes(findings):
+            print(f"  [{fx['severity']}] {fx['category']}: {fx['fix']}")
+            print(f"       in: {fx['quote'][:120]}")
+    else:
+        print("\nNo issues found — this reads clean to a skeptical eye.")
+
+
+def _render_pivot_reframe(r: dict) -> str:
+    lines = [f"# Reframed toward: {r['target_title']}", "",
+             r["honest_read"], "",
+             "## Reframed summary", "", r["reframed_summary"], "",
+             "## Skills to foreground", ""]
+    for s in r["skills_to_foreground"]:
+        lines.append(f"- {s}")
+    lines += ["", "## Roles (bullets reordered by relevance, verbatim)", ""]
+    for role in r["roles"]:
+        lines.append(f"### {role['title']} — {role['company']} ({role['dates']})")
+        lines.append(f"> {role['angle']}")
+        for b in role["bullets"]:
+            lines.append(f"- {b}")
+        lines.append("")
+    lines += ["## Credibility gaps", ""]
+    for g in r["credibility_gaps"]:
+        lines.append(f"- {g}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_pivot_plan(p: dict) -> str:
+    lines = [f"# 30/60/90-day plan: {p['target_title']}", "",
+             p["honest_read"], "",
+             "## Gaps to close", ""]
+    for g in p["gaps"]:
+        lines.append(f"- {g}")
+    lines += ["", "## Steps", ""]
+    for s in p["steps"]:
+        lines.append(f"### Day {s['phase']}: {s['action']}")
+        lines.append(f"Deliverable: {s['outcome']} (addresses: {s['addresses']})")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def cmd_pivot(a):
+    from candid import pivot as PV
+    prof = _profile()
+    if a.what == "suggest":
+        sug = PV.suggest_pivots(prof, n=a.n)
+        if not sug:
+            print("No adjacent pivots found — try a broader skill set in your profile.")
+            return
+        for s in sug:
+            print(f"- {s['target']} ({s['overlap_pct']}% skill overlap)")
+            if s["transferable"]:
+                print(f"    transferable: {', '.join(s['transferable'])}")
+            if s["gaps"]:
+                print(f"    gaps: {', '.join(s['gaps'])}")
+            if s["why"]:
+                print(f"    why: {s['why']}")
+    elif a.what == "reframe":
+        out = _render_pivot_reframe(PV.reframe(prof, a.target))
+        if a.out:
+            with open(a.out, "w", encoding="utf-8") as f:
+                f.write(out)
+            print(f"Reframe saved to {a.out}")
+        else:
+            print(out)
+    elif a.what == "plan":
+        out = _render_pivot_plan(PV.pivot_plan(prof, a.target))
+        if a.out:
+            with open(a.out, "w", encoding="utf-8") as f:
+                f.write(out)
+            print(f"Pivot plan saved to {a.out}")
+        else:
+            print(out)
+    elif a.what == "brief":
+        out = PV.pivot_brief(prof, a.target)
+        if a.out:
+            with open(a.out, "w", encoding="utf-8") as f:
+                f.write(out)
+            print(f"Pivot brief saved to {a.out}")
+        else:
+            print(out)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -917,7 +1219,199 @@ def build_parser() -> argparse.ArgumentParser:
     t = _sub(ls, "guide", "How to download your LinkedIn data export.", [
         "python -m candid linkedin guide",
     ])
+    t = _sub(ls, "optimize", "Headline variants, about draft, experience rewrite, keyword gaps.", [
+        "python -m candid linkedin optimize",
+        "python -m candid linkedin optimize --open-to-work",
+        "python -m candid linkedin optimize --out linkedin-report.md",
+    ])
+    t.add_argument("--open-to-work", action="store_true",
+                   help="Include an 'open to work' line in the about draft")
+    t.add_argument("--out", default="",
+                   help="Write the full report to a file instead of stdout")
+    t = _sub(ls, "polish-about", "Clean up an existing about section, keeping your voice.", [
+        'python -m candid linkedin polish-about --text "I am a data scientist..."',
+        "python -m candid linkedin polish-about --file about.txt --voice-notes --changes",
+    ])
+    t.add_argument("--text", default="", help="The current about text")
+    t.add_argument("--file", default="", help="File holding the current about text")
+    t.add_argument("--voice-notes", action="store_true",
+                   help="Show what voice markers were preserved")
+    t.add_argument("--changes", action="store_true",
+                   help="List every edit that was made")
     s.set_defaults(func=cmd_linkedin)
+
+    # master
+    s = _sub(sub, "master", "Master resume: source of truth for all variants.", [
+        "python -m candid master init --resume resume.md --note \"seed from resume\"",
+        "python -m candid master init   # from your onboarded profile",
+        "python -m candid master show",
+        "python -m candid master update new-master.md --note \"added metrics\"",
+        "python -m candid master diff v0001 v0002",
+        "python -m candid master lineage acme_ds_2026",
+    ])
+    ms_ = _nested(s)
+    t = _sub(ms_, "init", "(Re-)initialize the master resume; resets version history.", [
+        "python -m candid master init",
+        "python -m candid master init --resume resume.md --note \"seed from resume\"",
+    ])
+    t.add_argument("--resume", default=None, help="Resume markdown/text file to seed from")
+    t.add_argument("--note", default="", help="Note for this version")
+    _sub(ms_, "show", "Show the current master resume.", [
+        "python -m candid master show",
+    ])
+    t = _sub(ms_, "update", "Save a new master version (history kept).", [
+        "python -m candid master update master-v2.md --note \"added Q3 metrics\"",
+    ])
+    t.add_argument("file", help="File with the new master markdown")
+    t.add_argument("--note", default="", help="Note for this version")
+    t = _sub(ms_, "diff", "Diff two master versions.", [
+        "python -m candid master diff v0001 v0002",
+    ])
+    t.add_argument("v1"); t.add_argument("v2")
+    t = _sub(ms_, "lineage", "Which master version a tailored variant came from.", [
+        "python -m candid master lineage acme_ds_2026",
+    ])
+    t.add_argument("variant_id", help="Variant id recorded by the tailor step")
+    s.set_defaults(func=cmd_master)
+
+    # bullets
+    s = _sub(sub, "bullets", "Score resume bullets; grounded rewording suggestions.", [
+        "python -m candid bullets score resume.md",
+        'python -m candid bullets reword "Responsible for maintaining the data pipeline"',
+    ])
+    bs = _nested(s)
+    t = _sub(bs, "score", "Score every bullet in a resume markdown file (0-100).", [
+        "python -m candid bullets score resume.md",
+    ])
+    t.add_argument("file", help="Resume markdown/text file")
+    t = _sub(bs, "reword", "Suggest a stronger rewording using only the bullet's own facts.", [
+        'python -m candid bullets reword "Responsible for maintaining the data pipeline"',
+    ])
+    t.add_argument("text", help="The bullet text to reword")
+    s.set_defaults(func=cmd_bullets)
+
+    # narrative
+    s = _sub(sub, "narrative", "Your career narrative in 60 seconds or 2 minutes.", [
+        "python -m candid narrative",
+        "python -m candid narrative --length 2min",
+    ])
+    s.add_argument("--length", default="60s", choices=["60s", "2min"])
+    s.set_defaults(func=cmd_narrative)
+
+    # narrative-arc
+    s = _sub(sub, "narrative-arc", "Your story arc: where you started, the turn, where you're headed.", [
+        "python -m candid narrative-arc",
+    ])
+    s.set_defaults(func=cmd_narrative_arc)
+
+    # pitch
+    s = _sub(sub, "pitch", "Elevator pitch tuned to the audience.", [
+        "python -m candid pitch",
+        "python -m candid pitch --audience hiring-manager",
+    ])
+    s.add_argument("--audience", default="recruiter",
+                   choices=["recruiter", "hiring-manager", "networking"])
+    s.set_defaults(func=cmd_pitch)
+
+    # references
+    s = _sub(sub, "references", "Reference list + printable reference sheet.", [
+        "python -m candid references add \"Jane Doe\" \"former manager\" --contact jane@example.com",
+        "python -m candid references list",
+        "python -m candid references remove \"Jane Doe\"",
+        "python -m candid references sheet --format markdown --on-request",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "add", "Add a reference.", [
+        "python -m candid references add \"Jane Doe\" \"former manager\"",
+        'python -m candid references add "Jane Doe" "former manager" --contact jane@example.com --notes "managed me 2022-24"',
+    ])
+    t.add_argument("name"); t.add_argument("relationship")
+    t.add_argument("--contact", default=""); t.add_argument("--notes", default="")
+    _sub(rs, "list", "List stored references.", [
+        "python -m candid references list",
+    ])
+    t = _sub(rs, "remove", "Remove a reference.", [
+        "python -m candid references remove \"Jane Doe\"",
+    ])
+    t.add_argument("name")
+    t = _sub(rs, "sheet", "Render a reference sheet (omit contact details with --on-request).", [
+        "python -m candid references sheet",
+        "python -m candid references sheet --format text --on-request",
+    ])
+    t.add_argument("--format", dest="format", default="markdown",
+                   choices=["markdown", "text"])
+    t.add_argument("--on-request", action="store_true",
+                   help="Print 'Available on request' instead of contact details")
+    s.set_defaults(func=cmd_references)
+
+    # networking-brief
+    s = _sub(sub, "networking-brief", "One-pager for networking chats: your story + ask.", [
+        "python -m candid networking-brief",
+        "python -m candid networking-brief --roles \"Data Scientist,ML Engineer\" --ask \"intro to your hiring manager\"",
+        "python -m candid networking-brief --out /tmp/brief.md",
+    ])
+    s.add_argument("--roles", default="",
+                   help="Comma-separated target roles (default: inferred from profile)")
+    s.add_argument("--ask", default="", help="Your ask for the conversation")
+    s.add_argument("--out", default="", help="Output path (default: candid_data/networking_brief.md)")
+    s.set_defaults(func=cmd_networking_brief)
+
+    # portfolio
+    s = _sub(sub, "portfolio", "Turn repos.json into resume-ready project blurbs.", [
+        "python -m candid portfolio describe --repos repos.json",
+        "python -m candid portfolio describe --repos repos.json --name my-project",
+        "python -m candid portfolio section --repos repos.json --top-n 4",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "describe", "Headline + resume-ready bullets for one repo or all.", [
+        "python -m candid portfolio describe --repos repos.json",
+        "python -m candid portfolio describe --repos repos.json --name my-project",
+    ])
+    t.add_argument("--repos", required=True, help="Path to repos.json")
+    t.add_argument("--name", default="", help="Describe only this repo")
+    t = _sub(ps, "section", "Rank repos by skill overlap; render a resume section.", [
+        "python -m candid portfolio section --repos repos.json",
+        "python -m candid portfolio section --repos repos.json --top-n 3",
+    ])
+    t.add_argument("--repos", required=True, help="Path to repos.json")
+    t.add_argument("--top-n", type=int, default=4)
+    s.set_defaults(func=cmd_portfolio)
+
+    # redteam
+    s = _sub(sub, "redteam", "Hostile review of a resume: vague bullets, overclaims, ATS risk.", [
+        "python -m candid redteam",
+        "python -m candid redteam --resume resume.md",
+    ])
+    s.add_argument("--resume", default="",
+                   help="Resume markdown/text to review (default: your onboarded profile)")
+    s.set_defaults(func=cmd_redteam)
+
+    # pivot
+    s = _sub(sub, "pivot", "Career pivots: ranked targets, reframe, 30/60/90 plan.", [
+        "python -m candid pivot suggest",
+        "python -m candid pivot suggest --n 3",
+        'python -m candid pivot reframe --target "Product Manager"',
+        'python -m candid pivot plan --target "Product Manager" --out plan.md',
+        'python -m candid pivot brief --target "Product Manager"',
+    ])
+    pv = _nested(s)
+    t = _sub(pv, "suggest", "Rank adjacent titles by transferable-skill overlap.", [
+        "python -m candid pivot suggest",
+        "python -m candid pivot suggest --n 3",
+    ])
+    t.add_argument("--n", type=int, default=5)
+    for name_, desc in [
+        ("reframe", "Reframe your profile toward a target title."),
+        ("plan", "30/60/90-day pivot plan from the credibility gaps."),
+        ("brief", "Full markdown pivot brief for a target title."),
+    ]:
+        t = _sub(pv, name_, desc, [
+            f'python -m candid pivot {name_} --target "Product Manager"',
+            f'python -m candid pivot {name_} --target "Product Manager" --out pivot-{name_}.md',
+        ])
+        t.add_argument("--target", required=True, help="Target job title")
+        t.add_argument("--out", default="", help="Write to file instead of stdout")
+    s.set_defaults(func=cmd_pivot)
 
     return p
 

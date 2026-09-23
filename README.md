@@ -65,6 +65,16 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `master` | Master resume as the source of truth: versioned history (`init`/`update`/`show`), diffs between versions, and lineage tracing every tailored variant back to the master version it was derived from. |
+| `bullets` | Score each resume bullet 0-100 (action verb, result, scope, specificity, length) with prioritized fixes, plus grounded rewording that uses only the bullet's own facts and never invents metrics or tools. |
+| `linkedin optimize` | Suggested headline variants, a drafted about section (optional open-to-work line), experience rewrite guidance, and keyword gaps against your target roles. |
+| `linkedin polish-about` | Clean up an existing about section (punctuation, capitalization, filler tightening) while preserving your voice markers, with optional change lists. |
+| `narrative` / `narrative-arc` / `pitch` | Your career narrative as a 60-second or 2-minute spoken story, your story arc (where you started, the turn, where you're headed), and an elevator pitch tuned to recruiter, hiring-manager, or networking audiences. |
+| `references` | Reference list with add/remove, plus a printable reference sheet in markdown or text with an "available on request" mode that omits contact details. |
+| `networking-brief` | One-pager for networking chats: your story, top bullets, target roles (inferred or your own), conversation starters, and your ask, saved as Markdown. |
+| `portfolio` | Rank your repos by skill overlap with your profile and turn metadata into resume-ready project blurbs, with an honest caveat when no README excerpt was supplied. |
+| `redteam` | Hostile resume review: vague bullets, overclaim risk, buzzwords, ATS risk, date inconsistencies, and employment gaps, with a hiring-manager summary and prioritized fixes. |
+| `pivot` | Ranked adjacent titles by transferable-skill overlap, a reframed resume for a target title, a 30/60/90-day plan closing the credibility gaps, and a full markdown pivot brief. |
 
 ## Job-source coverage (honest)
 
