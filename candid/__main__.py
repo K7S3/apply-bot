@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "skills",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "skills": ["radar", "gaps", "plan", "evidence", "snapshot", "trend",
+               "report", "targets"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +57,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "SkillsRadarError",
     "ValueError",
 }
 
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "SkillsRadarError": "python -m candid skills --help",
 }
 
 
@@ -484,6 +488,147 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _default_target_name(profile: dict) -> str:
+    """Pick a sensible default role target from current seniority."""
+    seniority = (profile.get("seniority") or "").strip().lower()
+    if seniority in ("senior", "lead", "staff", "principal"):
+        return "staff-swe"
+    return "senior-swe"
+
+
+def cmd_skills(a):
+    from candid import skills_radar as SR
+    prof = _profile()
+    what = a.what
+
+    if what == "targets":
+        for t in SR.list_targets():
+            print(f"{t['name']:12} {t['label']} — {t['blurb']}")
+        print("\nCustom targets: pass a JSON file path to --target instead "
+              "of a built-in name.")
+        return
+
+    if what == "snapshot":
+        snap = SR.take_snapshot(prof, when=a.date or None)
+        top = sorted(snap["axes"].items(), key=lambda kv: -kv[1])[:3]
+        print(f"Snapshot saved for {snap['date']}. "
+              f"Top axes: {', '.join(f'{k} {v}' for k, v in top)}.")
+        return
+
+    if what == "trend":
+        t = SR.trend()
+        if not t:
+            print("Need at least 2 snapshots to show a trend.\n"
+                  "Run `python -m candid skills snapshot` first.")
+            return
+        if a.json:
+            print(json.dumps(t, indent=2))
+            return
+        print(f"Skill trend: {t['from']} → {t['to']}")
+        for row in t["axes"]:
+            sign = "+" if row["delta"] >= 0 else ""
+            print(f"  {row['axis']:20} {row['before']:3} → {row['after']:3} "
+                  f"({sign}{row['delta']})")
+        movers = [r for r in t["skills"] if r["delta"] != 0][:8]
+        if movers:
+            print("Movers:")
+            for r in movers:
+                sign = "+" if r["delta"] >= 0 else ""
+                print(f"  {r['skill']:24} {sign}{r['delta']}")
+        return
+
+    if what == "evidence":
+        rows = SR.evidence_for_axis(prof, a.axis)
+        if a.json:
+            print(json.dumps(rows, indent=2))
+            return
+        if not rows:
+            print(f"No experience evidence found for '{a.axis}'.")
+            return
+        print(f"Evidence for {a.axis}:")
+        for r in rows:
+            print(f"- {r['title']} @ {r['company']} ({r['dates']})")
+            print(f"  skills: {', '.join(r['matched_skills'])}")
+            for b in r["bullets"]:
+                print(f"  · {b[:120]}")
+        return
+
+    target_name = a.target or _default_target_name(prof)
+    target = SR.load_target(target_name)
+
+    if what == "radar":
+        current = SR.radar_scores(prof)
+        required = SR.target_axes_required(target)
+        if a.json:
+            print(json.dumps({"target": target["name"], "current": current,
+                              "required": required}, indent=2))
+        elif a.format == "md":
+            print(f"## Skills radar → {target['label']}\n")
+            print("```\n" + SR.render_ascii_radar(current, required) + "\n```\n")
+            print(SR.render_radar_table(current, required))
+        else:
+            print(SR.render_ascii_radar(current, required))
+            print()
+            print(SR.render_radar_table(current, required))
+        return
+
+    if what == "gaps":
+        analysis = SR.gap_analysis(prof, target)
+        if a.json:
+            print(json.dumps(analysis, indent=2))
+            return
+        s = analysis["summary"]
+        print(f"Gaps → {target['label']} (readiness {s['readiness']}/100):")
+        for row in analysis["axes"]:
+            mark = "✓" if row["status"] == "met" else (
+                "~" if row["status"] == "near" else "✗")
+            print(f"  {mark} {row['axis']:20} {row['current']:3} → "
+                  f"{row['required']:3}  gap {row['gap']:3}")
+        print("Top skill gaps:")
+        for row in [r for r in analysis["skills"]
+                    if r["status"] == "gap"][:8]:
+            print(f"  ✗ {row['skill']:24} {row['current']:3} → "
+                  f"{row['required']:3}  ({row['axis']})")
+        return
+
+    if what == "plan":
+        report = SR.plan_report(prof, target, max_plan=a.n)
+        if a.json:
+            print(json.dumps(report["plan"], indent=2))
+            return
+        if a.md:
+            Path(a.md).write_text(SR.report_markdown(report),
+                                   encoding="utf-8")
+            print(f"Wrote learning plan to {a.md}")
+            return
+        if not report["plan"]:
+            print(f"No skill gaps for {target['label']} — pick a harder target.")
+            return
+        total_h = sum(s["hours"] for s in report["plan"])
+        print(f"Learning plan → {target['label']} "
+              f"(~{total_h:.0f}h total, top {len(report['plan'])}):")
+        for i, step in enumerate(report["plan"], 1):
+            pre = (f"  [after: {', '.join(step['prereqs'])}]"
+                   if step["prereqs"] else "")
+            print(f"  {i}. {step['skill']}{pre}")
+            print(f"     {step['current']} → {step['required']} "
+                  f"(~{step['hours']:.0f}h) — {step['why']}")
+        return
+
+    if what == "report":
+        report = SR.plan_report(prof, target, max_plan=a.n)
+        md = SR.report_markdown(report)
+        if a.json:
+            print(json.dumps(report, indent=2, default=str))
+            return
+        if a.md:
+            Path(a.md).write_text(md, encoding="utf-8")
+            print(f"Wrote skills report to {a.md}")
+            return
+        print(md)
+        return
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1063,78 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # skills radar
+    s = _sub(sub, "skills", "Skills radar: map your skills against next-level roles.", [
+        "python -m candid skills radar",
+        "python -m candid skills radar --target staff-ml",
+        "python -m candid skills gaps --target senior-swe",
+        "python -m candid skills plan --target staff-ml --n 8",
+        "python -m candid skills snapshot",
+        "python -m candid skills trend",
+    ])
+    s.add_argument("--json", action="store_true",
+                   help="Print the result as JSON (for scripting)")
+    s.add_argument("--target", default="",
+                   help="Role target: built-in name (see `skills targets`) or "
+                        "a JSON file path with axes/skills/weights")
+    ss = _nested(s)
+    t = _sub(ss, "targets", "List built-in next-level role targets.", [
+        "python -m candid skills targets",
+    ])
+    t = _sub(ss, "radar", "ASCII radar chart: your coverage vs a target role.", [
+        "python -m candid skills radar",
+        "python -m candid skills radar --target staff-ml --format md",
+    ])
+    t.add_argument("--format", default="ascii", choices=["ascii", "json", "md"],
+                   help="Output format (default: ascii)")
+    t.add_argument("--target", default="",
+                   help="Role target: built-in name (see `skills targets`) or "
+                        "a JSON file path with axes/skills/weights")
+    t = _sub(ss, "gaps", "Required-vs-current gaps for a target role, by impact.", [
+        "python -m candid skills gaps",
+        "python -m candid skills gaps --target eng-manager --json",
+    ])
+    t.add_argument("--target", default="",
+                   help="Role target: built-in name (see `skills targets`) or "
+                        "a JSON file path with axes/skills/weights")
+    t = _sub(ss, "plan", "Prioritized learning plan: benefit-per-hour, prereqs first.", [
+        "python -m candid skills plan --target staff-ml",
+        "python -m candid skills plan --target senior-ml --n 5 --md plan.md",
+    ])
+    t.add_argument("--target", default="",
+                   help="Role target: built-in name (see `skills targets`) or "
+                        "a JSON file path with axes/skills/weights")
+    t.add_argument("--n", type=int, default=10,
+                   help="Max plan steps (default: 10)")
+    t.add_argument("--md", default="",
+                   help="Write the full report as Markdown to this file")
+    t = _sub(ss, "evidence", "Trace an axis score back to resume entries.", [
+        "python -m candid skills evidence --axis \"ML & AI\"",
+    ])
+    t.add_argument("--axis", default="ML & AI",
+                   help="Radar axis to trace (default: \"ML & AI\")")
+    t = _sub(ss, "snapshot", "Store a dated radar snapshot for trend tracking.", [
+        "python -m candid skills snapshot",
+        "python -m candid skills snapshot --date 2026-01-01",
+    ])
+    t.add_argument("--date", default="",
+                   help="Snapshot date YYYY-MM-DD (default: today)")
+    t = _sub(ss, "trend", "Per-axis skill growth between first and latest snapshot.", [
+        "python -m candid skills trend",
+    ])
+    t = _sub(ss, "report", "Full skills report: radar, gaps, plan, evidence.", [
+        "python -m candid skills report --target staff-ml",
+        "python -m candid skills report --target senior-swe --md report.md",
+    ])
+    t.add_argument("--target", default="",
+                   help="Role target: built-in name (see `skills targets`) or "
+                        "a JSON file path with axes/skills/weights")
+    t.add_argument("--n", type=int, default=10,
+                   help="Max plan steps in the report (default: 10)")
+    t.add_argument("--md", default="",
+                   help="Write the report as Markdown to this file")
+    s.set_defaults(func=cmd_skills)
 
     return p
 
