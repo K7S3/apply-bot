@@ -73,6 +73,13 @@ _GAP_CATEGORY_KEYWORDS: list[tuple[str, str]] = [
     ("model", "ml"),
     ("system design", "system_design"),
     ("distributed", "system_design"),
+    ("cach", "system_design"),
+    ("queue", "system_design"),
+    ("shard", "system_design"),
+    ("consist", "system_design"),
+    ("load balanc", "system_design"),
+    ("scalab", "system_design"),
+    ("kafka", "system_design"),
     ("python", "python"),
     ("coding", "python"),
     ("behavioral", "behavioral"),
@@ -239,6 +246,38 @@ def _comp_talking_points(company: str, role: str, location: str) -> str:
     ])
 
 
+def _sysdesign_section(gaps: list[str], gap_cats: list[str],
+                       categories: list[str]) -> list[str]:
+    """System-design fundamentals subsection for the prep pack.
+
+    Included when system design is among the gap categories / question
+    categories, or when gap text maps to sysdesign topics. Lists the
+    matched topics with their one-liners and first trade-off rule, and
+    points at the sysdesign CLI for deep-dives, drills, and flashcards.
+    """
+    from candid import sysdesign as SD
+    topics = SD.topics_for_gaps(gaps)
+    if "system_design" in gap_cats or "system_design" in categories:
+        for t in SD.CORE_TOPICS:
+            if t not in topics:
+                topics.append(t)
+    if not topics:
+        return []
+    lines = ["### System design fundamentals", ""]
+    for tid in topics[:5]:
+        t = SD.get_topic(tid)
+        lines.append(f"**{t['title']}** - {t['one_liner']}")
+        cards = SD.tradeoff_cards(tid)
+        if cards:
+            lines.append(f"  Key trade-off: {cards[0]['rule']}")
+        lines.append("")
+    lines.append("_Go deeper: `python -m candid sysdesign deep-dive --topic <id>` · "
+                 "trade-offs: `sysdesign tradeoffs` · drills: `sysdesign drill` · "
+                 "facts: `sysdesign flashcards` · full list: `sysdesign list`._")
+    lines.append("")
+    return lines
+
+
 def build_pack(profile: dict, company: str, role: str, jd: str = "",
                app_id: int | None = None, location: str = "",
                gaps: list[str] | None = None) -> tuple[str, Path]:
@@ -346,6 +385,7 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
     for tag in concept_tags[:8]:
         if tag in PC.CONCEPTS:
             lines += [PC.CONCEPTS[tag], ""]
+    lines += _sysdesign_section(gaps, gap_cats, categories)
     lines += ["## 4. " + _tailored_mock(profile, role, company, categories).lstrip("# ").rstrip(),
               ""]
     lines += ["## 5. " + _star_prompts(profile).lstrip("# ").rstrip(), ""]

@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `patterns` | Coding patterns curriculum on the problem bank: 20-pattern taxonomy with recognition cues + templates, per-problem pattern tags, **Blind-75-style study plans generated from your skill gaps**, SM-2 **spaced repetition** scheduling, day-by-day **weekly drills** (new weak-pattern problems + due reviews in your time budget), per-pattern **mastery dashboard**, and one-page **cheat sheets**. See [docs/patterns.md](docs/patterns.md). |
+| `sysdesign` | System design fundamentals library: 10 topic overviews, 5 long-form deep-dives (caching, queues, sharding, consistency, load balancing), 20 trade-off cards, 20 practice drills with self-check rubrics, a back-of-envelope capacity estimator, flashcards, a 45-minute interview checklist, and per-topic study plans. Prep packs auto-include the fundamentals section when your match gaps touch system design. See [docs/system_design.md](docs/system_design.md). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
 | `benefits` | Benefits comparator: health-plan cost at a spend level, scenario-weighted healthcare cost, 401(k) match math, vesting schedules, PTO valuation, ESPP gain, HSA/FSA value, commuter benefits, paid-leave valuation, stipends, whole-package normalization (`normalize`) and head-to-head package comparison (`compare`). |
@@ -157,6 +158,7 @@ No analytics, no telemetry, no accounts.
 - [docs/adding_problems.md](docs/adding_problems.md) — add coding problems to the mock judge
 - [docs/adding_questions.md](docs/adding_questions.md) — add reported interview questions (source + URL required)
 - [docs/adding_sources.md](docs/adding_sources.md) — add a public job feed
+- [docs/system_design.md](docs/system_design.md) — extend the system design fundamentals library
 
 ## Tests
 
@@ -164,17 +166,18 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+286 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
 salary (LCA import variants, title aggregation), judge verdicts (incl.
 infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
-STAR prompts), offers (sign-on amortization, markdown export), negotiation
+STAR prompts, system-design fundamentals section), offers (sign-on amortization, markdown export), negotiation
 scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
-errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
+errors), the system design library (topics, deep-dives, trade-off cards,
+drills, estimator math, flashcards, study plans, sysdesign CLI), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
 `/api/import` multipart upload, import guides, and an HTML↔API
 cross-check). The mock judge is also verified by running every problem's
 reference solution through it (`python scripts/seed_problems.py --verify`).

@@ -33,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "benefits", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
+    "dashboard", "import", "gmail", "linkedin", "patterns", "sysdesign",
 ]
 
 SUBCOMMANDS = {
@@ -54,6 +54,8 @@ SUBCOMMANDS = {
     "linkedin": ["import", "guide"],
     "patterns": ["list", "tags", "plan", "log", "due", "review",
                  "drill", "mastery", "cheatsheet", "reset"],
+    "sysdesign": ["list", "show", "deep-dive", "tradeoffs", "drill",
+                "estimate", "checklist", "flashcards", "plan"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -61,8 +63,8 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "BenefitsError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "PatternsError",
-    "ValueError",
+    "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "PatternsError", "SysdesignError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -81,6 +83,7 @@ _NEXT_COMMAND = {
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
+    "SysdesignError": "python -m candid sysdesign --help",
 }
 
 
@@ -689,6 +692,57 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def cmd_sysdesign(a):
+    from candid import sysdesign as S
+    import json as _json
+    if a.what == "list":
+        topics = S.list_topics()
+        if getattr(a, "json", False):
+            print(_json.dumps(S.to_jsonable(topics), indent=2))
+            return
+        print(f"{'Topic':<18}{'One-liner'}")
+        for t in topics:
+            print(f"{t['id']:<18}{t['one_liner']}")
+    elif a.what == "show":
+        t = S.get_topic(a.topic)
+        print(f"### {t['title']}\n\n{t['overview']}\n")
+        print("**Key patterns:**")
+        for pat in t["patterns"]:
+            print(f"- {pat}")
+        print("\n**Numbers to remember:**")
+        for num in t["numbers"]:
+            print(f"- {num}")
+        print(f"\n_Interview one-liner: {t['one_liner']}_")
+    elif a.what == "deep-dive":
+        print(S.deep_dive(a.topic))
+    elif a.what == "tradeoffs":
+        if getattr(a, "json", False):
+            print(_json.dumps(S.to_jsonable(S.tradeoff_cards(a.topic)), indent=2))
+        else:
+            print(S.render_tradeoffs(a.topic))
+    elif a.what == "drill":
+        print(S.render_drill(a.topic, a.level))
+    elif a.what == "estimate":
+        res = S.estimate(
+            qps=a.qps, daily_active_users=a.dau,
+            requests_per_user_per_day=a.per_user,
+            read_ratio=a.read_ratio, payload_kb=a.payload_kb,
+            retention_days=a.retention_days, replication=a.replication,
+            overhead=a.overhead)
+        if getattr(a, "json", False):
+            print(_json.dumps(S.to_jsonable(res), indent=2))
+        else:
+            print("### Back-of-envelope estimate\n")
+            for line in res["lines"]:
+                print(f"- {line}")
+    elif a.what == "checklist":
+        print(S.checklist())
+    elif a.what == "flashcards":
+        print(S.render_flashcards(a.topic, n=a.n, seed=a.seed))
+    elif a.what == "plan":
+        print(S.render_study_plan(a.topic))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -1295,6 +1349,75 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # sysdesign
+    s = _sub(sub, "sysdesign", "System design fundamentals: deep-dives, trade-offs, drills.", [
+        "python -m candid sysdesign list",
+        "python -m candid sysdesign deep-dive --topic caching",
+        "python -m candid sysdesign tradeoffs --topic queues",
+        "python -m candid sysdesign drill --topic sharding --level hard",
+        "python -m candid sysdesign estimate --qps 10000 --payload-kb 2 --retention-days 365",
+    ])
+    ys = _nested(s)
+    t = _sub(ys, "list", "List the 10 fundamentals topics.", [
+        "python -m candid sysdesign list",
+        "python -m candid sysdesign list --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the topic list as JSON (for scripting)")
+    t = _sub(ys, "show", "Show a topic overview: patterns, numbers, one-liner.", [
+        "python -m candid sysdesign show --topic caching",
+    ])
+    t.add_argument("--topic", required=True, help="Topic id (see: sysdesign list)")
+    t = _sub(ys, "deep-dive", "Long-form explainer for a core topic.", [
+        "python -m candid sysdesign deep-dive --topic consistency",
+    ])
+    t.add_argument("--topic", required=True, help="caching|queues|sharding|consistency|load_balancing")
+    t = _sub(ys, "tradeoffs", "Trade-off cards: the decisions interviewers probe.", [
+        "python -m candid sysdesign tradeoffs --topic caching",
+        "python -m candid sysdesign tradeoffs --topic caching --json",
+    ])
+    t.add_argument("--topic", required=True, help="Topic id (see: sysdesign list)")
+    t.add_argument("--json", action="store_true",
+                   help="Print the trade-off cards as JSON (for scripting)")
+    t = _sub(ys, "drill", "Practice prompts with self-check rubrics.", [
+        "python -m candid sysdesign drill --topic queues",
+        "python -m candid sysdesign drill --topic sharding --level hard",
+    ])
+    t.add_argument("--topic", required=True, help="Topic id (see: sysdesign list)")
+    t.add_argument("--level", default=None, choices=["easy", "medium", "hard"],
+                   help="Filter drills by difficulty (default: all)")
+    t = _sub(ys, "estimate", "Back-of-envelope capacity math (QPS, storage, bandwidth).", [
+        "python -m candid sysdesign estimate --qps 10000 --payload-kb 2 --retention-days 365",
+        "python -m candid sysdesign estimate --dau 1000000 --per-user 20 --payload-kb 1",
+    ])
+    t.add_argument("--qps", type=float, default=None, help="Total queries per second")
+    t.add_argument("--dau", type=float, default=None, dest="dau",
+                   help="Daily active users (alternative to --qps)")
+    t.add_argument("--per-user", type=float, default=10.0,
+                   help="Requests per user per day (with --dau)")
+    t.add_argument("--read-ratio", type=float, default=0.9, help="Fraction of reads (0-1)")
+    t.add_argument("--payload-kb", type=float, default=1.0, help="Average payload size in KB")
+    t.add_argument("--retention-days", type=float, default=365.0, help="Data retention in days")
+    t.add_argument("--replication", type=int, default=3, help="Replica count")
+    t.add_argument("--overhead", type=float, default=1.3, help="Storage overhead multiplier")
+    t.add_argument("--json", action="store_true",
+                   help="Print the estimate as JSON (for scripting)")
+    _sub(ys, "checklist", "The 45-minute system design interview checklist.", [
+        "python -m candid sysdesign checklist",
+    ])
+    t = _sub(ys, "flashcards", "Q/A flashcards from trade-off cards and key numbers.", [
+        "python -m candid sysdesign flashcards --topic caching",
+        "python -m candid sysdesign flashcards --topic caching --n 8 --seed 3",
+    ])
+    t.add_argument("--topic", required=True, help="Topic id (see: sysdesign list)")
+    t.add_argument("--n", type=int, default=5, help="Number of cards (default 5)")
+    t.add_argument("--seed", type=int, default=0, help="Shuffle seed (default 0)")
+    t = _sub(ys, "plan", "Ordered study plan for a topic.", [
+        "python -m candid sysdesign plan --topic consistency",
+    ])
+    t.add_argument("--topic", required=True, help="Topic id (see: sysdesign list)")
+    s.set_defaults(func=cmd_sysdesign)
 
     return p
 
