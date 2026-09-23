@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "archive",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,9 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "archive": ["cycles", "restore-app", "list", "compress", "search",
+                "restore-data", "verify", "export", "import", "stats",
+                "prune", "policy"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "ColdArchiveError", "ColdCyclesError",
     "ValueError",
 }
 
@@ -484,6 +488,136 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def cmd_archive(a):
+    from candid import coldstore as CS
+    if a.what == "cycles":
+        from candid import cold_cycles as CC
+        res = CC.archive_old_cycles(days=a.days, dry_run=a.dry_run)
+        if res["dry_run"]:
+            print(f"Dry run: {res['archived']} closed application(s) older than "
+                  f"{a.days} days would be archived.")
+        elif res["archived"]:
+            print(f"Archived {res['archived']} closed application(s) "
+                  f"to {res['archive_id']}.")
+        else:
+            print("Nothing to archive.")
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+    elif a.what == "restore-app":
+        from candid import cold_cycles as CC
+        app = CC.restore_application(a.id)
+        print(f"Restored #{app['id']}: {app.get('role')} @ {app.get('company')} "
+              f"[{app.get('status')}]")
+    elif a.what == "list":
+        archives = CS.list_archives(kind=a.kind)
+        if a.json:
+            print(json.dumps(archives, indent=2, default=str))
+            return
+        if not archives:
+            print("No cold archives yet.")
+            return
+        for m in archives:
+            print(f"{m['archive_id']}  [{m['kind']}] {m.get('label', '')}  "
+                  f"{m.get('created_utc', '')}")
+    elif a.what == "compress":
+        from candid import cold_searchdata as SD
+        res = SD.compress_stale_data(days=a.days, dry_run=a.dry_run)
+        if res["dry_run"]:
+            print(f"Dry run: {res['files']} stale file(s) would be compressed "
+                  f"into {len(res['archives'])} archive(s).")
+        elif res["files"]:
+            mb = res["bytes_saved"] / (1024 * 1024)
+            print(f"Compressed {res['files']} stale file(s), freed ~{mb:.1f} MB "
+                  f"({', '.join(res['archives'])}).")
+        else:
+            print("Nothing stale to compress.")
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+    elif a.what == "search":
+        from candid import cold_searchdata as SD
+        hits = SD.search_archives(a.query, kinds=tuple(a.kind) if a.kind else None)
+        if a.json:
+            print(json.dumps(hits, indent=2, default=str))
+            return
+        if not hits:
+            print(f"No cold-archive matches for {a.query!r}.")
+            return
+        for h in hits:
+            print(f"{h['archive_id']}  [{h['kind']}] {h.get('label', '')}")
+            for m in h.get("matched", []):
+                print(f"    ~ {m}")
+    elif a.what == "restore-data":
+        from candid import cold_searchdata as SD
+        path = SD.restore_searchdata(a.id, dest=a.dest, overwrite=a.overwrite)
+        print(f"Restored archive {a.id} to {path}.")
+    elif a.what == "verify":
+        from candid import cold_verify as CV
+        if a.id:
+            res = CV.verify_archive(a.id)
+            print(f"{a.id}: {'OK' if res['ok'] else 'FAILED'} "
+                  f"({res['checked']} file(s) checked)")
+            for e in res["errors"]:
+                print(f"  ! {e}")
+        else:
+            res = CV.verify_all(kind=a.kind)
+            print(f"{res['ok']}/{res['total']} archives verified OK.")
+            for aid in res["failed"]:
+                print(f"  ! FAILED: {aid}")
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+    elif a.what == "export":
+        from candid import cold_export as CE
+        path = CE.export_archive(a.id, a.dest)
+        print(f"Exported {a.id} to {path}.")
+    elif a.what == "import":
+        from candid import cold_export as CE
+        rec = CE.import_archive(a.path)
+        print(f"Imported archive {rec.get('archive_id')} "
+              f"[{rec.get('kind')}] {rec.get('label', '')}.")
+    elif a.what == "stats":
+        from candid import cold_stats as ST
+        stats = ST.storage_stats()
+        print(ST.format_stats(stats))
+        if a.json:
+            print(json.dumps(stats, indent=2, default=str))
+    elif a.what == "prune":
+        from candid import cold_policy as CP
+        res = CP.prune_archives(older_than_days=a.days, dry_run=a.dry_run)
+        if res["dry_run"]:
+            print(f"Dry run: {len(res['deleted'])} archive(s) older than "
+                  f"{a.days} days would be pruned.")
+        elif res["deleted"]:
+            print(f"Pruned {len(res['deleted'])} archive(s): "
+                  f"{', '.join(res['deleted'])}.")
+        else:
+            print("Nothing to prune.")
+        for aid in res.get("skipped_unverified", []):
+            print(f"  ! skipped unverified: {aid}")
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+    elif a.what == "policy":
+        from candid import cold_policy as CP
+        if a.apply:
+            res = CP.apply_policies(dry_run=a.dry_run)
+            if res.get("errors"):
+                for e in res["errors"]:
+                    print(f"  ! {e.get('step')}: {e.get('error')}")
+            print("Policy run complete:"
+                  f" cycles archived={(res.get('archive_cycles') or {}).get('archived', 0)},"
+                  f" files compressed={(res.get('compress_searchdata') or {}).get('files', 0)},"
+                  f" archives pruned={len((res.get('prune_archives') or {}).get('deleted', []))}.")
+        else:
+            res = CP.policy_report()
+            cyc = res.get("cycles") or {}
+            cmp = res.get("searchdata") or {}
+            prn = res.get("prune") or {}
+            print(f"Policy preview: {cyc.get('archived', 0)} app(s) archivable, "
+                  f"{cmp.get('files', 0)} stale file(s) compressible, "
+                  f"{len(prn.get('deleted', []))} archive(s) prunable.")
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1052,93 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # archive (cold archival)
+    s = _sub(sub, "archive", "Cold-archive old cycles and stale data.", [
+        "python -m candid archive cycles --dry-run",
+        "python -m candid archive stats",
+        "python -m candid archive policy",
+    ])
+    ls = _nested(s, dest="what")
+    t = _sub(ls, "cycles", "Archive closed applications older than N days.", [
+        "python -m candid archive cycles",
+        "python -m candid archive cycles --days 60 --dry-run",
+    ])
+    t.add_argument("--days", type=int, default=90,
+                   help="Archive closed apps older than N days (default: 90)")
+    t.add_argument("--dry-run", action="store_true",
+                   help="Show what would be archived without changing anything")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "restore-app", "Restore one archived application to the tracker.", [
+        "python -m candid archive restore-app --id 12",
+    ])
+    t.add_argument("--id", required=True, help="Application id to restore")
+    t = _sub(ls, "list", "List cold archives.", [
+        "python -m candid archive list",
+        "python -m candid archive list --kind cycles",
+    ])
+    t.add_argument("--kind", help="Filter by archive kind")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "compress", "Compress stale search/curation data.", [
+        "python -m candid archive compress --dry-run",
+    ])
+    t.add_argument("--days", type=int, default=30,
+                   help="Compress data older than N days (default: 30)")
+    t.add_argument("--dry-run", action="store_true",
+                   help="Show what would be compressed without changing anything")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "search", "Search inside cold archives without restoring.", [
+        "python -m candid archive search acme",
+    ])
+    t.add_argument("query", help="Case-insensitive search text")
+    t.add_argument("--kind", action="append",
+                   help="Restrict to archive kind(s); repeatable")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "restore-data", "Restore a searchdata archive to the data dir.", [
+        "python -m candid archive restore-data --id <archive-id>",
+    ])
+    t.add_argument("--id", required=True, help="Archive id to restore")
+    t.add_argument("--dest", help="Restore destination dir (default: data dir)")
+    t.add_argument("--overwrite", action="store_true",
+                   help="Overwrite existing files")
+    t = _sub(ls, "verify", "Verify archive integrity (checksums).", [
+        "python -m candid archive verify",
+        "python -m candid archive verify --id <archive-id>",
+    ])
+    t.add_argument("--id", help="Verify one archive (default: verify all)")
+    t.add_argument("--kind", help="With no --id, restrict to this kind")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "export", "Export an archive as a portable .candid-cold file.", [
+        "python -m candid archive export --id <archive-id> --dest /tmp/",
+    ])
+    t.add_argument("--id", required=True, help="Archive id to export")
+    t.add_argument("--dest", required=True, help="Destination file or directory")
+    t = _sub(ls, "import", "Import a .candid-cold file into cold storage.", [
+        "python -m candid archive import --path backup.candid-cold",
+    ])
+    t.add_argument("--path", required=True, help="Path to the .candid-cold file")
+    t = _sub(ls, "stats", "Show storage usage: active vs cold.", [
+        "python -m candid archive stats",
+    ])
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "prune", "Delete archives older than N days (keeps newest).", [
+        "python -m candid archive prune --dry-run",
+    ])
+    t.add_argument("--days", type=int, default=365,
+                   help="Prune archives older than N days (default: 365)")
+    t.add_argument("--dry-run", action="store_true",
+                   help="Show what would be pruned without deleting anything")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    t = _sub(ls, "policy", "Preview or apply archival policies.", [
+        "python -m candid archive policy",
+        "python -m candid archive policy --apply",
+    ])
+    t.add_argument("--apply", action="store_true",
+                   help="Apply policies (default is a read-only preview)")
+    t.add_argument("--dry-run", action="store_true",
+                   help="With --apply: simulate without changing anything")
+    t.add_argument("--json", action="store_true", help="Machine-readable output")
+    s.set_defaults(func=cmd_archive)
 
     return p
 
