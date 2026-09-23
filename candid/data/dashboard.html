@@ -135,6 +135,21 @@
   <pre class="report hidden" id="curateOut"></pre>
   <div class="cards" id="jobsCards" style="margin-top:12px"></div></section>
 
+<!-- 3b. watchlist: company career-page monitors -->
+<section id="sec-watch"><h2>Watchlist <span class="sub" style="color:var(--muted);font-weight:400">(career-page monitors)</span></h2>
+  <div id="watchNote"></div>
+  <div class="cards" id="watchCards" style="margin-top:12px"></div>
+  <h2 style="font-size:14px;color:var(--muted);margin-top:16px">New postings</h2>
+  <div class="toolbar">
+    <button class="ghost" id="btnWatchRefresh">Refresh</button>
+    <button class="ghost" id="btnMarkAllRead">Mark all read</button>
+  </div>
+  <div id="alertFeed"></div>
+  <div id="timelineWrap" class="hidden" style="margin-top:16px">
+    <h2 style="font-size:14px;color:var(--muted)">Posting timeline — <span id="timelineCompany"></span></h2>
+    <div id="timelineBody"></div>
+  </div></section>
+
 <!-- 4. prep -->
 <section id="sec-prep"><h2>Interview prep</h2><div id="prepList"></div></section>
 
@@ -188,7 +203,7 @@
 <script>
 "use strict";
 /* candid dashboard UI — vanilla JS, no dependencies, works offline.
-   Sections: overview, nudges, apps, jobs, prep, import, lab, salary. */
+   Sections: overview, nudges, apps, jobs, watch, prep, import, lab, salary. */
 const $=id=>document.getElementById(id);
 const api={
   get:p=>fetch(p).then(async r=>{const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j;}),
@@ -354,6 +369,125 @@ $("btnCurate").onclick=async()=>{
   loadJobs(); loadOverview();
 };
 
+/* ---------- 3b. watchlist: monitor cards, alerts feed, timelines ---------- */
+function healthClass(h){
+  h=String(h||"unknown").toLowerCase();
+  if(["ok","healthy","green"].includes(h)) return "ok";
+  if(["error","failed","red","down"].includes(h)) return "err";
+  return "warn";
+}
+
+async function loadWatch(){
+  const note=$("watchNote"), w=$("watchCards");
+  let st;
+  try{ st=await api.get("/api/watch"); }
+  catch(err){ note.innerHTML=`<div class="err">Watch unavailable: ${esc(err.message)}</div>`; w.innerHTML=""; return; }
+  if(!st.enabled){
+    note.innerHTML='<div style="color:var(--muted)">No career-page monitors yet. '+
+      'Watch your favorite companies\' career pages from the CLI: '+
+      '<code>python -m candid watch add Acme --greenhouse acme</code> '+
+      '(see <code>python -m candid watch --help</code>). '+
+      'Then run <code>python -m candid watch run</code> to poll.</div>';
+    w.innerHTML=""; return;
+  }
+  note.innerHTML=st.error?`<div class="err">Watch error: ${esc(st.error)}</div>`:"";
+  const cs=st.companies||[];
+  w.innerHTML="";
+  if(!cs.length){ w.innerHTML='<div style="color:var(--muted)">No companies watched yet.</div>'; return; }
+  for(const c of cs){
+    const d=document.createElement("div"); d.className="card";
+    d.style.cursor="pointer";
+    d.innerHTML=`<h3>${esc(c.company)}</h3>
+      <div class="meta">${esc(c.source_type||"")}${c.enabled?"":" · <span class='warn'>paused</span>"}</div>
+      <div style="font-size:13px">
+        <span class="${healthClass(c.feed_health)}">●</span> feed ${esc(c.feed_health)}
+        ${c.last_error?` — <span class="err">${esc(c.last_error)}</span>`:""}<br>
+        ${c.open_count} open · <b class="${c.new_since_last?"ok":""}">${c.new_since_last} new</b> since last run<br>
+        <span style="color:var(--muted)">last run ${esc(c.last_run||"never")}</span>
+      </div>
+      <div class="meta" style="margin-top:6px">click for posting timeline</div>`;
+    d.onclick=()=>loadTimeline(c.company);
+    w.appendChild(d);
+  }
+}
+
+async function loadAlerts(){
+  const w=$("alertFeed");
+  let st;
+  try{ st=await api.get("/api/watch/alerts"); }
+  catch(err){ w.innerHTML=`<div class="err">Alerts unavailable: ${esc(err.message)}</div>`; return; }
+  const al=st.alerts||[];
+  w.innerHTML="";
+  if(!st.enabled){
+    w.innerHTML='<div style="color:var(--muted)">Alert feed is empty until you add a monitor — see above.</div>';
+    return;
+  }
+  const th=st.threshold;
+  const head=`<div style="color:var(--muted);font-size:13px;margin-bottom:8px">${
+    al.length?`<b>${al.length}</b> unread alert(s)`:"No unread alerts"}${
+    th!=null?` · alerts fire on <b>${esc(String(th))}/100</b>+ match`:""}</div>`;
+  if(!al.length){
+    w.innerHTML=head+'<div style="color:var(--muted)">New postings from watched companies land here — run <code>python -m candid watch run</code> or wait for the next poll.</div>';
+    return;
+  }
+  w.innerHTML=head;
+  for(const a of al){
+    const d=document.createElement("div"); d.className="nudge";
+    d.style.borderLeftColor="var(--accent)";
+    const verdict=a.verdict?` · <b>${esc(a.verdict)}</b>`:"";
+    const score=a.score!=null?` <span class="scorebadge ${scoreClass(a.score)}">${esc(String(a.score))}</span>`:"";
+    d.innerHTML=`<b>${esc(a.title||"(untitled)")}</b> @ ${esc(a.company)}${score}${verdict}
+      ${a.kind==="repost"?'<span class="pill saved" style="margin-left:6px">repost</span>':""}<br>
+      <span style="font-size:13px">${esc(a.message||"")}</span>
+      <div style="font-size:12px;color:var(--muted)">seen ${esc(a.created_at||a.first_seen||"")}</div>
+      <div class="actions" style="display:flex;gap:8px;margin-top:6px">
+        ${a.url?`<a href="${esc(a.url)}" target="_blank" rel="noopener"><button class="ghost" style="padding:4px 10px;font-size:12px">Apply ↗</button></a>`:""}
+        <button class="ghost" data-read="${esc(a.id)}" style="padding:4px 10px;font-size:12px">Mark read</button>
+      </div>`;
+    w.appendChild(d);
+  }
+  w.querySelectorAll("[data-read]").forEach(b=>b.onclick=async()=>{
+    let id=b.dataset.read;
+    const n=parseInt(id); if(String(n)===String(id)) id=n;
+    try{ await api.post(`/api/watch/alerts/${encodeURIComponent(String(id))}/read`); }
+    catch(err){ alert("Error: "+err.message); }
+    loadAlerts(); loadWatch();
+  });
+}
+
+$("btnWatchRefresh").onclick=()=>{ loadWatch(); loadAlerts(); };
+$("btnMarkAllRead").onclick=async()=>{
+  let st;
+  try{ st=await api.get("/api/watch/alerts"); }
+  catch(err){ alert("Error: "+err.message); return; }
+  for(const a of (st.alerts||[])){
+    try{ await api.post(`/api/watch/alerts/${encodeURIComponent(String(a.id))}/read`); }
+    catch(err){ /* keep going — one failure shouldn't block the rest */ }
+  }
+  loadAlerts(); loadWatch();
+};
+
+async function loadTimeline(company){
+  const wrap=$("timelineWrap"), body=$("timelineBody");
+  $("timelineCompany").textContent=company;
+  wrap.classList.remove("hidden"); body.textContent="Loading…";
+  try{
+    const t=await api.get(`/api/watch/company?name=${encodeURIComponent(company)}`);
+    const prow=p=>`<tr><td>${esc(p.title)}</td><td>${esc(p.location||"")}</td>
+      <td>${esc(p.first_seen||"")}</td><td>${esc(p.last_seen||"")}</td>
+      <td>${p.reposted?'<span class="warn">repost</span>':'—'}</td>
+      <td>${p.url?`<a href="${esc(p.url)}" target="_blank" rel="noopener">open ↗</a>`:""}</td></tr>`;
+    const mk=(title,rows)=>rows.length?
+      `<h3 style="font-size:14px;margin:12px 0 6px">${title} (${rows.length})</h3>
+       <div style="overflow-x:auto"><table>
+       <thead><tr><th>Title</th><th>Location</th><th>First seen</th><th>Last seen</th><th>Flags</th><th></th></tr></thead>
+       <tbody>${rows.map(prow).join("")}</tbody></table></div>`:
+      `<div style="color:var(--muted);font-size:13px">No ${title.toLowerCase()}.</div>`;
+    body.innerHTML=mk("Open postings",t.open||[])+mk("Recently closed",t.recently_closed||[]);
+    wrap.scrollIntoView({behavior:"smooth"});
+  }catch(err){ body.innerHTML=`<div class="err">Error: ${esc(err.message)}</div>`; }
+}
+
 /* ---------- 4. prep cards ---------- */
 async function loadPrep(){
   const rows=await api.get("/api/prep-status"); const w=$("prepList"); w.innerHTML="";
@@ -491,7 +625,8 @@ $("btnSalary").onclick=async()=>{
 
 /* ---------- boot ---------- */
 renderChips();
-loadOverview(); loadApps(); loadJobs(); loadPrep(); loadImportGuides();
+loadOverview(); loadApps(); loadJobs(); loadWatch(); loadAlerts();
+loadPrep(); loadImportGuides();
 </script>
 </body>
 </html>

@@ -407,6 +407,8 @@ ROUTES = [
     "/api/apps/<id>", "/api/prep", "/api/match", "/api/tailor",
     "/api/proposals/<id>/confirm", "/api/proposals/<id>/reject",
     "/api/import", "/api/curate", "/api/jobs/dismiss", "/api/tailor-diff",
+    "/api/watch", "/api/watch/alerts", "/api/watch/company",
+    "/api/watch/alerts/<id>/read",
 ]
 
 

@@ -42,6 +42,9 @@ SALARY_DB = DATA_DIR / "salary.db"
 PREP_PACKS_DIR = DATA_DIR / "prep_packs"
 TAILOR_DIR = DATA_DIR / "tailored"
 GMAIL_PROPOSALS_PATH = DATA_DIR / "gmail_proposals.json"
+ALERTS_PATH = DATA_DIR / "alerts.json"
+WATCH_CONFIG_PATH = DATA_DIR / "watch_config.json"
+WATCH_RUNS_PATH = DATA_DIR / "watch_runs.json"
 
 # --- sample data (committed; clearly fictional) ------------------------------
 SAMPLES_DIR = PROJECT_ROOT / "samples" / "candid"

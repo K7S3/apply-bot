@@ -12,8 +12,10 @@ data functions are importable and unit-tested independently of HTTP.
 from __future__ import annotations
 
 import http.server
+import importlib
 import json
 import re
+import sys
 import tempfile
 import threading
 import urllib.parse
@@ -422,6 +424,313 @@ def salary_lookup(company: str, title: str, location: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# watchlist (company career-page monitors) — defensive integration
+#
+# candid/monitors.py and candid/alerts.py are owned elsewhere. The dashboard
+# must never crash because of them: every read goes through _watch_module(),
+# which returns None when the module is absent (or known-absent via
+# sys.modules), and all state access is wrapped in try/except. Field
+# normalization uses .get() with multiple aliases so slightly different
+# shapes still render.
+#
+# Native API preferred (list_companies/health/get_history on monitors;
+# get_pending_alerts/mark_read/load_alerts/get_threshold on alerts); generic
+# aliases below are probed as fallbacks.
+# ---------------------------------------------------------------------------
+
+_WATCH_MONITORS_ALIASES = ["list_companies", "list_monitors", "get_monitors",
+                           "companies", "all_monitors", "monitors"]
+_WATCH_ALERTS_ALIASES = ["get_pending_alerts", "unread", "unread_alerts",
+                         "list_unread", "pending", "pending_alerts"]
+_WATCH_MARK_READ_ALIASES = ["mark_read", "ack", "ack_alert", "dismiss_alert",
+                            "mark_alert_read"]
+_WATCH_TIMELINE_ALIASES = ["get_history", "timeline", "company_timeline",
+                           "postings", "company_postings", "get_postings"]
+
+
+def _watch_module(name: str):
+    """Import candid.<name> (monitors/alerts) or return None if absent.
+
+    A defensive import: the dashboard works fine without these modules —
+    the watch panels just render a "not configured" state.
+    """
+    fullname = f"candid.{name}"
+    if fullname in sys.modules:
+        return sys.modules[fullname]  # may be None = known absent
+    try:
+        return importlib.import_module(fullname)
+    except Exception:  # ImportError or anything raised at import time
+        log.debug("watch module %s unavailable", fullname)
+        return None
+
+
+def _first_fn(mod, aliases: list[str]):
+    for a in aliases:
+        fn = getattr(mod, a, None)
+        if callable(fn):
+            return fn
+    return None
+
+
+def watch_available() -> bool:
+    """True when at least the monitors module is importable."""
+    return _watch_module("monitors") is not None
+
+
+def _native_watch_cards(mod) -> list[dict]:
+    """Build company cards from the native monitors API.
+
+    Combines the registry (list_companies), per-source feed health
+    (health), and last-run counts (alerts.load_runs) — all defensively,
+    since any of those reads may fail.
+    """
+    companies = mod.list_companies() or []
+    try:
+        health_map = mod.health() or {}
+    except Exception:  # noqa: BLE001
+        health_map = {}
+    try:
+        alerts_mod = _watch_module("alerts")
+        runs = (alerts_mod.load_runs() or {}) if alerts_mod else {}
+    except Exception:  # noqa: BLE001
+        runs = {}
+    runs_companies = runs.get("companies", {}) or {}
+
+    def _runs_for(name: str) -> dict:
+        if name in runs_companies:
+            return runs_companies[name]
+        low = name.lower()
+        for k, v in runs_companies.items():
+            if str(k).lower() == low:
+                return v
+        return {}
+
+    cards = []
+    for comp in companies:
+        if not isinstance(comp, dict):
+            continue
+        name = comp.get("name", "")
+        sources = comp.get("sources") or []
+        types = sorted({str(s.get("type", "")) for s in sources if s.get("type")})
+        entries = [h for h in (health_map.values() if isinstance(health_map, dict) else [])
+                   if isinstance(h, dict) and h.get("company") == name]
+        statuses = {str(e.get("status", "")).lower() for e in entries}
+        if not sources:
+            feed_health = "not configured"
+        elif statuses & {"skipped", "failing"}:
+            feed_health = "error"
+        elif statuses == {"ok"} or not statuses:
+            feed_health = "ok"
+        else:
+            feed_health = "unknown"
+        last_error = next((str(e.get("last_error") or "") for e in entries
+                           if e.get("last_error")), "")
+        run = _runs_for(name)
+        open_count = run.get("open")
+        if open_count is None:
+            # fall back to counting open postings in the history
+            try:
+                hist = mod.get_history(name) or {}
+                open_count = sum(1 for r in hist.values()
+                                 if isinstance(r, dict)
+                                 and r.get("status") == "open")
+            except Exception:  # noqa: BLE001
+                open_count = 0
+        cards.append({
+            "company": name,
+            "source_type": ", ".join(types),
+            "source_key": str(sources[0].get("label", "")) if sources else "",
+            "enabled": True,
+            "last_run": run.get("last_run", ""),
+            "open_count": int(open_count or 0),
+            "new_since_last": int(run.get("new", 0) or 0),
+            "feed_health": feed_health,
+            "last_error": last_error,
+        })
+    return cards
+
+
+def _norm_company_card(c: dict) -> dict:
+    c = dict(c or {})
+    open_count = c.get("open_count", c.get("open_postings", None))
+    if open_count is None:
+        postings = c.get("postings") or []
+        open_count = len(postings)
+    health = c.get("feed_health", c.get("health", c.get("status", "unknown")))
+    return {
+        "company": c.get("company", c.get("name", "")),
+        "source_type": c.get("source_type", c.get("source", "")),
+        "source_key": str(c.get("source_key", c.get("key", c.get("token", "")))),
+        "enabled": bool(c.get("enabled", True)),
+        "last_run": c.get("last_run", c.get("last_checked", "")),
+        "open_count": int(open_count or 0),
+        "new_since_last": int(c.get("new_since_last",
+                                   c.get("new_count", c.get("new", 0))) or 0),
+        "feed_health": str(health or "unknown"),
+        "last_error": c.get("last_error", c.get("error", "")) or "",
+    }
+
+
+def watch_status() -> dict:
+    """Per-company monitor cards: status, counts, feed health.
+
+    Returns {"enabled": bool, "companies": [...]}. Never raises for a
+    missing/broken monitors module — degrades to enabled=False.
+    """
+    mod = _watch_module("monitors")
+    if mod is None:
+        return {"enabled": False, "companies": []}
+    try:
+        if callable(getattr(mod, "list_companies", None)):
+            return {"enabled": True,
+                    "companies": _native_watch_cards(mod)}
+        fn = _first_fn(mod, _WATCH_MONITORS_ALIASES)
+        companies = [_norm_company_card(c) for c in (fn() if fn else [])]
+        return {"enabled": True, "companies": companies}
+    except Exception as e:  # noqa: BLE001 — dashboard must not crash
+        log.warning("watch_status failed: %s: %s", type(e).__name__, e)
+        return {"enabled": True, "companies": [],
+                "error": f"{type(e).__name__}: {e}"}
+
+
+def _norm_alert(a: dict) -> dict:
+    a = dict(a or {})
+    return {
+        "id": a.get("id"),
+        "kind": a.get("kind", "new"),
+        "company": a.get("company", ""),
+        "title": a.get("title", a.get("role", "")),
+        "url": a.get("url", a.get("link", a.get("apply_url", ""))),
+        "location": a.get("location", ""),
+        "source_type": a.get("source_type", a.get("source", "")),
+        "posted_at": a.get("posted_at", ""),
+        "first_seen": a.get("first_seen", ""),
+        "created_at": a.get("created_at", ""),
+        "score": a.get("score"),
+        "verdict": a.get("verdict", ""),
+        "message": a.get("message", ""),
+        "read": bool(a.get("read", False)),
+    }
+
+
+def watch_alerts(unread_only: bool = True) -> dict:
+    """Unread new-posting alerts with posting URLs.
+
+    Returns {"enabled": bool, "alerts": [...], "threshold": ...}. Degrades
+    to enabled=False when the alerts module is absent.
+    """
+    mod = _watch_module("alerts")
+    if mod is None:
+        return {"enabled": False, "alerts": []}
+    try:
+        threshold = None
+        if callable(getattr(mod, "get_threshold", None)):
+            try:
+                threshold = mod.get_threshold()
+            except Exception:  # noqa: BLE001
+                pass
+        fn = _first_fn(mod, _WATCH_ALERTS_ALIASES)
+        raw = fn() if fn else []
+        alerts = [_norm_alert(a) for a in (raw or [])]
+        if unread_only:
+            alerts = [a for a in alerts if not a["read"]]
+        return {"enabled": True, "alerts": alerts, "threshold": threshold}
+    except Exception as e:  # noqa: BLE001
+        log.warning("watch_alerts failed: %s: %s", type(e).__name__, e)
+        return {"enabled": True, "alerts": [],
+                "error": f"{type(e).__name__}: {e}"}
+
+
+def watch_mark_read(alert_id) -> dict:
+    """Mark one alert as read. Raises DashboardError when unavailable."""
+    mod = _watch_module("alerts")
+    if mod is None:
+        raise DashboardError("Alerts are not available — candid/alerts.py "
+                             "is not installed.")
+    fn = _first_fn(mod, _WATCH_MARK_READ_ALIASES)
+    if fn is None:
+        raise DashboardError("The alerts module has no mark-read function.")
+    try:
+        fn(alert_id)
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Could not mark alert {alert_id!r} read: {e}") from e
+    log.debug("marked alert %r read", alert_id)
+    return {"ok": True, "id": alert_id}
+
+
+def _norm_posting(p: dict) -> dict:
+    p = dict(p or {})
+    reposted = p.get("reposted", p.get("is_repost", p.get("repost", False)))
+    return {
+        "id": p.get("id", ""),
+        "title": p.get("title", p.get("role", "")),
+        "url": p.get("url", p.get("link", p.get("apply_url", ""))),
+        "location": p.get("location", ""),
+        "first_seen": p.get("first_seen", ""),
+        "last_seen": p.get("last_seen", ""),
+        "closed_at": p.get("closed_at", ""),
+        "reposted": bool(reposted),
+    }
+
+
+def _timeline_from_history(name: str, hist: dict) -> dict:
+    """Split a {posting_id: record} history into open / recently closed."""
+    recs = [r for r in (hist or {}).values() if isinstance(r, dict)]
+    open_ = [r for r in recs if r.get("status") == "open"]
+    closed = sorted(
+        (r for r in recs if r.get("status") == "closed"),
+        key=lambda r: str(r.get("closed_at", "")), reverse=True)[:25]
+    open_.sort(key=lambda r: str(r.get("first_seen", "")), reverse=True)
+    return {"company": name,
+            "open": [_norm_posting(p) for p in open_],
+            "recently_closed": [_norm_posting(p) for p in closed]}
+
+
+def company_timeline(name: str) -> dict:
+    """Open postings (with first_seen), recently closed, repost flags.
+
+    Raises DashboardError when unavailable or the company is unknown.
+    """
+    if not (name or "").strip():
+        raise DashboardError("Provide a company name (?name=...).")
+    mod = _watch_module("monitors")
+    if mod is None:
+        raise DashboardError("Watch is not available — candid/monitors.py "
+                             "is not installed.")
+    get_history = getattr(mod, "get_history", None)
+    if callable(get_history):
+        try:
+            return _timeline_from_history(name, get_history(name))
+        except Exception as e:  # noqa: BLE001
+            raise DashboardError(str(e)) from e
+    fn = _first_fn(mod, [a for a in _WATCH_TIMELINE_ALIASES
+                         if a != "get_history"])
+    if fn is None:
+        raise DashboardError("The monitors module has no timeline function.")
+    try:
+        res = fn(name)
+    except TypeError:  # maybe keyword-style signature
+        res = fn(company=name)
+    except Exception as e:  # noqa: BLE001
+        raise DashboardError(f"Could not load timeline for {name!r}: {e}") from e
+    if isinstance(res, list):  # plain list of postings → all open
+        return {"company": name,
+                "open": [_norm_posting(p) for p in res],
+                "recently_closed": []}
+    if isinstance(res, dict) and ("open" in res or "recently_closed" in res
+                                  or "closed" in res):
+        res = dict(res)
+        return {"company": res.get("company", name),
+                "open": [_norm_posting(p) for p in (res.get("open") or [])],
+                "recently_closed": [_norm_posting(p)
+                                    for p in (res.get("recently_closed")
+                                              or res.get("closed") or [])]}
+    if isinstance(res, dict):  # {posting_id: record} history shape
+        return _timeline_from_history(name, res)
+    return {"company": name, "open": [], "recently_closed": []}
+
+
+# ---------------------------------------------------------------------------
 # HTTP server
 # ---------------------------------------------------------------------------
 
@@ -526,6 +835,18 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     status=qs.get("status", [None])[0]))
             elif path == "/api/import-guides":
                 _send_json(self, import_guides())
+            elif path == "/api/watch":
+                _send_json(self, watch_status())
+            elif path == "/api/watch/alerts":
+                _send_json(self, watch_alerts())
+            elif path == "/api/watch/company":
+                try:
+                    _send_json(self, company_timeline(
+                        qs.get("name", [""])[0]))
+                except DashboardError as e:
+                    code = 404 if "Unknown company" in str(e) else 400
+                    _send_json(self, {"error": str(e)}, code)
+                return
             else:
                 _send_json(self, {"error": "not found"}, 404)
         except DashboardError as e:
@@ -650,6 +971,19 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                     body.get("role", ""), body.get("jd", ""),
                     tone=body.get("tone", "confident"),
                     length=body.get("length", "one-page")))
+                return
+            m = re.fullmatch(r"/api/watch/alerts/([^/]+)/read", path)
+            if m:
+                alert_id = urllib.parse.unquote(m.group(1))
+                try:
+                    alert_id = int(alert_id)
+                except (TypeError, ValueError):
+                    pass  # string ids are passed through unchanged
+                try:
+                    _send_json(self, watch_mark_read(alert_id))
+                except DashboardError as e:
+                    code = 404 if "No alert" in str(e) else 400
+                    _send_json(self, {"error": str(e)}, code)
                 return
             _send_json(self, {"error": "not found"}, 404)
         except DashboardError as e:

@@ -57,6 +57,7 @@ one ends with the exact next command to run.
 | `tailor` | Grounded résumé + cover letter in 4 tones and 2 lengths. Reorders *your* bullets; never invents experience. Now ends with an **ATS keyword check** (covered vs missing JD keywords) and a **what-changed** summary. |
 | `track` | Application tracker: add / list / update / stats / search / export-csv, with funnel + response/interview/offer rates and per-status next-action hints. Re-adding an existing company+role returns the existing record instead of duplicating. |
 | `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
+| `watch` | Poll company career pages (Greenhouse, Lever, RSS) and raise a match-gated alert per new posting. `watch add Acme --greenhouse acme`, `watch list`, `watch run`, `watch status`, `watch alerts --unread`, `watch alerts-read 3`, `watch threshold 70`. Per-run diffing with repost detection and per-source feed-health reporting. See [docs/watch.md](docs/watch.md). |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
@@ -64,7 +65,7 @@ one ends with the exact next command to run.
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
-| `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), **watchlist panel** (per-company monitor cards with feed health, new-postings alert feed with mark-read, per-company posting timelines with repost flags), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
 
 ## Job-source coverage (honest)
 
@@ -150,6 +151,7 @@ No analytics, no telemetry, no accounts.
 - [docs/adding_problems.md](docs/adding_problems.md) — add coding problems to the mock judge
 - [docs/adding_questions.md](docs/adding_questions.md) — add reported interview questions (source + URL required)
 - [docs/adding_sources.md](docs/adding_sources.md) — add a public job feed
+- [docs/watch.md](docs/watch.md) — watch company career pages: setup, source types, thresholds, alert workflow
 
 ## Tests
 

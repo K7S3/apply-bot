@@ -11,6 +11,7 @@
     python -m candid gmail import mail.mbox  # propose tracker entries from a Takeout mbox
     python -m candid linkedin import --zip LinkedIn-export.zip
     python -m candid import --gmail-takeout mail.mbox  # general import entry point
+    python -m candid watch run  # fetch watched boards, match, alert
 
 Run `python -m candid <command> --help` for details on each command.
 """
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "watch",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "watch": ["add", "remove", "list", "run", "status", "alerts",
+              "alerts-read", "threshold"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "AlertError", "MonitorError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -70,6 +73,8 @@ _NEXT_COMMAND = {
     "JudgeError": "python -m candid mock --help",
     "GmailError": "python -m candid gmail --help",
     "LinkedInError": "python -m candid linkedin guide",
+    "AlertError": "python -m candid watch --help",
+    "MonitorError": "python -m candid watch --help",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
 }
@@ -484,6 +489,116 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+def _monitors():
+    """Lazy import of the monitor engine (built by another worker)."""
+    try:
+        import importlib
+        # import_module (not `from candid import monitors`) so tests can
+        # inject a fake candid.monitors into sys.modules.
+        MON = importlib.import_module("candid.monitors")
+    except ImportError as exc:
+        sys.exit("The watch monitor engine (candid.monitors) isn't available yet.\n"
+                 f"Detail: {exc}")
+    return MON
+
+
+def cmd_watch(a):
+    from candid import alerts as AL
+    if a.what == "add":
+        MON = _monitors()
+        try:
+            MON.add_company(a.company)
+        except MON.MonitorError as e:
+            if "already monitored" not in str(e):
+                raise
+        source_type = ("greenhouse" if a.greenhouse else
+                       "lever" if a.lever else "rss")
+        kwargs = ({"board": a.greenhouse} if a.greenhouse else
+                  {"site": a.lever} if a.lever else {"url": a.rss})
+        src = MON.add_source(a.company, source_type, **kwargs)
+        print(f"Watching {a.company} ({source_type}: {src['label']}).")
+    elif a.what == "remove":
+        MON = _monitors()
+        try:
+            MON.remove_company(a.company)
+        except MON.MonitorError:
+            print(f"{a.company} was not being watched.")
+        else:
+            print(f"Stopped watching {a.company}.")
+    elif a.what == "list":
+        MON = _monitors()
+        companies = MON.list_companies()
+        if a.json:
+            print(json.dumps(companies, indent=2, default=str))
+        elif not companies:
+            print("Not watching any companies yet. "
+                  "Add one with `python -m candid watch add <company> --greenhouse <board>`.")
+        else:
+            for c in companies:
+                srcs = ", ".join(f"{s['type']}:{s['label']}"
+                                 for s in c.get("sources", [])) or "no sources"
+                print(f"{c['name']}  [{srcs}]")
+    elif a.what == "run":
+        prof = _profile()
+        MON = _monitors()
+        summary = MON.poll()
+        new_all, closed_all = [], []
+        for ckey, cs in summary.get("companies", {}).items():
+            name = cs.get("name", ckey)
+            for rec in cs.get("new", []):
+                new_all.append({**rec, "company": name})
+            for rec in cs.get("closed", []):
+                closed_all.append({**rec, "company": name})
+        totals = summary.get("totals", {})
+        threshold = AL.get_threshold()
+        result = AL.evaluate_postings(new_all, prof, threshold=threshold)
+        polled = [cs.get("name", ckey)
+                  for ckey, cs in summary.get("companies", {}).items()]
+        runs = AL.record_run(new_all, closed_all, companies=polled)
+        if a.json:
+            print(json.dumps({
+                "new_postings": len(new_all),
+                "closed_postings": len(closed_all),
+                "reposts": totals.get("reposts", 0),
+                "errors": totals.get("errors", 0),
+                "alerts_created": result["created"],
+                "below_threshold": result["below_threshold"],
+                "duplicates": result["duplicates"],
+                "threshold": threshold,
+                "runs": runs,
+            }, indent=2, default=str))
+        else:
+            print(AL.render_run_summary(result, threshold,
+                                        n_closed=len(closed_all)))
+            if totals.get("errors"):
+                print(f"  ⚠️  {totals['errors']} source fetch error(s) — "
+                      f"run `python -m candid watch status` for details.")
+    elif a.what == "status":
+        alerts = AL.load_alerts()
+        runs = AL.load_runs()
+        try:
+            companies = _monitors().list_companies()
+        except SystemExit:
+            companies = []
+        print(AL.render_status(companies, runs, alerts))
+    elif a.what == "alerts":
+        alerts = AL.load_alerts()
+        if a.unread:
+            alerts = [x for x in alerts if not x.get("read", False)]
+        if a.json:
+            print(json.dumps(alerts, indent=2, default=str))
+        else:
+            print(AL.render_alerts(alerts))
+    elif a.what == "alerts-read":
+        alert = AL.mark_read(a.id)
+        print(f"Marked alert #{alert['id']} as read: "
+              f"{alert.get('title')} @ {alert.get('company')}")
+    elif a.what == "threshold":
+        val = AL.set_threshold(a.n)
+        print(f"Alert threshold set to {val:g}. "
+              f"New postings alert when verdict is GO/CONDITIONAL or score >= {val:g}.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +1033,68 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # watch
+    s = _sub(sub, "watch", "Watch company career pages; get match alerts.", [
+        "python -m candid watch add Acme --greenhouse acme",
+        "python -m candid watch add Beta --lever beta",
+        "python -m candid watch list",
+        "python -m candid watch run",
+        "python -m candid watch alerts --unread",
+        "python -m candid watch threshold 70",
+    ])
+    ws = _nested(s)
+    t = _sub(ws, "add", "Start watching a company's career page.", [
+        "python -m candid watch add Acme --greenhouse acme",
+        "python -m candid watch add Beta --lever beta",
+        "python -m candid watch add Gamma --rss https://gamma.example.com/jobs.xml",
+    ])
+    t.add_argument("company", help="Company display name")
+    src = t.add_mutually_exclusive_group(required=True)
+    src.add_argument("--greenhouse", metavar="BOARD",
+                     help="Greenhouse board token (acme in boards.greenhouse.io/acme)")
+    src.add_argument("--lever", metavar="ORG",
+                     help="Lever org slug (acme in api.lever.co/v0/postings/acme)")
+    src.add_argument("--rss", metavar="URL", help="Jobs RSS/Atom feed URL")
+    t = _sub(ws, "remove", "Stop watching a company.", [
+        "python -m candid watch remove Acme",
+    ])
+    t.add_argument("company", help="Company display name")
+    t = _sub(ws, "list", "List watched companies.", [
+        "python -m candid watch list",
+        "python -m candid watch list --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the watched-company list as JSON (for scripting)")
+    t = _sub(ws, "run", "Fetch all watched boards, diff, match, and create alerts.", [
+        "python -m candid watch run",
+        "python -m candid watch run --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the run summary as JSON (for scripting)")
+    t = _sub(ws, "status", "Last run per company + alert counts.", [
+        "python -m candid watch status",
+    ])
+    t = _sub(ws, "alerts", "Show alerts (newest first).", [
+        "python -m candid watch alerts",
+        "python -m candid watch alerts --unread",
+        "python -m candid watch alerts --json",
+    ])
+    t.add_argument("--unread", action="store_true", help="Only unread alerts")
+    t.add_argument("--json", action="store_true",
+                   help="Print the alert list as JSON (for scripting)")
+    t = _sub(ws, "alerts-read", "Mark an alert as read (acknowledge).", [
+        "python -m candid watch alerts-read 3",
+    ])
+    t.add_argument("id", type=int, help="Alert id from `watch alerts`")
+    t = _sub(ws, "threshold", "Set the alert score threshold (0-100).", [
+        "python -m candid watch threshold 70",
+        "python -m candid watch threshold 60",
+    ])
+    t.add_argument("n", type=float,
+                   help="New threshold: new postings alert when verdict is "
+                        "GO/CONDITIONAL or score >= n (default 60)")
+    s.set_defaults(func=cmd_watch)
 
     return p
 
