@@ -65,6 +65,14 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `search` | Full-text search across applications, prep packs, tailored files, and debriefs. AND semantics, quoted phrases, ranked with title matches first, context snippets. `--json` for scripting. |
+| `analytics` | Data-driven answers: `funnel` (per-source funnel with applied-to-response/interview/offer conversion rates), `response-times` (days from application to first response, overall and per company), `sources` (source leaderboard). Sources are recorded with `track add --source` / `track update --source`; status history is tracked automatically. |
+| `variants` | Resume variant A/B tracking: register tailored versions per application, link them across apps, and see which tone/length gets responses (`variants stats`). |
+| `backup` | Full backup and restore of all candid data as a zip (tracker, profile, offers, prep packs, tailored files, salary DB) with a manifest. Restore always takes a pre-restore snapshot first. |
+| `retention` | Data retention controls: archive rejected/withdrawn/offer applications not updated in N days (default 180) out of the active tracker, with `--dry-run` preview and archive stats. |
+| `reports` | Weekly/monthly trend reports: applications added, responses, interviews, offers per period, in text or Markdown. |
+| `goals` | Weekly application goals: `goals set --target 5`, `goals show` for this week's progress and your streak of on-target weeks. |
+| `report` | Custom report builder: slice the tracker by status, source, company, and date range, exported to CSV or Markdown. |
 
 ## Job-source coverage (honest)
 

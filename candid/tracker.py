@@ -43,7 +43,8 @@ def _next_id(apps: list[dict]) -> int:
 
 
 def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
-        notes: str = "", path: str | Path | None = None) -> dict:
+        notes: str = "", source: str = "",
+        path: str | Path | None = None) -> dict:
     """Add an application. Returns the new record.
 
     If the same company+role is already tracked, returns the EXISTING
@@ -65,6 +66,7 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
         "jd_link": jd_link.strip(),
         "status": status,
         "notes": notes.strip(),
+        "source": source.strip(),
         "date_added": date.today().isoformat(),
         "date_updated": date.today().isoformat(),
         "prep_pack": "",
@@ -75,8 +77,15 @@ def add(company: str, role: str, *, jd_link: str = "", status: str = "saved",
 
 
 def update(app_id: int, *, status: str | None = None, notes: str | None = None,
-           prep_pack: str | None = None, path: str | Path | None = None) -> dict:
-    """Update an application's status/notes/prep_pack. Returns the record."""
+           prep_pack: str | None = None, source: str | None = None,
+           path: str | Path | None = None) -> dict:
+    """Update an application's status/notes/prep_pack/source. Returns the record.
+
+    On a status change the record's ``status_history`` list gains an entry
+    ``{"status": <new status>, "date": <today>}``. Records that predate the
+    history feature are seeded first with their previous status (dated from
+    ``date_updated``) so the history is never misleading.
+    """
     apps = _load(path)
     rec = next((a for a in apps if a.get("id") == app_id), None)
     if rec is None:
@@ -84,11 +93,24 @@ def update(app_id: int, *, status: str | None = None, notes: str | None = None,
     if status is not None:
         if status not in C.STATUSES:
             raise TrackerError(f"Unknown status '{status}'. Choose from: {', '.join(C.STATUSES)}")
+        if status != rec.get("status"):
+            history = rec.get("status_history")
+            if not isinstance(history, list):
+                history = []
+            if not history:
+                history.append({
+                    "status": rec.get("status"),
+                    "date": rec.get("date_updated"),
+                })
+            history.append({"status": status, "date": date.today().isoformat()})
+            rec["status_history"] = history
         rec["status"] = status
     if notes is not None:
         rec["notes"] = notes
     if prep_pack is not None:
         rec["prep_pack"] = prep_pack
+    if source is not None:
+        rec["source"] = source.strip()
     rec["date_updated"] = date.today().isoformat()
     _save(apps, path)
     return rec

@@ -32,7 +32,8 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "search", "analytics",
+    "variants", "backup", "retention", "reports", "goals", "report",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,13 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "analytics": ["funnel", "response-times", "sources"],
+    "variants": ["list", "register", "link", "stats"],
+    "backup": ["create", "list", "restore"],
+    "retention": ["run", "stats"],
+    "reports": ["weekly", "monthly"],
+    "goals": ["set", "show"],
+    "report": ["build"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,6 +63,8 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
+    "SearchError", "AnalyticsError", "VariantsError", "BackupError",
+    "RetentionError", "ReportsError", "GoalsError",
     "ValueError",
 }
 
@@ -72,6 +82,13 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "SearchError": "python -m candid search --help",
+    "AnalyticsError": "python -m candid analytics funnel",
+    "VariantsError": "python -m candid variants list",
+    "BackupError": "python -m candid backup list",
+    "RetentionError": "python -m candid retention run --dry-run",
+    "ReportsError": "python -m candid reports --help",
+    "GoalsError": "python -m candid goals --help",
 }
 
 
@@ -229,7 +246,7 @@ def cmd_track(a):
     from candid import tracker as T
     if a.what == "add":
         rec = T.add(a.company, a.role, jd_link=a.jd_link or "", status=a.status,
-                    notes=a.notes or "")
+                    notes=a.notes or "", source=getattr(a, "source", "") or "")
         if rec.get("duplicate"):
             print(f"Already tracked as #{rec['id']}: {rec['role']} @ {rec['company']} "
                   f"[{rec['status']}] — not duplicated.")
@@ -247,7 +264,8 @@ def cmd_track(a):
                  if len(apps) > limit else ""))
         print(T.render_list(shown))
     elif a.what == "update":
-        rec = T.update(a.id, status=a.status, notes=a.notes)
+        rec = T.update(a.id, status=a.status, notes=a.notes,
+                       source=getattr(a, "source", None))
         print(f"Updated #{rec['id']}: status={rec['status']}")
         if rec["status"] == "selected_for_interview":
             print("\n🎯 Interview! Generate a prep pack with:")
@@ -267,6 +285,124 @@ def cmd_track(a):
     elif a.what == "export-csv":
         path = T.export_csv(a.dest)
         print(f"Exported {len(T.list_apps())} applications to {path}")
+
+
+def cmd_search(a):
+    from candid import search as S
+    results = S.search_all(a.query)
+    if a.json:
+        print(json.dumps(results, indent=2, default=str))
+        return
+    print(S.render_results(results, limit=a.limit if a.limit and a.limit > 0 else 20))
+
+
+def cmd_analytics(a):
+    from candid import analytics as A
+    if a.what == "funnel":
+        f = A.funnel_by_source()
+        print(json.dumps(f, indent=2) if a.json else A.render_funnel(f))
+    elif a.what == "response-times":
+        t = A.time_to_response()
+        print(json.dumps(t, indent=2) if a.json else A.render_response_times(t))
+    elif a.what == "sources":
+        rows = A.sources_summary()
+        print(json.dumps(rows, indent=2) if a.json else A.render_sources(rows))
+
+
+def cmd_variants(a):
+    from candid import variants as V
+    if a.what == "list":
+        rows = V.list_variants(app_id=a.app_id)
+        if a.json:
+            print(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            print("No variants registered yet.")
+            print("Next: python -m candid variants register --app-id N --file PATH")
+            return
+        for r in rows:
+            print(f"{r['variant_id']}  app #{r['app_id']}  {r['file']}  "
+                  f"tone={r['tone'] or '-'} length={r['length'] or '-'} "
+                  f"label={r['label'] or '-'}")
+    elif a.what == "register":
+        if a.app_id is None or not a.file:
+            sys.exit("--app-id and --file are required to register a variant.")
+        rec = V.register_variant(a.app_id, a.file, tone=a.tone or "",
+                                 length=a.length or "", label=a.label or "")
+        print(f"Registered {rec['variant_id']} for application #{rec['app_id']}: {rec['file']}")
+    elif a.what == "link":
+        if not a.variant_id or a.app_id is None:
+            sys.exit("--variant-id and --app-id are required to link a variant.")
+        rec = V.link_variant(a.variant_id, a.app_id)
+        print(f"Linked {rec['variant_id']} to application #{rec['app_id']}.")
+    elif a.what == "stats":
+        stats = V.variant_stats()
+        if a.json:
+            print(json.dumps(stats, indent=2, default=str))
+            return
+        rows = stats["variants"]
+        print(f"{len(rows)} variant(s) tracked")
+        for r in rows:
+            mark = "yes" if r["responded"] else "no"
+            print(f"{r['variant_id']}  {r['company']} / {r['role']}  "
+                  f"status={r['status']}  response={mark}")
+        print("\nResponse rate by tone:")
+        for tone, b in stats["summary"]["by_tone"].items():
+            print(f"  {tone}: {b['responses']}/{b['variants']} ({b['response_rate'] * 100:.0f}%)")
+        print("Response rate by length:")
+        for length, b in stats["summary"]["by_length"].items():
+            print(f"  {length}: {b['responses']}/{b['variants']} ({b['response_rate'] * 100:.0f}%)")
+
+
+def cmd_backup(a):
+    from candid import backup as B
+    if a.what == "create":
+        path = B.create_backup(a.name)
+        print(f"Backup created: {path}")
+    elif a.what == "list":
+        print(B.render_backups(B.list_backups()))
+    elif a.what == "restore":
+        res = B.restore_backup(a.name, force=a.force)
+        print(f"Restored backup '{res['restored']}'. "
+              f"Pre-restore snapshot: {res['snapshot']}")
+
+
+def cmd_retention(a):
+    from candid import retention as R
+    if a.what == "run":
+        print(R.render_archive_summary(R.archive_old(days=a.days, dry_run=a.dry_run)))
+    elif a.what == "stats":
+        st = R.archive_stats()
+        if st["archived_count"]:
+            print(f"Archived: {st['archived_count']} "
+                  f"(oldest {st['oldest']}, newest {st['newest']})")
+        else:
+            print("Archive is empty. Next: run `python -m candid retention run --dry-run` to preview")
+
+
+def cmd_reports(a):
+    from candid import reports as R
+    rows = R.trend_report(a.what, n=a.n)
+    print(R.render_trend(rows, format=a.format))
+
+
+def cmd_goals(a):
+    from candid import goals as G
+    if a.what == "set":
+        goal = G.set_goal(target=a.target)
+        print(f"Goal set: {goal['target']} applications/week.")
+    elif a.what == "show":
+        print(G.render_goals(G.goal_status()))
+
+
+def cmd_report(a):
+    from candid import reports as R
+    if a.what == "build":
+        path = R.build_report(status=a.status, source=a.source or "",
+                              company=a.company or "",
+                              since=a.since or "", until=a.until or "",
+                              format=a.format, out=a.out)
+        print(f"Report written to {path}")
 
 
 def cmd_prep(a):
@@ -573,6 +709,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--company", required=True); t.add_argument("--role", required=True)
     t.add_argument("--jd-link", default=""); t.add_argument("--status", default="saved")
     t.add_argument("--notes", default="")
+    t.add_argument("--source", default="",
+                   help="Where the application came from (e.g. linkedin, referral, company-site)")
     t = _sub(ts, "list", "List tracked applications (default view: newest first, up to --limit).", [
         "python -m candid track list",
         "python -m candid track list --status applied",
@@ -590,6 +728,8 @@ def build_parser() -> argparse.ArgumentParser:
     ])
     t.add_argument("id", type=int)
     t.add_argument("--status", default=None); t.add_argument("--notes", default=None)
+    t.add_argument("--source", default=None,
+                   help="Set the source (e.g. linkedin, referral, company-site)")
     t = _sub(ts, "remove", "Remove an application.", [
         "python -m candid track remove 3",
     ])
@@ -918,6 +1058,165 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # search
+    s = _sub(sub, "search", "Full-text search across applications, prep packs, tailored files, and debriefs.", [
+        "python -m candid search python",
+        "python -m candid search \"machine learning\" --limit 5",
+    ])
+    s.add_argument("query", help="Search terms (all must match; use quotes for phrases)")
+    s.add_argument("--limit", type=int, default=20,
+                   help="Max results to show (default: 20)")
+    s.add_argument("--json", action="store_true",
+                   help="Emit results as JSON")
+    s.set_defaults(func=cmd_search)
+
+    # analytics
+    s = _sub(sub, "analytics", "Source attribution and response analytics.", [
+        "python -m candid analytics funnel",
+        "python -m candid analytics response-times",
+        "python -m candid analytics sources --json",
+    ])
+    asub = _nested(s)
+    t = _sub(asub, "funnel", "Per-source funnel with conversion rates.", [
+        "python -m candid analytics funnel",
+        "python -m candid analytics funnel --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the funnel as JSON (for scripting)")
+    t = _sub(asub, "response-times", "Days from application to first response.", [
+        "python -m candid analytics response-times",
+        "python -m candid analytics response-times --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print response-time stats as JSON (for scripting)")
+    t = _sub(asub, "sources", "Source leaderboard sorted by application count.", [
+        "python -m candid analytics sources",
+        "python -m candid analytics sources --json",
+    ])
+    t.add_argument("--json", action="store_true",
+                   help="Print the leaderboard as JSON (for scripting)")
+    s.set_defaults(func=cmd_analytics)
+
+    # variants
+    s = _sub(sub, "variants", "Track resume variants per application (A/B test which version works).", [
+        "python -m candid variants list --app-id 3",
+        "python -m candid variants register --app-id 3 --file tailored/acme-ds.md --tone confident --length one-page",
+        "python -m candid variants link --variant-id v1 --app-id 4",
+        "python -m candid variants stats --json",
+    ])
+    s.add_argument("what", choices=SUBCOMMANDS["variants"],
+                   help="list: show variants · register: add one · link: re-point to another app · stats: response-rate report")
+    s.add_argument("--app-id", type=int, default=None,
+                   help="Application id from `python -m candid track list`")
+    s.add_argument("--variant-id", help="Variant id, e.g. v1")
+    s.add_argument("--file", help="Path to the tailored resume file to register")
+    s.add_argument("--tone", default="", help="Tone used, e.g. confident")
+    s.add_argument("--length", default="", help="Length used, e.g. one-page")
+    s.add_argument("--label", default="", help="Free-form label, e.g. baseline")
+    s.add_argument("--json", action="store_true", help="Output JSON")
+    s.set_defaults(func=cmd_variants)
+
+    # backup
+    s = _sub(sub, "backup", "Back up and restore all your candid data.", [
+        "python -m candid backup create",
+        "python -m candid backup create --name before-cleanup",
+        "python -m candid backup list",
+        "python -m candid backup restore --name before-cleanup",
+    ])
+    bs = _nested(s)
+    t = _sub(bs, "create", "Create a zip backup of all your candid data.", [
+        "python -m candid backup create",
+        "python -m candid backup create --name before-cleanup",
+    ])
+    t.add_argument("--name", help="Backup name (default: candid-backup-YYYYMMDD-HHMMSS)")
+    t = _sub(bs, "list", "List your backups, newest first.", [
+        "python -m candid backup list",
+    ])
+    t = _sub(bs, "restore", "Restore a backup (takes a pre-restore snapshot first).", [
+        "python -m candid backup restore --name before-cleanup",
+    ])
+    t.add_argument("--name", required=True, help="Name of the backup to restore")
+    t.add_argument("--force", action="store_true",
+                   help="Restore even if the backup was made by a different candid version")
+    s.set_defaults(func=cmd_backup)
+
+    # retention
+    s = _sub(sub, "retention", "Archive old terminal applications out of the active tracker.", [
+        "python -m candid retention run --dry-run",
+        "python -m candid retention run --days 180",
+        "python -m candid retention stats",
+    ])
+    rs = _nested(s)
+    t = _sub(rs, "run", "Archive rejected/withdrawn/offer apps not updated in N days.", [
+        "python -m candid retention run --dry-run",
+        "python -m candid retention run --days 180",
+    ])
+    t.add_argument("--days", type=int, default=180,
+                   help="Archive terminal apps not updated in this many days (default: 180)")
+    t.add_argument("--dry-run", action="store_true",
+                   help="Show what would be archived without changing anything")
+    t = _sub(rs, "stats", "Show archive summary.", [
+        "python -m candid retention stats",
+    ])
+    s.set_defaults(func=cmd_retention)
+
+    # reports
+    s = _sub(sub, "reports", "Application trend reports (weekly/monthly).", [
+        "python -m candid reports weekly",
+        "python -m candid reports monthly -n 6 --format md",
+    ])
+    rps = _nested(s)
+    t = _sub(rps, "weekly", "Weekly trends: added, responses, interviews, offers.", [
+        "python -m candid reports weekly",
+        "python -m candid reports weekly -n 12 --format md",
+    ])
+    t.add_argument("-n", type=int, default=8, help="Number of weeks (default: 8)")
+    t.add_argument("--format", default="text", choices=["text", "md"])
+    t = _sub(rps, "monthly", "Monthly trends: added, responses, interviews, offers.", [
+        "python -m candid reports monthly",
+        "python -m candid reports monthly -n 12",
+    ])
+    t.add_argument("-n", type=int, default=8, help="Number of months (default: 8)")
+    t.add_argument("--format", default="text", choices=["text", "md"])
+    s.set_defaults(func=cmd_reports)
+
+    # goals
+    s = _sub(sub, "goals", "Weekly application goals: set a target, track progress.", [
+        "python -m candid goals set --target 5",
+        "python -m candid goals show",
+    ])
+    gs = _nested(s)
+    t = _sub(gs, "set", "Set your weekly applications goal.", [
+        "python -m candid goals set --target 5",
+    ])
+    t.add_argument("--target", type=int, default=5,
+                   help="Applications per week (default: 5)")
+    t = _sub(gs, "show", "Show this week's progress and streak.", [
+        "python -m candid goals show",
+    ])
+    s.set_defaults(func=cmd_goals)
+
+    # report (custom builder)
+    s = _sub(sub, "report", "Custom filtered reports over the tracker.", [
+        "python -m candid report build --status applied --format md",
+        "python -m candid report build --since 2026-09-01 --out apps.csv",
+    ])
+    rbs = _nested(s)
+    t = _sub(rbs, "build", "Build a filtered CSV/Markdown report.", [
+        "python -m candid report build",
+        "python -m candid report build --status applied --source referral",
+        "python -m candid report build --company Acme --since 2026-09-01 --until 2026-09-30 --format md --out report.md",
+    ])
+    t.add_argument("--status", default=None)
+    t.add_argument("--source", default=None)
+    t.add_argument("--company", default=None)
+    t.add_argument("--since", default=None, help="Only apps added on/after YYYY-MM-DD")
+    t.add_argument("--until", default=None, help="Only apps added on/before YYYY-MM-DD")
+    t.add_argument("--format", default="csv", choices=["csv", "md"])
+    t.add_argument("--out", default=None,
+                   help="Output file (default: candid_data/report-<ts>.<ext>)")
+    s.set_defaults(func=cmd_report)
 
     return p
 
