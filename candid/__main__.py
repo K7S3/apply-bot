@@ -33,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin", "patterns",
+    "dashboard", "import", "gmail", "linkedin", "patterns", "leveling", "promo",
 ]
 
 SUBCOMMANDS = {
@@ -51,6 +51,8 @@ SUBCOMMANDS = {
     "linkedin": ["import", "guide"],
     "patterns": ["list", "tags", "plan", "log", "due", "review",
                  "drill", "mastery", "cheatsheet", "reset"],
+    "leveling": ["list", "guide", "scope", "ladder", "map", "compare"],
+    "promo": ["checklist", "evidence", "packet", "timeline", "rubric", "gaps"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -59,6 +61,7 @@ _EXPECTED_ERRORS = {
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
     "PatternsError",
+    "LevelingError", "PromoError",
     "ValueError",
 }
 
@@ -77,6 +80,8 @@ _NEXT_COMMAND = {
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
     "PatternsError": "python -m candid patterns --help",
+    "LevelingError": "python -m candid leveling --help",
+    "PromoError": "python -m candid promo --help",
 }
 
 
@@ -597,6 +602,83 @@ def cmd_linkedin(a):
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
 
 
+def cmd_leveling(a):
+    from candid import leveling as L
+    if a.what == "list":
+        print(L.render_company_list())
+    elif a.what == "guide":
+        print(L.render_guide(a.company))
+    elif a.what == "scope":
+        print(L.render_scope(a.company, a.level))
+    elif a.what == "ladder":
+        print(L.render_ladder(a.company))
+    elif a.what == "map":
+        print(L.render_translation(a.from_company, a.level, a.to_company))
+    elif a.what == "compare":
+        print(L.render_compare(a.company, a.from_level, a.to_level))
+
+
+def _optional_profile():
+    """Profile when onboarding is done, else None (promo still works)."""
+    from candid import profile as P
+    try:
+        return P.load_profile()
+    except P.OnboardError:
+        return None
+
+
+def cmd_promo(a):
+    from candid import promo as PR
+    if a.what == "checklist":
+        prof = _optional_profile()
+        res = PR.checklist(prof, a.company, a.current, a.target)
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+        else:
+            print(PR.render_checklist(res))
+            if prof is None:
+                print("\nNote: no profile found — run "
+                      "`python -m candid onboard --resume your_resume.pdf` "
+                      "for a personalized checklist.")
+    elif a.what == "evidence":
+        if a.ev_what == "add":
+            rec = PR.add_evidence(a.text, company=a.company, level=a.level,
+                                  criterion=a.criterion, date_str=a.date)
+            print(f"Banked evidence #{rec['id']}"
+                  + (f" [{rec['criterion']}]" if rec["criterion"] else "")
+                  + f": {rec['text'][:80]}")
+        elif a.ev_what == "list":
+            print(PR.render_evidence_list(PR.list_evidence(company=a.company)))
+        elif a.ev_what == "remove":
+            rec = PR.remove_evidence(a.id)
+            print(f"Removed evidence #{rec['id']}.")
+    elif a.what == "packet":
+        prof = _optional_profile()
+        markdown, path = PR.build_packet(prof, a.company, a.target,
+                                         current=a.current, out=a.out or None)
+        print(f"Promo-packet outline saved to {path}\n")
+        print(markdown[:2500])
+        if len(markdown) > 2500:
+            print(f"\n... ({len(markdown) - 2500} more chars in the file)")
+    elif a.what == "timeline":
+        prof = _optional_profile()
+        res = PR.timeline(prof, a.company, a.target, current=a.current,
+                          months_at_level=a.months_at_level)
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+        else:
+            print(PR.render_timeline(res))
+    elif a.what == "rubric":
+        print(PR.render_rubric(PR.rubric_rows(a.company, a.current, a.target)))
+    elif a.what == "gaps":
+        prof = _optional_profile()
+        res = PR.gaps(prof, a.company, a.target)
+        if a.json:
+            print(json.dumps(res, indent=2, default=str))
+        else:
+            print(PR.render_gaps(res))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = CandidParser(prog="python -m candid",
                      description="The generic job-search copilot.",
@@ -1107,6 +1189,125 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # leveling
+    s = _sub(sub, "leveling", "IC leveling guides, scope, and level translation.", [
+        "python -m candid leveling list",
+        "python -m candid leveling guide --company meta",
+        "python -m candid leveling scope --company meta --level E5",
+        "python -m candid leveling ladder --company amazon",
+        "python -m candid leveling map --from meta --level E5 --to google",
+        "python -m candid leveling compare --company meta --from E4 --to E5",
+    ])
+    ls = _nested(s)
+    _sub(ls, "list", "Companies with leveling guides.", [
+        "python -m candid leveling list",
+    ])
+    t = _sub(ls, "guide", "Full IC ladder for a company.", [
+        "python -m candid leveling guide --company meta",
+        "python -m candid leveling guide --company google",
+    ])
+    t.add_argument("--company", required=True,
+                   help="meta | google | amazon | microsoft | apple | startup")
+    t = _sub(ls, "scope", "Scope expectations and promo criteria for one level.", [
+        "python -m candid leveling scope --company meta --level E5",
+        "python -m candid leveling scope --company amazon --level \"SDE III\"",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--level", required=True, help="Level code, e.g. E5, L5, 62, ICT4")
+    t = _sub(ls, "ladder", "ASCII ladder view of a company's levels.", [
+        "python -m candid leveling ladder --company microsoft",
+    ])
+    t.add_argument("--company", required=True)
+    t = _sub(ls, "map", "Translate a level between companies (approximation).", [
+        "python -m candid leveling map --from meta --level E5 --to google",
+        "python -m candid leveling map --from amazon --level \"SDE III\" --to meta",
+    ])
+    t.add_argument("--from", dest="from_company", required=True, help="Source company")
+    t.add_argument("--level", required=True, help="Source level code")
+    t.add_argument("--to", dest="to_company", required=True, help="Target company")
+    t = _sub(ls, "compare", "What changes between two levels at one company.", [
+        "python -m candid leveling compare --company meta --from E4 --to E5",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--from", dest="from_level", required=True)
+    t.add_argument("--to", dest="to_level", required=True)
+    s.set_defaults(func=cmd_leveling)
+
+    # promo
+    s = _sub(sub, "promo", "Promotion path planner: readiness, evidence, packet.", [
+        "python -m candid promo checklist --company meta --current E4 --target E5",
+        "python -m candid promo evidence add --text \"Led X migration\" --criterion impact-team-plus-scope",
+        "python -m candid promo gaps --company meta --target E5",
+        "python -m candid promo packet --company meta --target E5",
+        "python -m candid promo timeline --company meta --current E4 --target E5",
+    ])
+    ps = _nested(s)
+    t = _sub(ps, "checklist", "Readiness checklist vs the target level.", [
+        "python -m candid promo checklist --company meta --current E4 --target E5",
+        "python -m candid promo checklist --company google --current L4 --target L5 --json",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--current", required=True, help="Current level code")
+    t.add_argument("--target", required=True, help="Target level code")
+    t.add_argument("--json", action="store_true",
+                   help="Print the checklist as JSON (for scripting)")
+    t = _sub(ps, "evidence", "Bank promotion evidence (wins, launches, scope stories).", [
+        "python -m candid promo evidence add --text \"Led X migration across 2 teams\"",
+        "python -m candid promo evidence list",
+        "python -m candid promo evidence remove 1",
+    ])
+    es = _nested(t, dest="ev_what")
+    u = _sub(es, "add", "Bank one evidence item.", [
+        "python -m candid promo evidence add --text \"Led X migration\" --company meta --criterion impact-team-plus-scope",
+    ])
+    u.add_argument("--text", required=True, help="The win, in one or two sentences")
+    u.add_argument("--company", default="")
+    u.add_argument("--level", default="")
+    u.add_argument("--criterion", default="",
+                   help="Short tag for the promo criterion it supports")
+    u.add_argument("--date", default="", help="YYYY-MM-DD (default: today)")
+    u = _sub(es, "list", "List banked evidence.", [
+        "python -m candid promo evidence list",
+        "python -m candid promo evidence list --company meta",
+    ])
+    u.add_argument("--company", default="")
+    u = _sub(es, "remove", "Remove an evidence item.", [
+        "python -m candid promo evidence remove 1",
+    ])
+    u.add_argument("id", type=int)
+    t = _sub(ps, "packet", "Build a promo-packet outline (markdown).", [
+        "python -m candid promo packet --company meta --target E5",
+        "python -m candid promo packet --company meta --current E4 --target E5 --out packet.md",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--target", required=True)
+    t.add_argument("--current", default="")
+    t.add_argument("--out", default="", help="Output path (default: candid_data/promo_packets/)")
+    t = _sub(ps, "timeline", "Estimate months to promotion readiness.", [
+        "python -m candid promo timeline --company meta --current E4 --target E5",
+        "python -m candid promo timeline --company meta --target E5 --months-at-level 20",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--target", required=True)
+    t.add_argument("--current", default="")
+    t.add_argument("--months-at-level", type=int, default=None)
+    t.add_argument("--json", action="store_true",
+                   help="Print the timeline as JSON (for scripting)")
+    t = _sub(ps, "rubric", "Side-by-side scope for current vs target level.", [
+        "python -m candid promo rubric --company meta --current E4 --target E5",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--current", required=True)
+    t.add_argument("--target", required=True)
+    t = _sub(ps, "gaps", "Uncovered promo criteria with next actions.", [
+        "python -m candid promo gaps --company meta --target E5",
+    ])
+    t.add_argument("--company", required=True)
+    t.add_argument("--target", required=True)
+    t.add_argument("--json", action="store_true",
+                   help="Print the gaps as JSON (for scripting)")
+    s.set_defaults(func=cmd_promo)
 
     return p
 

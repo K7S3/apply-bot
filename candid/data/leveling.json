@@ -1,0 +1,881 @@
+{
+  "companies": {
+    "amazon": {
+      "aliases": [
+        "aws"
+      ],
+      "levels": [
+        {
+          "aka": [
+            "sde i",
+            "sde1",
+            "sde-1",
+            "l4",
+            "4"
+          ],
+          "code": "SDE I",
+          "promo_criteria": [
+            "Reliable delivery against commitments",
+            "Growing independence and ownership",
+            "Meets the quality and operational bar",
+            "Earns trust: does what they say"
+          ],
+          "rung": 0,
+          "scope": [
+            "Implements well-defined components and features",
+            "Learns AWS systems, operational practices, and the bar",
+            "Writes tested, reviewed code; participates in on-call with support",
+            "Documents work; communicates status"
+          ],
+          "summary": "Early-career engineer. Delivers components with guidance; learns Amazon's systems and bar.",
+          "title": "Software Development Engineer I (L4)",
+          "typical_months_to_next": 18,
+          "typical_years": "0-2"
+        },
+        {
+          "aka": [
+            "sde ii",
+            "sde2",
+            "sde-2",
+            "l5",
+            "5"
+          ],
+          "code": "SDE II",
+          "promo_criteria": [
+            "End-to-end ownership with operational excellence",
+            "Design quality at service scale",
+            "Mentorship and bar-raising contributions",
+            "Scope growth toward multi-service work"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns services end to end: design, build, deploy, operate",
+            "Designs for scale, resilience, and operational excellence",
+            "Mentors SDE Is; contributes to hiring and code reviews",
+            "Writes clear design docs and operational runbooks"
+          ],
+          "summary": "Mid-level engineer. Owns services end to end including operations.",
+          "title": "Software Development Engineer II (L5)",
+          "typical_months_to_next": 36,
+          "typical_years": "2-5"
+        },
+        {
+          "aka": [
+            "sde iii",
+            "sde3",
+            "sde-3",
+            "l6",
+            "6",
+            "senior"
+          ],
+          "code": "SDE III",
+          "promo_criteria": [
+            "Large-scope impact across teams",
+            "Architecture leadership recognized org-wide",
+            "Sustained delivery of complex programs",
+            "Mentorship and org-level contributions"
+          ],
+          "rung": 2,
+          "scope": [
+            "Leads large, ambiguous programs across teams",
+            "Sets architecture and standards for an area",
+            "Drives org-level initiatives; influences roadmaps",
+            "Mentors SDE IIs; raises the org's technical bar",
+            "Deep operational and business judgment"
+          ],
+          "summary": "Senior engineer at Amazon scope. Leads large ambiguous programs across teams.",
+          "title": "Software Development Engineer III (L6)",
+          "typical_months_to_next": 48,
+          "typical_years": "5-9"
+        },
+        {
+          "aka": [
+            "principal",
+            "principal sde",
+            "l7",
+            "7"
+          ],
+          "code": "Principal SDE",
+          "promo_criteria": [
+            "Company-level outcomes from your technical direction",
+            "Strategy-setting: bets the company follows",
+            "Talent development and senior advisory impact",
+            "Judgment on the hardest ambiguous problems"
+          ],
+          "rung": 3,
+          "scope": [
+            "Company-wide technical impact",
+            "Sets long-term architecture and technology strategy",
+            "Solves Amazon's hardest technical problems",
+            "Develops principal-track talent; advises senior leadership",
+            "External technical influence"
+          ],
+          "summary": "Principal engineer. Company-level technical leadership and strategy.",
+          "title": "Principal Software Development Engineer (L7)",
+          "typical_months_to_next": null,
+          "typical_years": "10+"
+        },
+        {
+          "aka": [
+            "sr principal",
+            "senior principal",
+            "l8",
+            "8"
+          ],
+          "code": "Sr Principal SDE",
+          "promo_criteria": [
+            "Transformative, industry-visible outcomes",
+            "Creates new technical or business capabilities",
+            "Shapes the company's long-term technical future"
+          ],
+          "rung": 4,
+          "scope": [
+            "Industry-level technical impact",
+            "Defines technology direction for large parts of Amazon",
+            "Creates new technical capabilities or businesses",
+            "Develops principals; shapes senior leadership thinking"
+          ],
+          "summary": "Senior principal. Industry-level impact; shapes Amazon's technology future.",
+          "title": "Senior Principal SDE (L8)",
+          "typical_months_to_next": null,
+          "typical_years": "15+"
+        }
+      ],
+      "name": "Amazon",
+      "track": "Software Development Engineer (IC)"
+    },
+    "apple": {
+      "aliases": [],
+      "levels": [
+        {
+          "aka": [
+            "ict2",
+            "2"
+          ],
+          "code": "ICT2",
+          "promo_criteria": [
+            "Reliable, high-quality delivery",
+            "Growing independence",
+            "Meets Apple's quality bar"
+          ],
+          "rung": 0,
+          "scope": [
+            "Delivers well-defined tasks with guidance",
+            "Learns Apple's tools, frameworks, and quality bar",
+            "Writes tested code; participates in review",
+            "Clear communication of status"
+          ],
+          "summary": "Early-career engineer. Executes defined work with high quality bar.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 18,
+          "typical_years": "0-2"
+        },
+        {
+          "aka": [
+            "ict3",
+            "3"
+          ],
+          "code": "ICT3",
+          "promo_criteria": [
+            "End-to-end feature ownership",
+            "Quality and craft at Apple bar",
+            "Cross-functional collaboration"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns features end to end",
+            "Designs components meeting Apple's quality bar",
+            "Collaborates across functions (design, QA, hardware)",
+            "Mentors junior engineers"
+          ],
+          "summary": "Mid-level engineer. Owns features across Apple's product stack.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 30,
+          "typical_years": "2-5"
+        },
+        {
+          "aka": [
+            "ict4",
+            "4",
+            "senior"
+          ],
+          "code": "ICT4",
+          "promo_criteria": [
+            "Team-plus technical impact",
+            "Architecture leadership",
+            "Delivery of ambiguous, complex work",
+            "Peer endorsement on craft and collaboration"
+          ],
+          "rung": 2,
+          "scope": [
+            "Leads complex projects; sets team technical direction",
+            "Drives architecture decisions",
+            "Influence beyond the immediate team",
+            "Handles ambiguity in product and technical space",
+            "Mentors engineers; upholds the quality bar"
+          ],
+          "summary": "Senior engineer. Technical leadership for the team and beyond.",
+          "title": "Senior Software Engineer",
+          "typical_months_to_next": 36,
+          "typical_years": "5-8"
+        },
+        {
+          "aka": [
+            "ict5",
+            "5",
+            "staff"
+          ],
+          "code": "ICT5",
+          "promo_criteria": [
+            "Org-level impact",
+            "Technical strategy ownership",
+            "Sustained leadership record"
+          ],
+          "rung": 3,
+          "scope": [
+            "Leads programs across teams and product areas",
+            "Owns technical strategy for an area",
+            "Drives high-ambiguity, high-impact initiatives",
+            "Multiplies org output through mentorship"
+          ],
+          "summary": "Staff engineer. Org-level impact across product areas.",
+          "title": "Staff Software Engineer",
+          "typical_months_to_next": 48,
+          "typical_years": "8-12"
+        },
+        {
+          "aka": [
+            "ict6",
+            "6",
+            "senior staff"
+          ],
+          "code": "ICT6",
+          "promo_criteria": [
+            "Company-level outcomes",
+            "Direction-setting technical leadership",
+            "Talent development at scale"
+          ],
+          "rung": 4,
+          "scope": [
+            "Company-level technical impact",
+            "Sets long-term direction for major areas",
+            "Solves Apple's hardest technical problems",
+            "Develops senior talent at scale"
+          ],
+          "summary": "Senior staff engineer. Company-level technical leadership.",
+          "title": "Senior Staff Software Engineer",
+          "typical_months_to_next": null,
+          "typical_years": "12+"
+        }
+      ],
+      "name": "Apple",
+      "track": "Software Engineer (IC, ICT ladder)"
+    },
+    "google": {
+      "aliases": [],
+      "levels": [
+        {
+          "aka": [
+            "l3",
+            "3"
+          ],
+          "code": "L3",
+          "promo_criteria": [
+            "Reliable delivery of assigned work",
+            "Growing independence over the first year",
+            "Meets Google's code quality and testing bar",
+            "Collaborates well with teammates"
+          ],
+          "rung": 0,
+          "scope": [
+            "Completes well-defined tasks with guidance",
+            "Learns Google's codebase, tools, and engineering practices",
+            "Writes tests; participates in code review",
+            "Communicates progress and blockers clearly"
+          ],
+          "summary": "Early-career engineer. Executes tasks, learns the stack, builds reliable delivery.",
+          "title": "Software Engineer II",
+          "typical_months_to_next": 18,
+          "typical_years": "0-2"
+        },
+        {
+          "aka": [
+            "l4",
+            "4"
+          ],
+          "code": "L4",
+          "promo_criteria": [
+            "Sustained project ownership and delivery",
+            "Design quality and documentation",
+            "Mentorship and code review contributions",
+            "Scope growth: bigger projects, more autonomy"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns projects end to end within the team",
+            "Designs systems; writes design docs",
+            "Reviews code and mentors L3 engineers",
+            "Coordinates with stakeholders on requirements"
+          ],
+          "summary": "Mid-level engineer. Owns projects and designs systems of moderate complexity.",
+          "title": "Software Engineer III",
+          "typical_months_to_next": 30,
+          "typical_years": "2-5"
+        },
+        {
+          "aka": [
+            "l5",
+            "5",
+            "senior"
+          ],
+          "code": "L5",
+          "promo_criteria": [
+            "Impact beyond the team boundary",
+            "Technical leadership recognized by peers",
+            "Delivery of ambiguous, complex work",
+            "Consistent Googleyness and collaboration signal"
+          ],
+          "rung": 2,
+          "scope": [
+            "Leads complex projects; often across teams",
+            "Sets technical direction for the team",
+            "Drives impact beyond the immediate team",
+            "Navigates ambiguity: frames problems, not just solutions",
+            "Mentors junior engineers; improves team practices"
+          ],
+          "summary": "Senior engineer. Technical leadership within the team and influence beyond it.",
+          "title": "Senior Software Engineer",
+          "typical_months_to_next": 36,
+          "typical_years": "5-8"
+        },
+        {
+          "aka": [
+            "l6",
+            "6",
+            "staff"
+          ],
+          "code": "L6",
+          "promo_criteria": [
+            "Org-level impact on metrics or platform",
+            "Recognized authority in a technical area",
+            "Leadership through influence across teams",
+            "Sustained performance across review cycles"
+          ],
+          "rung": 3,
+          "scope": [
+            "Leads programs spanning multiple teams",
+            "Owns technical strategy for an area",
+            "Drives ambiguous, high-stakes initiatives",
+            "Multiplies org output through mentorship and direction",
+            "Influences product direction with technical judgment"
+          ],
+          "summary": "Staff engineer. Org-level impact and technical strategy.",
+          "title": "Staff Software Engineer",
+          "typical_months_to_next": 48,
+          "typical_years": "8-12"
+        },
+        {
+          "aka": [
+            "l7",
+            "7",
+            "senior staff"
+          ],
+          "code": "L7",
+          "promo_criteria": [
+            "Multi-org outcomes tied to your leadership",
+            "Direction-setting technical bets that paid off",
+            "Talent development at scale",
+            "Judgment under high ambiguity and stakes"
+          ],
+          "rung": 4,
+          "scope": [
+            "Multi-org technical impact",
+            "Sets long-term direction for a large area",
+            "Tackles the hardest ambiguous problems",
+            "Grows senior talent at scale",
+            "External technical leadership"
+          ],
+          "summary": "Senior staff engineer. Multi-org impact; sets direction for large technical areas.",
+          "title": "Senior Staff Software Engineer",
+          "typical_months_to_next": null,
+          "typical_years": "12+"
+        }
+      ],
+      "name": "Google",
+      "track": "Software Engineer (IC)"
+    },
+    "meta": {
+      "aliases": [
+        "facebook",
+        "fb"
+      ],
+      "levels": [
+        {
+          "aka": [
+            "e3",
+            "3"
+          ],
+          "code": "E3",
+          "promo_criteria": [
+            "Consistent, reliable delivery of assigned work",
+            "Growing independence: needs less hand-holding over time",
+            "Code quality meets team bar; reviews are constructive",
+            "Positive peer signal on collaboration"
+          ],
+          "rung": 0,
+          "scope": [
+            "Delivers well-scoped tasks and bug fixes with guidance",
+            "Learns team codebase, tools, and development workflows",
+            "Writes tests for own code; participates in code review",
+            "Communicates status clearly; asks for help early when stuck"
+          ],
+          "summary": "Early-career engineer. Executes well-defined tasks, learns the stack, and builds a record of reliable delivery.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 18,
+          "typical_years": "0-2"
+        },
+        {
+          "aka": [
+            "e4",
+            "4"
+          ],
+          "code": "E4",
+          "promo_criteria": [
+            "Sustained delivery of meaningful, visible projects",
+            "Design quality: trade-offs considered, docs written",
+            "Influence beyond own tasks: mentors others, improves team practices",
+            "Evidence of growing scope: larger features, more stakeholders"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns features or services end to end: design, build, launch, maintain",
+            "Designs subsystems and writes design docs for medium-complexity work",
+            "Mentors interns and E3 engineers; gives useful code reviews",
+            "Partners with product/partner teams on scoping"
+          ],
+          "summary": "Mid-level engineer. Owns features end to end and starts designing subsystems.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 30,
+          "typical_years": "2-5"
+        },
+        {
+          "aka": [
+            "e5",
+            "5",
+            "senior"
+          ],
+          "code": "E5",
+          "promo_criteria": [
+            "Impact at team-plus scope: outcomes felt outside own team",
+            "Technical leadership: others follow your designs and direction",
+            "Consistent delivery of complex, ambiguous projects",
+            "Strong peer and cross-functional endorsement",
+            "Typically 1-2 years of sustained E5-level work before packet"
+          ],
+          "rung": 2,
+          "scope": [
+            "Leads projects spanning multiple engineers or teams",
+            "Sets technical direction for the team: architecture, standards, roadmaps",
+            "Drives impact beyond the immediate team (partner teams, org initiatives)",
+            "Handles ambiguity: defines the problem, not just the solution",
+            "Mentors E3/E4 engineers; raises the team's technical bar"
+          ],
+          "summary": "Senior engineer. Owns projects that span team boundaries and sets technical direction for a team.",
+          "title": "Senior Software Engineer",
+          "typical_months_to_next": 36,
+          "typical_years": "5-8"
+        },
+        {
+          "aka": [
+            "e6",
+            "6",
+            "staff"
+          ],
+          "code": "E6",
+          "promo_criteria": [
+            "Org-level impact: outcomes move org metrics",
+            "Recognized technical authority in an area",
+            "Leads through others: engineers seek your direction",
+            "Sustained record over multiple halves",
+            "Scope is the differentiator: size and ambiguity of problems owned"
+          ],
+          "rung": 3,
+          "scope": [
+            "Leads programs across multiple teams; aligns roadmaps",
+            "Owns org-level technical strategy in an area",
+            "Drives large, ambiguous initiatives from problem framing to launch",
+            "Develops senior engineers; multiplies the org's output",
+            "Influences product and business direction with technical insight"
+          ],
+          "summary": "Staff engineer. Multi-team programs and org-level technical leadership.",
+          "title": "Staff Software Engineer",
+          "typical_months_to_next": 48,
+          "typical_years": "8-12"
+        },
+        {
+          "aka": [
+            "e7",
+            "7",
+            "senior staff"
+          ],
+          "code": "E7",
+          "promo_criteria": [
+            "Company-level outcomes attributable to your leadership",
+            "Direction-setting: the company follows your technical bets",
+            "Talent multiplier at org scale",
+            "Judgment on high-stakes, high-ambiguity decisions"
+          ],
+          "rung": 4,
+          "scope": [
+            "Company-level technical impact across orgs",
+            "Sets long-term technical direction for a large area",
+            "Solves the company's hardest, most ambiguous problems",
+            "Builds and grows senior technical talent at scale",
+            "External visibility: represents the company technically"
+          ],
+          "summary": "Senior staff engineer. Company-level impact; sets direction for large orgs.",
+          "title": "Senior Staff Software Engineer",
+          "typical_months_to_next": null,
+          "typical_years": "12+"
+        }
+      ],
+      "name": "Meta",
+      "track": "Software Engineer (IC)"
+    },
+    "microsoft": {
+      "aliases": [
+        "msft"
+      ],
+      "levels": [
+        {
+          "aka": [
+            "59",
+            "sde"
+          ],
+          "code": "59",
+          "promo_criteria": [
+            "Reliable delivery",
+            "Growing independence",
+            "Quality bar met consistently"
+          ],
+          "rung": 0,
+          "scope": [
+            "Delivers assigned tasks and features with guidance",
+            "Learns codebase, tools, and engineering systems",
+            "Writes tests; participates in code review",
+            "Communicates status and blockers"
+          ],
+          "summary": "Early-career engineer. Executes assigned work and learns the team's systems.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 18,
+          "typical_years": "0-2"
+        },
+        {
+          "aka": [
+            "60"
+          ],
+          "code": "60",
+          "promo_criteria": [
+            "Independent feature delivery",
+            "Design contributions",
+            "Positive collaboration signal"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns features with moderate complexity",
+            "Contributes to design discussions",
+            "Mentors interns; helpful in code review",
+            "Partners with PM on scoping"
+          ],
+          "summary": "Engineer taking on larger features with growing independence.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 18,
+          "typical_years": "1-3"
+        },
+        {
+          "aka": [
+            "61",
+            "sde ii"
+          ],
+          "code": "61",
+          "promo_criteria": [
+            "End-to-end ownership",
+            "Design quality",
+            "Mentorship and team contributions"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns product areas end to end",
+            "Designs components and services",
+            "Mentors junior engineers",
+            "Drives quality and reliability improvements"
+          ],
+          "summary": "Mid-level engineer. Owns areas of the product end to end.",
+          "title": "Software Engineer II",
+          "typical_months_to_next": 24,
+          "typical_years": "2-5"
+        },
+        {
+          "aka": [
+            "62",
+            "senior"
+          ],
+          "code": "62",
+          "promo_criteria": [
+            "Team-plus impact",
+            "Technical leadership",
+            "Ambiguous project delivery",
+            "Strong peer endorsement"
+          ],
+          "rung": 2,
+          "scope": [
+            "Leads complex projects across the team",
+            "Sets technical direction: architecture and standards",
+            "Influences beyond the team",
+            "Handles ambiguity; defines problems",
+            "Mentors engineers; improves team practices"
+          ],
+          "summary": "Senior engineer. Leads projects and sets technical direction for the team.",
+          "title": "Senior Software Engineer",
+          "typical_months_to_next": 36,
+          "typical_years": "5-8"
+        },
+        {
+          "aka": [
+            "63"
+          ],
+          "code": "63",
+          "promo_criteria": [
+            "Cross-team impact",
+            "Recognized technical depth",
+            "Sustained senior-level delivery"
+          ],
+          "rung": 2,
+          "scope": [
+            "Leads larger cross-team efforts",
+            "Deeper technical authority in an area",
+            "Drives initiatives with org visibility",
+            "Mentors senior engineers"
+          ],
+          "summary": "Senior engineer with larger scope. Bridge level toward principal.",
+          "title": "Senior Software Engineer",
+          "typical_months_to_next": 30,
+          "typical_years": "6-10"
+        },
+        {
+          "aka": [
+            "64",
+            "principal"
+          ],
+          "code": "64",
+          "promo_criteria": [
+            "Org-level impact",
+            "Technical strategy ownership",
+            "Leadership through influence",
+            "Sustained record"
+          ],
+          "rung": 3,
+          "scope": [
+            "Leads programs across multiple teams",
+            "Owns technical strategy for an area",
+            "Drives ambiguous, high-impact initiatives",
+            "Multiplies org output; develops senior talent"
+          ],
+          "summary": "Principal engineer. Org-level technical leadership.",
+          "title": "Principal Software Engineer",
+          "typical_months_to_next": 42,
+          "typical_years": "8-12"
+        },
+        {
+          "aka": [
+            "65"
+          ],
+          "code": "65",
+          "promo_criteria": [
+            "Multi-org impact",
+            "Strategic technical bets",
+            "Senior talent development"
+          ],
+          "rung": 3,
+          "scope": [
+            "Broader org or multi-org programs",
+            "Longer-horizon technical strategy",
+            "High-stakes ambiguous decisions",
+            "Develops principals and senior staff"
+          ],
+          "summary": "Principal engineer with broader scope. Bridge toward partner.",
+          "title": "Principal Software Engineer",
+          "typical_months_to_next": 42,
+          "typical_years": "10-14"
+        },
+        {
+          "aka": [
+            "66",
+            "partner"
+          ],
+          "code": "66",
+          "promo_criteria": [
+            "Company-level outcomes",
+            "Direction-setting impact",
+            "Executive-level technical influence"
+          ],
+          "rung": 4,
+          "scope": [
+            "Company-level technical impact",
+            "Sets direction for large technical areas",
+            "Solves the hardest ambiguous problems",
+            "Shapes senior leadership technical thinking"
+          ],
+          "summary": "Partner engineer. Company-level impact and direction-setting.",
+          "title": "Partner Software Engineer",
+          "typical_months_to_next": null,
+          "typical_years": "12+"
+        }
+      ],
+      "name": "Microsoft",
+      "track": "Software Engineer (IC)"
+    },
+    "startup": {
+      "aliases": [
+        "generic",
+        "mid-size",
+        "midsize"
+      ],
+      "levels": [
+        {
+          "aka": [
+            "ic1",
+            "1",
+            "associate",
+            "junior"
+          ],
+          "code": "IC1",
+          "promo_criteria": [
+            "Consistent shipping",
+            "Growing independence",
+            "Team collaboration"
+          ],
+          "rung": 0,
+          "scope": [
+            "Ships tickets and small features with guidance",
+            "Learns the product, customers, and codebase",
+            "Writes tests; participates in review",
+            "Asks questions; communicates blockers"
+          ],
+          "summary": "Early-career engineer. Ships with guidance; learns the product and stack.",
+          "title": "Associate Engineer",
+          "typical_months_to_next": 12,
+          "typical_years": "0-2"
+        },
+        {
+          "aka": [
+            "ic2",
+            "2",
+            "engineer",
+            "mid"
+          ],
+          "code": "IC2",
+          "promo_criteria": [
+            "Independent delivery at startup pace",
+            "Pragmatic engineering judgment",
+            "Positive impact on team velocity"
+          ],
+          "rung": 1,
+          "scope": [
+            "Owns features end to end",
+            "Makes pragmatic build-vs-buy and scope trade-offs",
+            "Helps with hiring and onboarding",
+            "Balances speed with quality"
+          ],
+          "summary": "Mid-level engineer. Owns features in a fast-moving environment.",
+          "title": "Software Engineer",
+          "typical_months_to_next": 24,
+          "typical_years": "2-4"
+        },
+        {
+          "aka": [
+            "ic3",
+            "3",
+            "senior"
+          ],
+          "code": "IC3",
+          "promo_criteria": [
+            "Ownership of business-critical systems",
+            "Technical leadership",
+            "Business impact of engineering work"
+          ],
+          "rung": 2,
+          "scope": [
+            "Owns critical systems and architecture decisions",
+            "Sets technical direction for the team",
+            "Drives projects with business impact",
+            "Mentors engineers; improves engineering culture"
+          ],
+          "summary": "Senior engineer. Technical leader for the team; owns critical systems.",
+          "title": "Senior Engineer",
+          "typical_months_to_next": 30,
+          "typical_years": "4-7"
+        },
+        {
+          "aka": [
+            "ic4",
+            "4",
+            "staff"
+          ],
+          "code": "IC4",
+          "promo_criteria": [
+            "Company-level technical impact",
+            "Strategy and direction-setting",
+            "Org-building contributions"
+          ],
+          "rung": 3,
+          "scope": [
+            "Sets company technical strategy",
+            "Leads the hardest technical initiatives",
+            "Influences product and business direction",
+            "Builds engineering org practices"
+          ],
+          "summary": "Staff engineer. Company-level technical leadership in a smaller org.",
+          "title": "Staff Engineer",
+          "typical_months_to_next": 36,
+          "typical_years": "7-11"
+        },
+        {
+          "aka": [
+            "ic5",
+            "5",
+            "principal"
+          ],
+          "code": "IC5",
+          "promo_criteria": [
+            "Transformative technical outcomes",
+            "Vision-setting that the company follows",
+            "Leadership development"
+          ],
+          "rung": 4,
+          "scope": [
+            "Defines long-term technical vision",
+            "Tackles existential technical bets",
+            "Represents the company technically",
+            "Develops technical leaders"
+          ],
+          "summary": "Principal engineer. Defines the technical future of the company.",
+          "title": "Principal Engineer",
+          "typical_months_to_next": null,
+          "typical_years": "11+"
+        }
+      ],
+      "name": "Startup / mid-size (generic)",
+      "track": "Software Engineer (IC)"
+    }
+  },
+  "disclaimer": "Reference approximation for planning only. Leveling is company-internal and changes over time; verify against official leveling docs and your manager before any promotion decision. Comp varies widely by location and year; use `python -m candid salary lookup` for market data instead.",
+  "rung_meanings": {
+    "0": "Early career: executes well-defined work, builds fundamentals",
+    "1": "Mid: owns medium work end to end, starting to influence others",
+    "2": "Senior: owns projects across a team, sets technical direction",
+    "3": "Staff: multi-team programs, org-level technical leadership",
+    "4": "Principal/senior staff: org-wide or company-level impact",
+    "5": "Distinguished/fellow: industry-level impact"
+  }
+}

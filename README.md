@@ -70,6 +70,8 @@ one ends with the exact next command to run.
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
+| `leveling` | IC leveling guides for 6 companies (Meta, Google, Amazon, Microsoft, Apple, startup): `list`, `guide`, `scope` (expectations per level), `ladder`, `map` (cross-company level translation), `compare` (what changes between two levels). Reference approximations - verify against official docs. |
+| `promo` | Promotion path planner: `checklist` (readiness vs target level, from your profile), `evidence add/list/remove` (bank wins mapped to promo criteria), `gaps` (uncovered criteria + next actions), `timeline` (months-to-ready estimate), `rubric` (current vs target side by side), `packet` (promo-packet outline builder, markdown). See [docs/promotion.md](docs/promotion.md). |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
 
 ## Job-source coverage (honest)

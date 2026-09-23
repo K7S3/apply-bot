@@ -18,6 +18,10 @@ Modules:
     jobs      curated job discovery → tracker pipeline
     patterns  coding patterns curriculum: taxonomy, gap-driven Blind-75-style
               study plans, spaced repetition, drills, mastery, cheat sheets
+    leveling  IC leveling guides: ladders, scope per level, cross-company
+              level translation
+    promo     promotion path planner: readiness checklist, evidence bank,
+              gap analysis, timeline estimate, packet outline builder
 
 Everything runs locally and deterministically, except the ``mock ai``
 interviewer dialogue which uses the already-configured Gemini fast path.
