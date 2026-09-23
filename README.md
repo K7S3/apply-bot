@@ -65,6 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
+| `staff` | Staff/principal interview prep: scope-and-influence question bank (40 practice prompts, L6/L7 labels) with behavioral rubrics (`questions`, `rubric`), system-design-at-scale drills with 10x twists and org constraints plus a tech-strategy memo drill (`design`, `memo`), STAR+I story upgrades and a promo-packet builder from your own profile (`story`, `packet`), ambiguity decomposition drills and leveling calibration (`ambiguity`, `level`), cross-org influence scenarios and mentorship prep (`influence`, `mentor`). All prompts are labeled candid practice prompts; nothing invents your experience. |
 
 ## Job-source coverage (honest)
 

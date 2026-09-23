@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import importlib
 import json
 import re
 import sys
@@ -32,7 +33,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "staff",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +49,8 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "staff": ["questions", "rubric", "design", "memo", "story",
+              "packet", "ambiguity", "level", "influence", "mentor"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -55,7 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "StaffError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "StaffError": "python -m candid staff --help",
 }
 
 
@@ -484,6 +488,29 @@ def cmd_linkedin(a):
               f"{res['skills']} skills, {res['education']} education entries.")
         print(f"Profile now: {prof.get('name', '')} — {prof.get('headline', '')} "
               f"({prof.get('seniority')}, ~{prof.get('years_experience')} yrs)")
+
+
+#: staff leaf subcommand -> owning module. Each module's main(argv) expects
+#: the leaf word first, then the leaf's own flags.
+_STAFF_MODULES = {
+    "questions": "candid.staff_bank",
+    "rubric": "candid.staff_bank",
+    "design": "candid.staff_design",
+    "memo": "candid.staff_design",
+    "story": "candid.staff_impact",
+    "packet": "candid.staff_impact",
+    "ambiguity": "candid.staff_assess",
+    "level": "candid.staff_assess",
+    "influence": "candid.staff_lead",
+    "mentor": "candid.staff_lead",
+}
+
+
+def cmd_staff(a):
+    mod = importlib.import_module(_STAFF_MODULES[a.leaf])
+    rc = mod.main([a.leaf] + list(a.rest))
+    if rc:
+        sys.exit(rc)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -918,6 +945,21 @@ def build_parser() -> argparse.ArgumentParser:
         "python -m candid linkedin guide",
     ])
     s.set_defaults(func=cmd_linkedin)
+
+    # staff
+    s = _sub(sub, "staff", "Staff/principal engineer interview prep.", [
+        "python -m candid staff questions --dimension influence",
+        "python -m candid staff rubric --dimension mentorship",
+        "python -m candid staff design --list",
+        "python -m candid staff packet --out staff-packet.md",
+    ])
+    s.add_argument("leaf",
+                   choices=["questions", "rubric", "design", "memo", "story",
+                            "packet", "ambiguity", "level", "influence", "mentor"],
+                   help="Staff prep area (each has its own --help)")
+    s.add_argument("rest", nargs=argparse.REMAINDER,
+                   help="Flags for the chosen staff area")
+    s.set_defaults(func=cmd_staff)
 
     return p
 
