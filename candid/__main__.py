@@ -31,7 +31,7 @@ from candid import __version__
 
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
-    "followup", "offer", "negotiate", "salary", "mock", "jobs",
+    "followup", "onsite", "offer", "negotiate", "salary", "mock", "jobs",
     "dashboard", "import", "gmail", "linkedin",
 ]
 
@@ -40,6 +40,9 @@ SUBCOMMANDS = {
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
+    "onsite": ["plan", "plans", "add-round", "remove-round", "timeline",
+               "checklist", "check", "prep", "energy", "morning",
+               "questions", "notes", "summary", "delete"],
     "offer": ["add", "list", "compare", "export"],
     "negotiate": ["playbook", "script", "counter"],
     "salary": ["lookup", "import-lca", "parse-range"],
@@ -55,7 +58,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "OnsiteError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +75,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "OnsiteError": "python -m candid onsite --help",
 }
 
 
@@ -292,6 +296,73 @@ def cmd_followup(a):
                          last_contact=a.last_contact or "", tone=a.tone))
     elif a.what == "referral":
         print(F.referral_ask(name, a.person, a.role, a.company, connection=a.topics or ""))
+
+
+def _onsite_plan_id(a):
+    from candid import onsite as O
+    if getattr(a, "plan_id", None):
+        return a.plan_id
+    return O.latest_plan()["id"]
+
+
+def cmd_onsite(a):
+    from candid import onsite as O
+    if a.what == "plan":
+        plan = O.create_plan(a.company, a.role, a.date, mode=a.mode,
+                             location=a.location or "",
+                             commute_min=a.commute_min,
+                             rounds=tuple(a.round or ()))
+        if plan.get("duplicate"):
+            print(f"Already planned as #{plan['id']}: {plan['role']} @ {plan['company']} "
+                  f"on {plan['date']} — not duplicated.")
+        else:
+            print(f"Created day plan #{plan['id']}: {plan['role']} @ {plan['company']} "
+                  f"on {plan['date']} [{plan['mode']}]")
+            print(f"  {len(plan['checklist'])} checklist items generated; "
+                  f"{len(plan['rounds'])} round(s) scheduled.")
+            if not plan["rounds"]:
+                print(f"  Next: python -m candid onsite add-round --plan-id {plan['id']} "
+                      f"--round \"10:00 coding 45\"")
+    elif a.what == "plans":
+        plans = O.list_plans()
+        if a.limit and a.limit > 0:
+            plans = plans[:a.limit]
+        print(O.render_plans(plans))
+    elif a.what == "add-round":
+        rnd = O.add_round(_onsite_plan_id(a), a.round,
+                          interviewer=a.interviewer or "", where=a.where or "")
+        print(f"Added round #{rnd['id']}: {rnd['title']} "
+              f"{O.fmt_time(rnd['start'])}-{O.fmt_time(rnd['start'] + rnd['minutes'])} "
+              f"({rnd['minutes']}m)")
+    elif a.what == "remove-round":
+        O.remove_round(_onsite_plan_id(a), a.round_id)
+        print(f"Removed round #{a.round_id}.")
+    elif a.what == "timeline":
+        print(O.timeline(_onsite_plan_id(a)))
+    elif a.what == "checklist":
+        print(O.render_checklist(_onsite_plan_id(a)))
+    elif a.what == "check":
+        item = O.set_check(_onsite_plan_id(a), a.item_id, not a.undo)
+        state = "done" if item["done"] else "not done"
+        print(f"Item #{item['id']} marked {state}: {item['label']}")
+    elif a.what == "prep":
+        print(O.prep_reminders(_onsite_plan_id(a), round_id=a.round_id))
+    elif a.what == "energy":
+        print(O.energy_plan(_onsite_plan_id(a)))
+    elif a.what == "morning":
+        print(O.morning_plan(_onsite_plan_id(a)))
+    elif a.what == "questions":
+        print(O.questions(kind=a.kind, plan_id=a.plan_id))
+    elif a.what == "notes":
+        O.set_notes(_onsite_plan_id(a), a.text, round_id=a.round_id)
+        where = f"round #{a.round_id}" if a.round_id else "the day"
+        print(f"Saved notes for {where}.")
+    elif a.what == "summary":
+        dest = O.summary(_onsite_plan_id(a), out=a.out or None)
+        print(f"Wrote day summary to {dest}")
+    elif a.what == "delete":
+        O.delete_plan(a.plan_id)
+        print(f"Deleted day plan #{a.plan_id}.")
 
 
 def cmd_offer(a):
@@ -652,6 +723,97 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--tone", default="warm", choices=["warm", "formal", "concise"])
     t.add_argument("--topics", default="", help="Your connection to them")
     s.set_defaults(func=cmd_followup)
+
+    # onsite
+    s = _sub(sub, "onsite", "Plan an interview day: schedule, logistics, energy.", [
+        "python -m candid onsite plan --company Acme --role \"Data Scientist\" --date 2026-10-05 --mode onsite --commute-min 40",
+        "python -m candid onsite add-round --round \"10:00 coding 45\" --interviewer \"Jane Doe\" --where \"Room 4B\"",
+        "python -m candid onsite timeline",
+        "python -m candid onsite energy",
+    ])
+    os_ = _nested(s)
+    t = _sub(os_, "plan", "Create an interview-day plan.", [
+        "python -m candid onsite plan --company Acme --role \"Data Scientist\" --date 2026-10-05",
+        "python -m candid onsite plan --company Acme --role DS --date 2026-10-05 --mode virtual",
+        "python -m candid onsite plan --company Acme --role DS --date 2026-10-05 --round \"10:00 coding 45\" --round \"11:00 behavioral 45\"",
+    ])
+    t.add_argument("--company", required=True); t.add_argument("--role", required=True)
+    t.add_argument("--date", required=True, help="Interview date as YYYY-MM-DD")
+    t.add_argument("--mode", default="onsite", choices=["onsite", "virtual", "hybrid"])
+    t.add_argument("--location", default="", help="Office address or video link")
+    t.add_argument("--commute-min", type=int, default=0, help="One-way commute in minutes")
+    t.add_argument("--round", action="append", default=None,
+                   help="Round spec 'START KIND MINUTES [TITLE...]' e.g. \"10:00 coding 45\"; repeatable")
+    t = _sub(os_, "plans", "List day plans.", [
+        "python -m candid onsite plans",
+    ])
+    t.add_argument("--limit", type=int, default=0)
+    t = _sub(os_, "add-round", "Add a round to a plan (overlaps are rejected).", [
+        "python -m candid onsite add-round --plan-id 1 --round \"10:00 coding 45\" --interviewer \"Jane Doe\"",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--round", required=True, help="Round spec 'START KIND MINUTES [TITLE...]'")
+    t.add_argument("--interviewer", default="")
+    t.add_argument("--where", default="", help="Room or video link for this round")
+    t = _sub(os_, "remove-round", "Remove a round from a plan.", [
+        "python -m candid onsite remove-round --plan-id 1 --round-id 2",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--round-id", type=int, required=True)
+    t = _sub(os_, "timeline", "Render the day timeline with gap analysis.", [
+        "python -m candid onsite timeline",
+        "python -m candid onsite timeline --plan-id 1",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t = _sub(os_, "checklist", "Show the logistics checklist.", [
+        "python -m candid onsite checklist",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t = _sub(os_, "check", "Check off (or uncheck) a checklist item.", [
+        "python -m candid onsite check --item-id 3",
+        "python -m candid onsite check --item-id 3 --undo",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--item-id", type=int, required=True)
+    t.add_argument("--undo", action="store_true", help="Mark the item not done")
+    t = _sub(os_, "prep", "Per-round prep reminders for the day.", [
+        "python -m candid onsite prep",
+        "python -m candid onsite prep --round-id 1",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--round-id", type=int, default=None)
+    t = _sub(os_, "energy", "Energy plan: sleep, meals, breaks, caffeine.", [
+        "python -m candid onsite energy",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t = _sub(os_, "morning", "Morning-of reverse timeline (wake, leave-by, arrive).", [
+        "python -m candid onsite morning",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t = _sub(os_, "questions", "Questions to ask, per round kind or for a whole plan.", [
+        "python -m candid onsite questions --kind behavioral",
+        "python -m candid onsite questions --plan-id 1",
+    ])
+    t.add_argument("--kind", default=None, help="Round kind, e.g. coding, behavioral")
+    t.add_argument("--plan-id", type=int, default=None)
+    t = _sub(os_, "notes", "Save notes for the day or one round.", [
+        "python -m candid onsite notes --text \"Strong culture, slow hiring bar\"",
+        "python -m candid onsite notes --round-id 1 --text \"Asked about rate limiting\"",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--round-id", type=int, default=None)
+    t.add_argument("--text", required=True)
+    t = _sub(os_, "summary", "Export the day to Markdown.", [
+        "python -m candid onsite summary",
+        "python -m candid onsite summary --out /tmp/onsite-day.md",
+    ])
+    t.add_argument("--plan-id", type=int, default=None, help="Plan id (default: latest)")
+    t.add_argument("--out", default=None, help="Output path (default: candid_data/onsite_<id>_summary.md)")
+    t = _sub(os_, "delete", "Delete a day plan.", [
+        "python -m candid onsite delete --plan-id 1",
+    ])
+    t.add_argument("--plan-id", type=int, required=True)
+    s.set_defaults(func=cmd_onsite)
 
     # offer
     s = _sub(sub, "offer", "Record and compare offers.", [

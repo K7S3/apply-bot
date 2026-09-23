@@ -63,6 +63,7 @@ one ends with the exact next command to run.
 | `offer` | Normalize offers (base + bonus + sign-on + equity/vesting + benefits) into comparable $/yr, side-by-side tables, rough tax note, and markdown export (`offer export`). |
 | `negotiate` | BATNA playbook + pre-call checklist, scenario scripts (lowball / competing offer / exploding deadline / level pushback / leveling-up / remote flexibility), and counteroffer email drafts. |
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
+| `onsite` | Onsite day planner: build the interview-day schedule round by round (overlap detection, 9 round kinds), printable timeline with gap analysis, mode-aware logistics checklist (onsite / virtual / hybrid), per-round prep reminders, energy plan (sleep target, meal windows, breaks, caffeine cutoff), morning-of reverse timeline, questions-to-ask bank, per-round notes, and a Markdown day summary. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
 
@@ -132,8 +133,8 @@ Rules that hold for every source:
 
 Everything candid learns about you lives in `candid_data/` (git-ignored):
 `profile.json`, `tracker.json`, `offers.json`, `salary.db`, prep packs,
-tailored output, mock sessions, and `gmail_proposals.json` (pending Gmail
-import proposals). Delete the folder and you're forgotten — including every
+tailored output, mock sessions, `onsite.json` (day plans), and
+`gmail_proposals.json` (pending Gmail import proposals). Delete the folder and you're forgotten — including every
 proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
