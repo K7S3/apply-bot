@@ -56,7 +56,8 @@ one ends with the exact next command to run.
 | `match` | Score any JD 0–100 (skills / seniority / domain / title fit) with a GO / CONDITIONAL / NO-GO verdict. Section-weighted skill extraction, explicit "N+ years" handling, per-skill JD evidence, and "how to close it" pointers for missing must-haves. Accepts text, a file, a URL, or stdin. `--json` for scripting. |
 | `tailor` | Grounded résumé + cover letter in 4 tones and 2 lengths. Reorders *your* bullets; never invents experience. Now ends with an **ATS keyword check** (covered vs missing JD keywords) and a **what-changed** summary. |
 | `track` | Application tracker: add / list / update / stats / search / export-csv, with funnel + response/interview/offer rates and per-status next-action hints. Re-adding an existing company+role returns the existing record instead of duplicating. |
-| `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's two public APIs, not the whole web. |
+| `jobs` | Curate open postings from public feeds, score them against your profile, and save the good ones to the tracker. `--days N` for recency, `--min-score N` to gate tracker writes, cross-source dedupe, phrase-aware ranking. See [coverage](#job-source-coverage-honest) — it's four public feeds, not the whole web. |
+| `nonprofit` | Mission-driven job search: curate from nonprofit feeds (`sources`), score a JD's mission fit against your profile's optional `cause_interests` (`mission-fit`), sourced nonprofit interview questions (`questions`), a nonprofit/org-status check with PSLF framing (`org-status`), honest nonprofit comp notes and negotiation guidance (`comp-note`, `negotiate-guide`), a "why this mission" pitch scaffold (`pitch`), a curated employer list (`employers`), and a weekly mission digest (`digest`). See [docs/nonprofit.md](docs/nonprofit.md). |
 | `prep` | Role-aware interview prep pack: real reported company questions (with source links) or an explicit "no verified questions" fallback, gap-prioritized concept deep-dives, STAR prompts built from *your* resume bullets, company-research checklist, comp talking points, day-before checklist. Exportable Markdown. |
 | `mock` | Mock interviews: 15 seeded coding problems with a **sandboxed judge** (visible + hidden tests, hints, reference solutions; infinite loops fail fast per-test), behavioral STAR practice, system-design prompts, and an optional AI interviewer. Sandboxing limits CPU/memory/files per run; note the judge is built for running *your own* practice code, not untrusted third-party code (network is not blocked at the OS namespace level). |
 | `salary` | Salary intelligence: import DOL H-1B LCA disclosure data (CSV), parse posted ranges, look up p25/median/p75 by company + title with per-row source attribution, plus title-level aggregation across companies. |
@@ -68,11 +69,15 @@ one ends with the exact next command to run.
 
 ## Job-source coverage (honest)
 
-`jobs curate` pulls from **two free, no-login JSON feeds**: Arbeitnow and
-RemoteOK. That's the entire coverage today. It does *not* search the web at
-large, read company career pages, or touch anything behind a login — and the
-CLI never claims otherwise. Adding a new public feed is a ~20-line adapter;
-see [docs/adding_sources.md](docs/adding_sources.md).
+`jobs curate` pulls from **four free, no-login public feeds**: Arbeitnow and
+RemoteOK (JSON APIs) plus ReliefWeb Jobs and ReliefWeb bridge roles
+(Internships / Volunteering / Fellowships, via the public ReliefWeb Jobs
+RSS — the ReliefWeb v1 API is retired and v2 needs an approved appname, so
+the RSS feed is what works without a key). That's the entire coverage today.
+It does *not* search the web at large, read company career pages, or touch
+anything behind a login — and the CLI never claims otherwise. Adding a new
+public feed is a ~20-line adapter; see
+[docs/adding_sources.md](docs/adding_sources.md).
 
 ## Salary data: sources and limits
 
@@ -138,7 +143,7 @@ proposal and anything imported from a Takeout export or LinkedIn ZIP.
 Sample data is fictional (meet Alex Rivera) and lives in `samples/candid/`.
 
 The only network calls candid makes:
-- `jobs curate` → the two public job feeds above.
+- `jobs curate` → the four public job feeds above.
 - `match --jd <url>` → fetches the JD page you pointed it at.
 - `mock ai` → Gemini, **only** for conversational interview dialogue, only
   when you run it.
@@ -157,20 +162,22 @@ No analytics, no telemetry, no accounts.
 python3 -m pytest tests/ -q
 ```
 
-249 tests covering profile parsing (incl. LinkedIn-export text and
+335 tests covering profile parsing (incl. LinkedIn-export text and
 experience dedupe), section-weighted matching with JD evidence and
 missing-skill pointers, tailoring (ATS keyword check, what-changed,
 never-invent guarantee), tracker (duplicate handling, search, CSV export),
 salary (LCA import variants, title aggregation), judge verdicts (incl.
 infinite-loop timeouts) and the problem bank, prep packs (gap-aware,
-STAR prompts), offers (sign-on amortization, markdown export), negotiation
-scenarios, follow-ups, jobs curation (recency/min-score filters, dedupe),
+STAR prompts, nonprofit mission-alignment questions), offers (sign-on
+amortization, markdown export), negotiation scenarios, follow-ups, jobs
+curation (recency/min-score filters, dedupe, ReliefWeb nonprofit feeds),
 Gmail Takeout mbox import (6-kind classification, multipart handling),
 LinkedIn export import, CLI UX (typo suggestions, `--json`, friendly
-errors), and the dashboard HTTP endpoints (curate, dismiss, tailor-diff,
-`/api/import` multipart upload, import guides, and an HTML↔API
-cross-check). The mock judge is also verified by running every problem's
-reference solution through it (`python scripts/seed_problems.py --verify`).
+errors), the nonprofit command group (mission-fit scoring, comp notes,
+org-status, employers, digest), and the dashboard HTTP endpoints (curate,
+dismiss, tailor-diff, `/api/import` multipart upload, import guides, and an
+HTML↔API cross-check). The mock judge is also verified by running every
+problem's reference solution through it (`python scripts/seed_problems.py --verify`).
 
 ## Legacy automation
 

@@ -18,6 +18,10 @@ Profile schema:
   "education": [{"school": str, "degree": str, "dates": str}],
   "years_experience": float,
   "seniority": str,                # entry|junior|mid|senior|lead|staff|...
+  "cause_interests": [str, ...],   # optional: cause-area keys for mission-fit
+                                   # scoring, e.g. ["education",
+                                   # "climate_environment"] (see
+                                   # candid/mission_fit.py CAUSE_AREAS)
   "source_files": [str, ...],
 }
 """

@@ -1,7 +1,7 @@
 """Job curation: discover open postings, score them against the profile,
 and feed the best into the application tracker.
 
-Sources are free public JSON APIs that need no key, no login, and no
+Sources are free public feeds that need no key, no login, and no
 scraping: each adapter is a small function you can extend. Boards that sit
 behind logins or forbid automated access (LinkedIn, Indeed, …) are
 deliberately out of scope — for those, paste the JD into
@@ -134,6 +134,14 @@ ADAPTERS: dict[str, object] = {
     "arbeitnow": _adapt_arbeitnow,
     "remoteok": _adapt_remoteok,
 }
+
+# Nonprofit / mission-driven feeds (batch 18). Imported here - after the
+# constants above - rather than at module top: candid.nonprofit_feeds
+# imports JobsError/USER_AGENT/etc. from this module, so a top-level
+# import would be circular.
+from candid.nonprofit_feeds import NONPROFIT_ADAPTERS  # noqa: E402
+
+ADAPTERS.update(NONPROFIT_ADAPTERS)
 
 
 # ---------------------------------------------------------------------------

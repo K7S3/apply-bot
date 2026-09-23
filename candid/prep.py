@@ -36,6 +36,7 @@ from candid.prep_questions import QUESTIONS_DB, GENERIC_BANKS
 from candid import config as C
 from candid import prep_concepts as PC
 from candid import tracker as T
+from candid import nonprofit_prep as NP
 
 
 def _find_company(company: str) -> str | None:
@@ -340,6 +341,9 @@ def build_pack(profile: dict, company: str, role: str, jd: str = "",
     ]
     for i, q in enumerate(generic_qs[:12], 1):
         lines.append(f"{i}. {q['q']}")
+    if NP.org_status(company)["looks_nonprofit"]:
+        # Mission-alignment questions for nonprofit-looking employers.
+        lines += ["", NP.render_questions(NP.get_questions(limit=8))]
     lines += ["", "## 3. Concept deep-dives", ""]
     if gap_cats:
         lines += [f"_Ordered for your gaps first ({', '.join(c.replace('_', ' ') for c in gap_cats)})._", ""]

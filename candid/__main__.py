@@ -32,7 +32,7 @@ from candid import __version__
 COMMANDS = [
     "onboard", "profile", "match", "tailor", "track", "prep",
     "followup", "offer", "negotiate", "salary", "mock", "jobs",
-    "dashboard", "import", "gmail", "linkedin",
+    "dashboard", "import", "gmail", "linkedin", "nonprofit",
 ]
 
 SUBCOMMANDS = {
@@ -48,6 +48,9 @@ SUBCOMMANDS = {
     "jobs": ["curate", "refresh", "list"],
     "gmail": ["import", "proposals", "confirm", "reject", "guide"],
     "linkedin": ["import", "guide"],
+    "nonprofit": ["sources", "mission-fit", "questions", "org-status",
+                  "comp-note", "negotiate-guide", "pitch", "employers",
+                  "digest"],
 }
 
 #: Expected (non-bug) failures: reported cleanly, no tracebacks.
@@ -194,14 +197,20 @@ def _company_role_from_app(a) -> tuple[str, str]:
 
 def cmd_match(a):
     from candid import match as M
+    from candid import mission_fit as MF
     jd = _jd_text(a)
     company, role = _company_role_from_app(a)
-    result = M.score_match(_profile(), jd, title=role, company=company,
+    prof = _profile()
+    result = M.score_match(prof, jd, title=role, company=company,
                            location=a.location or "")
+    mf = MF.mission_fit_score(jd, prof)
+    result["mission_fit"] = mf
     if a.json:
         print(json.dumps(result, indent=2, default=str))
     else:
         print(M.render_report(result, company=company, title=role))
+        if mf["score"] is not None or mf["top_jd_causes"]:
+            print("\n" + MF.render_mission_fit(mf))
 
 
 def cmd_tailor(a):
@@ -425,6 +434,98 @@ def cmd_jobs(a):
             print(json.dumps(saved, indent=2, default=str))
         else:
             print(J.render_saved())
+
+
+def cmd_nonprofit(a):
+    """Nonprofit / mission-driven job search helpers (batch 18)."""
+    what = a.what
+    if what == "sources":
+        from candid.nonprofit_feeds import NONPROFIT_ADAPTERS
+        print("Nonprofit job feeds (public, no key, no login):")
+        for name in sorted(NONPROFIT_ADAPTERS):
+            fn = NONPROFIT_ADAPTERS[name]
+            print(f"  - {name}: {(fn.__doc__ or '').strip().splitlines()[0]}")
+        print("\nUse with: python -m candid jobs curate --sources "
+              + " ".join(sorted(NONPROFIT_ADAPTERS)))
+    elif what == "mission-fit":
+        from candid import mission_fit as MF
+        jd = _jd_text(a)
+        result = MF.mission_fit_score(jd, _profile())
+        if a.json:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            print(MF.render_mission_fit(result))
+    elif what == "questions":
+        from candid import nonprofit_prep as NP
+        qs = NP.get_questions(category=a.category, limit=a.limit)
+        print(NP.render_questions(qs))
+    elif what == "org-status":
+        from candid import nonprofit_prep as NP
+        st = NP.org_status(a.company)
+        print(f"{st['company']}: "
+              f"{'looks like a nonprofit/mission org' if st['looks_nonprofit'] else 'no nonprofit signals'}")
+        if st["signals"]:
+            print(f"  signals: {', '.join(st['signals'])}")
+        print(f"\n{st['pslf_note']}")
+    elif what == "comp-note":
+        from candid import nonprofit_comp as NC
+        note = NC.nonprofit_comp_note(a.title, a.company,
+                                      salary_text=a.salary_text or "",
+                                      loan_balance=a.loan_balance or 0.0)
+        print(NC.render_nonprofit_comp(note))
+    elif what == "negotiate-guide":
+        from candid import nonprofit_comp as NC
+        print(NC.nonprofit_negotiation_guide(a.role,
+                                             constraints=a.constraints or ""))
+    elif what == "pitch":
+        from candid import nonprofit_prep as NP
+        print(NP.mission_pitch_helper(a.mission or "", a.background or ""))
+    elif what == "employers":
+        from candid import mission_employers as ME
+        query = (a.query or "").strip().lower()
+        orgs = ME.MISSION_EMPLOYERS
+        if query:
+            orgs = [o for o in orgs
+                    if query in o["name"].lower() or query in o["cause"]]
+        if not orgs:
+            print("No mission-driven employers matched.")
+            return
+        for o in orgs:
+            print(f"- {o['name']} [{o['type']}, {o['cause']}] {o['url']}")
+        print(f"\n{len(orgs)} employer(s) listed.")
+    elif what == "digest":
+        from candid import jobs as J
+        from candid import tracker as T
+        from candid import mission_employers as ME
+        from candid.nonprofit_feeds import NONPROFIT_ADAPTERS
+        prof = _profile()
+        saved = T.list_apps(status="saved")
+        new_jobs = []
+        for app in saved:
+            meta = J.get_job_meta(app["id"])
+            if meta.get("source") in NONPROFIT_ADAPTERS:
+                new_jobs.append({
+                    "source": meta.get("source", ""),
+                    "source_id": "",
+                    "title": app.get("role", ""),
+                    "company": app.get("company", ""),
+                    "location": "",
+                    "url": meta.get("source_url") or "",
+                    "description": meta.get("jd_text") or "",
+                    "salary_text": "",
+                    "remote": False,
+                    "posted_at": app.get("date_added", ""),
+                })
+        hits = []
+        for app in T.list_apps():
+            rec = ME.is_mission_employer(app.get("company", ""))
+            if rec:
+                hits.append({"company": app["company"], "role": app.get("role", ""),
+                             "status": app.get("status", ""), **rec})
+        digest = ME.mission_digest(prof, new_jobs, hits)
+        print(ME.render_digest(digest))
+    else:
+        sys.exit(f"Unknown nonprofit subcommand: {what}")
 
 
 def cmd_dashboard(a):
@@ -816,7 +917,7 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--remote", action="store_true")
     t.add_argument("--level", default=None, help="entry|junior|mid|senior|lead|staff|principal")
     t.add_argument("--limit", type=int, default=15)
-    t.add_argument("--sources", nargs="*", default=None, help="subset of: arbeitnow remoteok")
+    t.add_argument("--sources", nargs="*", default=None, help="subset of: arbeitnow remoteok reliefweb reliefweb_volunteer")
     t.add_argument("--days", type=int, default=None,
                    help="Only postings from the last N days (unparseable dates are kept)")
     t.add_argument("--min-score", type=float, default=0,
@@ -842,6 +943,70 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--json", action="store_true",
                    help="Print the curated job list as JSON (for scripting)")
     s.set_defaults(func=cmd_jobs)
+
+    # nonprofit / mission-driven job search
+    s = _sub(sub, "nonprofit", "Nonprofit and mission-driven job search helpers.", [
+        "python -m candid nonprofit sources",
+        "python -m candid nonprofit mission-fit --jd jd.txt",
+        "python -m candid nonprofit questions --category mission",
+        "python -m candid nonprofit org-status --company \"Ford Foundation\"",
+        "python -m candid nonprofit comp-note --title \"Program Manager\" --company \"Khan Academy\"",
+        "python -m candid nonprofit employers --query education",
+        "python -m candid nonprofit digest",
+    ])
+    ns = _nested(s)
+    t = _sub(ns, "sources", "List nonprofit job feeds usable with jobs curate.", [
+        "python -m candid nonprofit sources",
+    ])
+    t = _sub(ns, "mission-fit", "Score a JD's mission fit against your cause interests.", [
+        "python -m candid nonprofit mission-fit --jd jd.txt",
+        "python -m candid nonprofit mission-fit --jd jd.txt --json",
+    ])
+    t.add_argument("--jd", required=True, help=JD_HELP)
+    t.add_argument("--app-id", type=int, default=None,
+                   help="Use the JD stored for a tracked application")
+    t.add_argument("--json", action="store_true")
+    t = _sub(ns, "questions", "Nonprofit interview questions (verified sources).", [
+        "python -m candid nonprofit questions",
+        "python -m candid nonprofit questions --category mission",
+    ])
+    t.add_argument("--category", default=None,
+                   help="mission|behavioral|situational (default: all)")
+    t.add_argument("--limit", type=int, default=10)
+    t = _sub(ns, "org-status", "Heuristic nonprofit check + PSLF note for an employer.", [
+        "python -m candid nonprofit org-status --company \"Ford Foundation\"",
+    ])
+    t.add_argument("--company", required=True)
+    t = _sub(ns, "comp-note", "Honest comp notes for a nonprofit-sector role.", [
+        "python -m candid nonprofit comp-note --title \"Program Manager\" --company \"Khan Academy\"",
+    ])
+    t.add_argument("--title", required=True)
+    t.add_argument("--company", required=True)
+    t.add_argument("--salary-text", default="",
+                   help="Posted salary range text, if the employer gave one")
+    t.add_argument("--loan-balance", type=float, default=0.0,
+                   help="Your federal loan balance (only used to show PSLF arithmetic)")
+    t = _sub(ns, "negotiate-guide", "Negotiation scripts for nonprofit offers.", [
+        "python -m candid nonprofit negotiate-guide --role \"Program Manager\"",
+    ])
+    t.add_argument("--role", required=True)
+    t.add_argument("--constraints", default="",
+                   help="Their stated constraints, echoed back in the guide")
+    t = _sub(ns, "pitch", "Scaffold a 'why this mission' answer from your own words.", [
+        "python -m candid nonprofit pitch --mission \"...\" --background \"...\"",
+    ])
+    t.add_argument("--mission", default="")
+    t.add_argument("--background", default="")
+    t = _sub(ns, "employers", "Curated mission-driven employers.", [
+        "python -m candid nonprofit employers",
+        "python -m candid nonprofit employers --query education",
+    ])
+    t.add_argument("--query", default="",
+                   help="Filter by name or cause area")
+    t = _sub(ns, "digest", "Weekly mission digest: nonprofit-sourced jobs + mission-employer hits.", [
+        "python -m candid nonprofit digest",
+    ])
+    s.set_defaults(func=cmd_nonprofit)
 
     # dashboard
     s = _sub(sub, "dashboard", "Launch the local web dashboard (127.0.0.1 only).", [
