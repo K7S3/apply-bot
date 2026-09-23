@@ -22,6 +22,7 @@ import difflib
 import json
 import re
 import sys
+from pathlib import Path
 
 from candid import __version__
 
@@ -287,13 +288,128 @@ def cmd_track(a):
         print(f"Exported {len(T.list_apps())} applications to {path}")
 
 
+#: Reserved first words on `search` that act as subcommands instead of a query.
+_SEARCH_SUBCOMMANDS = ("save", "saved", "unsave", "run", "history",
+                       "clear-history", "watch")
+
+
+def _search_error_exit(exc: Exception) -> None:
+    sys.stderr.write(f"error: {exc}\n")
+    raise SystemExit(2)
+
+
+def _write_search_output(a, text: str) -> None:
+    if getattr(a, "out", None):
+        out = Path(a.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text + "\n", encoding="utf-8")
+        print(f"Wrote {len(text.splitlines())} line(s) to {out}.")
+    else:
+        print(text)
+
+
+def _render_search_results(a, results: list[dict], limit: int) -> str:
+    """Render results in the requested --format (explain/facet are text-only)."""
+    from candid import search as S
+    from candid import search_render as SR
+    fmt = getattr(a, "format", "text") or "text"
+    if fmt == "csv":
+        return SR.render_csv(results)
+    if fmt == "md":
+        return SR.render_md(results)
+    return S.render_results(results, limit=limit)
+
+
+def _search_run_query(a, query: str, *, log: bool) -> None:
+    """Run one query string through search_advanced and render the output."""
+    from candid import search as S
+    from candid import searchstore as SS
+    from candid import search_render as SR
+    if log:
+        SS.log_query(query)
+    limit = a.limit if a.limit and a.limit > 0 else 20
+    text_only = (getattr(a, "format", "text") or "text") == "text"
+    parts: list[str] = []
+    if getattr(a, "explain", False) and text_only:
+        parts.append(S.explain_query(query))
+    results = S.search_advanced(query, limit=limit)
+    parts.append(_render_search_results(a, results, limit))
+    facet = getattr(a, "facet", None)
+    if facet and text_only:
+        parts.append(SR.render_facet(facet, SR.facet_counts(results, facet)))
+    _write_search_output(a, "\n\n".join(parts))
+
+
+def _cmd_search_sub(a, cmd: str, rest: list[str]) -> None:
+    from candid import search as S
+    from candid import searchstore as SS
+    if cmd == "save":
+        if len(rest) < 2:
+            _search_error_exit(ValueError(
+                "usage: python -m candid search save NAME QUERY..."))
+        name, query = rest[0], " ".join(rest[1:])
+        SS.save_search(name, query)
+        print(f"Saved search {name!r}: {query}")
+    elif cmd == "saved":
+        saved = SS.list_saved()
+        if not saved:
+            print("No saved searches.")
+        for name in sorted(saved):
+            print(f"{name}: {saved[name]}")
+    elif cmd == "unsave":
+        if not rest:
+            _search_error_exit(ValueError(
+                "usage: python -m candid search unsave NAME"))
+        SS.delete_search(rest[0])
+        print(f"Deleted saved search {rest[0]!r}.")
+    elif cmd == "run":
+        if not rest:
+            _search_error_exit(ValueError(
+                "usage: python -m candid search run NAME [--limit N]"))
+        query = SS.get_saved(rest[0])
+        _search_run_query(a, query, log=True)
+    elif cmd == "history":
+        limit = a.limit if a.limit and a.limit > 0 else 20
+        entries = SS.get_history(limit)
+        if not entries:
+            print("No search history.")
+        for e in entries:
+            print(f"{e.get('ts', '')}  {e.get('query', '')}".rstrip())
+    elif cmd == "clear-history":
+        SS.clear_history()
+        print("Search history cleared.")
+    elif cmd == "watch":
+        if not rest:
+            _search_error_exit(ValueError(
+                "usage: python -m candid search watch NAME [--limit N]"))
+        name = rest[0]
+        query = SS.get_saved(name)
+        limit = a.limit if a.limit and a.limit > 0 else None
+        results = S.search_advanced(query, limit=limit)
+        new_refs = set(SS.watch_new(name, query,
+                                    [r["ref"] for r in results]))
+        new_results = [r for r in results if r["ref"] in new_refs]
+        print(f"{len(new_results)} new match(es) since last check.")
+        print(S.render_results(new_results,
+                               limit if limit else len(new_results)))
+
+
 def cmd_search(a):
     from candid import search as S
-    results = S.search_all(a.query)
-    if a.json:
-        print(json.dumps(results, indent=2, default=str))
-        return
-    print(S.render_results(results, limit=a.limit if a.limit and a.limit > 0 else 20))
+    from candid.query import QueryError
+    from candid.searchstore import SearchStoreError
+    try:
+        if a.json:
+            results = S.search_advanced(" ".join(a.words))
+            print(json.dumps(results, indent=2, default=str))
+            return
+        words = list(a.words or [])
+        if words and words[0] in _SEARCH_SUBCOMMANDS:
+            _cmd_search_sub(a, words[0], words[1:])
+            return
+        _search_run_query(a, " ".join(words), log=True)
+    except (QueryError, SearchStoreError) as e:
+        _search_error_exit(e)
 
 
 def cmd_analytics(a):
@@ -1060,15 +1176,30 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_linkedin)
 
     # search
-    s = _sub(sub, "search", "Full-text search across applications, prep packs, tailored files, and debriefs.", [
+    s = _sub(sub, "search", "Advanced search across applications, prep packs, tailored files, and debriefs. Supports AND/OR/NOT, \"phrases\", field:value scopes, /regex/, term~ fuzzy, and after:/before: dates. The words save, saved, unsave, run, history, clear-history, and watch are subcommands when used as the first word.", [
         "python -m candid search python",
         "python -m candid search \"machine learning\" --limit 5",
+        "python -m candid search 'company:acme (senior OR staff) -intern' --explain",
+        "python -m candid search python --facet status --format md --out report.md",
+        "python -m candid search save infra 'company:acme backend'",
+        "python -m candid search run infra",
+        "python -m candid search watch infra",
+        "python -m candid search history",
     ])
-    s.add_argument("query", help="Search terms (all must match; use quotes for phrases)")
+    s.add_argument("words", nargs="*", metavar="QUERY",
+                   help="Query terms, or a subcommand (save/saved/unsave/run/history/clear-history/watch) as the first word")
     s.add_argument("--limit", type=int, default=20,
                    help="Max results to show (default: 20)")
     s.add_argument("--json", action="store_true",
                    help="Emit results as JSON")
+    s.add_argument("--explain", action="store_true",
+                   help="Print the parsed query breakdown before results (text format only)")
+    s.add_argument("--facet", choices=["status", "kind", "source", "company"],
+                   help="After results, print a per-value count breakdown (text format only)")
+    s.add_argument("--format", choices=["text", "csv", "md"], default="text",
+                   help="Result format: text (default), csv, or md")
+    s.add_argument("--out", metavar="FILE",
+                   help="Write rendered output to FILE instead of stdout (parent dirs are created)")
     s.set_defaults(func=cmd_search)
 
     # analytics

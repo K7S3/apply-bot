@@ -65,7 +65,7 @@ one ends with the exact next command to run.
 | `followup` | Thank-you, recruiter check-in, and referral-request drafts in your voice, with subject lines, timing advice, and tone options. |
 | `import` | Feed in *your own exports*: `--gmail-takeout FILE.mbox` (or a directory of them) and `--linkedin-zip FILE.zip`. Gmail imports only create *proposals* — nothing touches your tracker until you confirm each one. |
 | `dashboard` | Local web UI (127.0.0.1 only): funnel visualization, sortable/filterable applications table, curated-jobs workflow (curate from the UI, dismiss, tailor shortcut), match/tailor lab with keyword-coverage chips, prep cards, salary widget, and an **Import your data** section (export guides, drag-and-drop upload, proposal confirm/reject). |
-| `search` | Full-text search across applications, prep packs, tailored files, and debriefs. AND semantics, quoted phrases, ranked with title matches first, context snippets. `--json` for scripting. |
+| `search` | Advanced search across applications, prep packs, tailored files, and debriefs: AND/OR/NOT with parens, `"phrases"`, `field:value` scopes, `/regex/`, `term~` fuzzy, `after:`/`before:` dates. Ranked with title matches first, context snippets. `--explain`, `--facet`, `--format text/csv/md`, `--out FILE`, `--json`. Saved searches, history, and watch alerts (`search save/run/watch/history`). |
 | `analytics` | Data-driven answers: `funnel` (per-source funnel with applied-to-response/interview/offer conversion rates), `response-times` (days from application to first response, overall and per company), `sources` (source leaderboard). Sources are recorded with `track add --source` / `track update --source`; status history is tracked automatically. |
 | `variants` | Resume variant A/B tracking: register tailored versions per application, link them across apps, and see which tone/length gets responses (`variants stats`). |
 | `backup` | Full backup and restore of all candid data as a zip (tracker, profile, offers, prep packs, tailored files, salary DB) with a manifest. Restore always takes a pre-restore snapshot first. |
@@ -73,6 +73,58 @@ one ends with the exact next command to run.
 | `reports` | Weekly/monthly trend reports: applications added, responses, interviews, offers per period, in text or Markdown. |
 | `goals` | Weekly application goals: `goals set --target 5`, `goals show` for this week's progress and your streak of on-target weeks. |
 | `report` | Custom report builder: slice the tracker by status, source, company, and date range, exported to CSV or Markdown. |
+
+## Advanced search
+
+`python -m candid search QUERY` searches your tracker, prep packs,
+tailored files, and debriefs with a small query language:
+
+- `python backend` - AND: every term must match
+- `python OR golang` - OR (uppercase only); combine with parens: `(python OR golang) backend`
+- `-intern` or `NOT intern` - exclude a term (note: a leading `-term`
+  looks like a CLI flag, so prefer the `NOT` form or put a `--` separator
+  before the query: `search -- company:acme -intern`)
+- `"machine learning"` - quoted phrase
+- `company:acme`, `role:engineer`, `status:applied`, `source:referral`, `kind:prep_pack`, `title:...`, `notes:...`, `jd:...` - field scopes (field names are case-insensitive)
+- `/senior.*eng/` - regex term (case-insensitive); `/pat/i` also works
+- `pythno~1` - fuzzy term: matches words within edit distance 1 (max 3)
+- `after:2026-01-01` / `before:2026-06-30` - date bounds on `date_added` (tracker) or file date
+
+Copy-paste examples:
+
+```
+python -m candid search 'company:acme (senior OR staff) -intern'
+python -m candid search '"machine learning" status:applied after:2026-01-01'
+python -m candid search '/staff|principal/ kind:debrief'
+python -m candid search 'pythno~1'
+python -m candid search 'backend --explain --facet company'
+python -m candid search 'status:offer --format md --out offers.md'
+```
+
+Useful flags: `--explain` prints how the query was parsed before the
+results; `--facet status|kind|source|company` prints a count breakdown
+after the results (file docs count under `kind` only); `--format
+text|csv|md` picks the output format; `--out FILE` writes to a file
+instead of stdout; `--json` emits raw JSON; `--limit N` caps results.
+
+Saved searches, history, and watches (the words `save`, `saved`,
+`unsave`, `run`, `history`, `clear-history`, `watch` are subcommands
+when used as the first word):
+
+```
+python -m candid search save infra 'company:acme backend'
+python -m candid search saved              # list: name: query
+python -m candid search run infra --limit 5 # re-run a saved query
+python -m candid search unsave infra        # delete it
+python -m candid search history             # recent queries, newest first
+python -m candid search clear-history
+python -m candid search watch infra         # "N new match(es) since last check"
+```
+
+`watch` diffs the saved query's results against the last check and
+shows only new matches (the first run reports everything as new).
+Every bare query and `run` is logged to history; save/unsave/history/
+clear-history/watch are not.
 
 ## Job-source coverage (honest)
 
