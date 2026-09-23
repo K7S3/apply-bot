@@ -18,6 +18,7 @@ import re
 from datetime import date
 
 from candid import config as C
+from candid import skills as SK
 from candid.match import _jd_skills, _extract_jd  # internal reuse
 
 TONES = ["concise", "confident", "formal", "warm"]
@@ -38,7 +39,8 @@ def _role_family_label(profile: dict) -> str:
 
 def _top_domains(profile: dict, jd: str) -> str:
     must, nice = _jd_skills(jd)
-    matched = [s for s in (must | nice) if s in set(profile.get("skills", []))]
+    pcanon = SK.normalize_skill_list(profile.get("skills", []))
+    matched = [s for s in (must | nice) if SK.canonical(s) in pcanon]
     return ", ".join(matched[:4]) or "data"
 
 
@@ -81,6 +83,12 @@ def _ats_keyword_check(resume_text: str, jd: str) -> str:
         else:
             hit = re.search(r"(?<![a-z0-9])" + re.escape(name) + r"(?![a-z0-9])",
                             low) is not None
+            if not hit:
+                # alias-aware token check (JD "k8s" vs resume "Kubernetes")
+                want = SK.canonical(name)
+                tokens = {SK.canonical(t)
+                          for t in re.findall(r"[A-Za-z0-9+#]+", low)}
+                hit = want in tokens
         (covered if hit else missing).append(name)
     total = len(ex["items"])
     lines = [f"Covered ({len(covered)}/{total}): " + (", ".join(covered) if covered else "none")]
@@ -171,6 +179,17 @@ def build_resume(profile: dict, jd: str, company: str = "", role: str = "",
         lines.append("Most relevant to this role: " + ", ".join(matched_skills))
     lines.append("Also: " + ", ".join(other_skills[:20]))
 
+    proj = _relevant_project(profile, jd)
+    if proj:
+        repo = proj["repo"]
+        desc = (repo.get("description") or "").strip()
+        lines += ["", "RELEVANT PROJECT",
+                  f"{repo.get('name')} — {repo.get('url')}"
+                  + (f" — {desc}" if desc else ""),
+                  "Included for its keyword overlap with this JD: "
+                  + ", ".join(proj["overlap"])
+                  + " (keyword match only; the repo speaks for itself)"]
+
     lines += ["", "ATS KEYWORD CHECK", _ats_keyword_check("\n".join(lines), jd), "",
               "WHAT CHANGED"] + _what_changed(experience, tailored) + [""]
 
@@ -216,6 +235,15 @@ _COVER_TEMPLATES = {
         "Warmly,\n{name}"
     ),
 }
+
+
+def _relevant_project(profile: dict, jd: str) -> dict | None:
+    """Best GitHub project for this JD, for the tailored resume.
+
+    Reuses match._best_project (keyword overlap only, honestly labeled).
+    """
+    from candid.match import _best_project
+    return _best_project(profile, jd)
 
 
 def _proof_bullet(profile: dict, jd: str) -> str:

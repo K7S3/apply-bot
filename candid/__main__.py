@@ -36,7 +36,7 @@ COMMANDS = [
 ]
 
 SUBCOMMANDS = {
-    "profile": ["show"],
+    "profile": ["show", "github"],
     "tailor": ["resume", "cover-letter"],
     "track": ["add", "list", "update", "remove", "stats", "search", "export-csv"],
     "followup": ["thank-you", "check-in", "referral"],
@@ -55,7 +55,7 @@ _EXPECTED_ERRORS = {
     "OnboardError", "MatchError", "TrackerError", "PrepError",
     "OfferError", "SalaryError", "MockError", "JudgeError",
     "GmailError", "LinkedInError", "DashboardError", "JobsError",
-    "ValueError",
+    "GithubError", "ValueError",
 }
 
 #: Exact next command to run after each expected failure.
@@ -72,6 +72,7 @@ _NEXT_COMMAND = {
     "LinkedInError": "python -m candid linkedin guide",
     "DashboardError": "python -m candid dashboard --help",
     "JobsError": "python -m candid jobs --help",
+    "GithubError": "python -m candid profile github --help",
 }
 
 
@@ -149,6 +150,30 @@ def cmd_onboard(a):
 def cmd_profile_show(a):
     from candid import profile as P
     print(P.profile_card(_profile()))
+
+
+def cmd_profile_github(a):
+    from candid import github_projects as G
+    if not a.user:
+        sys.exit("Provide your GitHub username with --user.\n"
+                 "Next: run `python -m candid profile github --help`.")
+    repos, source = G.fetch_or_cached(a.user, refresh=a.refresh)
+    G.store_in_profile(a.user, repos)
+    notes = {"api": "fresh from the GitHub API",
+             "cache": "from the local cache (use --refresh to refetch)",
+             "cache-stale": "from an older local cache — the API was unreachable"}
+    print(f"Stored {len(repos)} public repo(s) for GitHub user '{a.user}' "
+          f"({notes.get(source, source)}).")
+    print("They are now part of your profile: `match` will cite the most "
+          "relevant one per JD (keyword overlap only).")
+    print(G.render_projects(repos))
+
+
+def cmd_profile(a):
+    if a.what == "github":
+        cmd_profile_github(a)
+    else:
+        cmd_profile_show(a)
 
 
 def _jd_text(a) -> str:
@@ -515,12 +540,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_onboard)
 
     # profile
-    s = _sub(sub, "profile", "Show your stored profile.", [
+    s = _sub(sub, "profile", "Show your stored profile; link GitHub projects.", [
         "python -m candid profile",
         "python -m candid profile show",
+        "python -m candid profile github --user octocat",
+        "python -m candid profile github --user octocat --refresh",
     ])
-    s.add_argument("what", nargs="?", default="show", choices=["show"])
-    s.set_defaults(func=cmd_profile_show)
+    s.add_argument("what", nargs="?", default="show", choices=["show", "github"])
+    s.add_argument("--user", default="",
+                   help="GitHub username (for `profile github`)")
+    s.add_argument("--refresh", action="store_true",
+                   help="Refetch from the GitHub API instead of using the cache")
+    s.set_defaults(func=cmd_profile)
 
     # match
     s = _sub(sub, "match", "Score a job description against your profile.", [
